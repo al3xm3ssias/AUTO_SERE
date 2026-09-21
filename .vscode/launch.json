@@ -1,0 +1,25 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Script atual",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}",
+            "envFile": "${workspaceFolder}/credenciais/.env"
+        },
+        {
+            "name": "Python: Módulo (src.automacao.<nome>)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "src.automacao.SUBSTITUA_PELO_MODULO",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}",
+            "envFile": "${workspaceFolder}/credenciais/.env"
+        }
+    ]
+}

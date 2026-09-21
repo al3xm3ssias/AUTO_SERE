@@ -1,0 +1,30 @@
+<div class="filters-bar">
+  <select class="js-filtro" data-key="turma"><option value="">Todas as turmas</option></select>
+  <select class="js-filtro" data-key="etapa"><option value="">Todas as etapas</option></select>
+  <input type="text" class="js-filtro" data-key="texto" placeholder="Filtro livre...">
+  <div class="search-box">
+    <span data-icon="search"></span>
+    <input type="text" class="js-busca" placeholder="Buscar...">
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <span class="card-title js-total">Carregando…</span>
+    <div class="card-header-actions">
+      <button class="btn-sm js-exportar"><span data-icon="download"></span> Exportar</button>
+    </div>
+  </div>
+  <div class="card-body no-pad">
+    <div class="tbl-wrap">
+      <table class="js-tabela-generica" data-entity="{{ entity }}">
+        <thead>
+          <tr id="thead-{{ entity }}"></tr>
+        </thead>
+        <tbody id="tbody-{{ entity }}">
+          <tr><td colspan="8" style="text-align:center; color:var(--txt3); padding:24px;">Carregando dados de {{ entity }}…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

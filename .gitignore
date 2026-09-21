@@ -1,0 +1,42 @@
+# ==== Ambiente Python ====
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+
+# ==== Credenciais e segredos (NUNCA versionar) ====
+credenciais/credenciais.py
+credenciais/*.env
+.env
+*.key
+qrcode_key.key
+
+# ==== Dados de alunos/servidores (dados sensíveis / LGPD) ====
+dados/*.json
+dados/backup/*
+!dados/backup/.gitkeep
+*.csv
+*.xlsx
+!config/*.xlsx
+
+# ==== Logs e locks (gerados em runtime) ====
+logs/*.log
+logs/*.txt
+!logs/.gitkeep
+locks/*.lock
+!locks/.gitkeep
+
+# ==== VS Code (mantemos apenas os arquivos de configuração do projeto) ====
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json
+
+# ==== Diversos ====
+.DS_Store
+Thumbs.db
+*.bak

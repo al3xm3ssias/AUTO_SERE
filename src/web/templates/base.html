@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="escuro">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Auto SERE</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('web.static', filename='img/favicon-32.png') }}">
+  <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('web.static', filename='img/favicon-16.png') }}">
+  <link rel="shortcut icon" href="{{ url_for('web.static', filename='img/favicon-32.png') }}">
+  <!-- Fontes Google (Inter + DM Mono). Se bloqueadas na rede local, o
+       CSS já cai automaticamente no fallback sans-serif/monospace do
+       sistema — nada quebra, só perde a fonte exata. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('web.static', filename='css/styles.css') }}">
+</head>
+<body>
+
+<div id="app" style="position:relative; min-height:100vh;">
+
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="sidebar-brand-icon">
+        <img src="{{ url_for('web.static', filename='img/logo-branco-192.png') }}" alt="Auto SERE">
+      </div>
+      <div class="sidebar-brand-text">
+        Auto SERE
+        <span>Automação escolar</span>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav" id="sidebar-nav">
+      <div class="nav-section-label">Painel</div>
+      <div class="nav-item active" data-view="painel">
+        <span class="nav-item-icon" data-icon="dashboard"></span>
+        <span class="nav-item-label">Painel principal</span>
+      </div>
+
+      <div class="nav-section-label">Menu</div>
+      <div class="nav-item" data-view="turmas">
+        <span class="nav-item-icon" data-icon="users"></span>
+        <span class="nav-item-label">Turmas</span>
+      </div>
+      <div class="nav-item" data-view="alunos">
+        <span class="nav-item-icon" data-icon="student"></span>
+        <span class="nav-item-label">Alunos</span>
+      </div>
+      <div class="nav-item" data-view="prematricula">
+        <span class="nav-item-icon" data-icon="clipboard"></span>
+        <span class="nav-item-label">Pré matrícula</span>
+      </div>
+      <div class="nav-item" data-view="funcionarios">
+        <span class="nav-item-icon" data-icon="badge"></span>
+        <span class="nav-item-label">Funcionários</span>
+      </div>
+
+      <div class="nav-group-toggle" id="toggle-automacoes">
+        <span class="nav-group-toggle-label">
+          <span class="nav-item-icon" data-icon="bolt"></span>
+          <span class="nav-item-label">Automações</span>
+        </span>
+        <span class="nav-group-chev" data-icon="chevronRight"></span>
+      </div>
+      <div class="nav-subitems" id="sub-automacoes">
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="gerar_pastas">
+          <span class="nav-item-icon" data-icon="folderPlus"></span>
+          <span class="nav-item-label">Gerar pastas</span>
+        </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="analisa_pasta">
+          <span class="nav-item-icon" data-icon="fileSearch"></span>
+          <span class="nav-item-label">Analisa docs da pasta</span>
+        </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="analisa_sere">
+          <span class="nav-item-icon" data-icon="fileSearch"></span>
+          <span class="nav-item-label">Analisa docs do SERE</span>
+        </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="documentos">
+          <span class="nav-item-icon" data-icon="files"></span>
+          <span class="nav-item-label">Documentos</span>
+        </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="cruzamento">
+          <span class="nav-item-icon" data-icon="compare"></span>
+          <span class="nav-item-label">Cruzamento de docs</span>
+        </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="cep">
+          <span class="nav-item-icon" data-icon="mapPin"></span>
+          <span class="nav-item-label">CEP</span>
+        </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="sus">
+          <span class="nav-item-icon" data-icon="heart"></span>
+          <span class="nav-item-label">Encaminhamentos SUS</span>
+        </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="transferidos">
+          <span class="nav-item-icon" data-icon="transfer"></span>
+          <span class="nav-item-label">Processo transferidos</span>
+        </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="parecer_fund">
+          <span class="nav-item-icon" data-icon="certificate"></span>
+          <span class="nav-item-label">Pareceres fundamental</span>
+        </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="parecer_rco">
+          <span class="nav-item-icon" data-icon="certificate"></span>
+          <span class="nav-item-label">Pareceres infantil</span>
+        </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="comprimir">
+          <span class="nav-item-icon" data-icon="zip"></span>
+          <span class="nav-item-label">Comprimir documentos</span>
+        </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="coleta_emails">
+          <span class="nav-item-icon" data-icon="mail"></span>
+          <span class="nav-item-label">Coleta e-mails</span>
+        </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="agendador">
+          <span class="nav-item-icon" data-icon="clock"></span>
+          <span class="nav-item-label">Rotinas no agendador</span>
+        </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="backup">
+          <span class="nav-item-icon" data-icon="database"></span>
+          <span class="nav-item-label">Backup dos dados</span>
+        </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="avisos">
+          <span class="nav-item-icon" data-icon="send"></span>
+          <span class="nav-item-label">Mandar avisos</span>
+        </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="compara_anos">
+          <span class="nav-item-icon" data-icon="scale"></span>
+          <span class="nav-item-label">Compara anos</span>
+        </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="termos">
+          <span class="nav-item-icon" data-icon="certificate"></span>
+          <span class="nav-item-label">Termos de ciência</span>
+        </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="mapear_pastas">
+          <span class="nav-item-icon" data-icon="map"></span>
+          <span class="nav-item-label">Mapear pastas</span>
+        </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="mascara">
+          <span class="nav-item-icon" data-icon="shieldLock"></span>
+          <span class="nav-item-label">Máscara de dados</span>
+        </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="rematricula">
+          <span class="nav-item-icon" data-icon="refresh"></span>
+          <span class="nav-item-label">Rematrícula no SERE</span>
+        </div>
+      </div>
+
+      <div class="nav-section-label">Sistema</div>
+      <div class="nav-item" data-view="configuracoes">
+        <span class="nav-item-icon" data-icon="settings"></span>
+        <span class="nav-item-label">Configurações</span>
+      </div>
+      <div class="nav-item" data-view="primeira-execucao">
+        <span class="nav-item-icon" data-icon="rocket"></span>
+        <span class="nav-item-label">1ª execução</span>
+      </div>
+      <div class="nav-item" data-view="ajuda">
+        <span class="nav-item-icon" data-icon="help"></span>
+        <span class="nav-item-label">Ajuda</span>
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="sidebar-footer-label">Auto SERE · <span id="sidebar-ano"></span></div>
+      <div class="theme-switcher" id="theme-switcher" title="Alternar tema">
+        <button class="theme-btn" data-theme="escuro" title="Escuro" data-icon="moon"></button>
+        <button class="theme-btn" data-theme="medio" title="Equilibrado" data-icon="contrast"></button>
+        <button class="theme-btn" data-theme="claro" title="Claro" data-icon="sun"></button>
+      </div>
+    </div>
+  </aside>
+
+  <header class="topbar" id="topbar">
+    <button class="topbar-toggle" id="sidebar-toggle" title="Recolher menu">
+      <span data-icon="bars"></span>
+    </button>
+    <div class="topbar-breadcrumb" id="breadcrumb">
+      <span>Painel</span>
+      <span class="sep">/</span>
+      <span class="current" id="topbar-title">Painel principal</span>
+    </div>
+    <div class="topbar-meta" id="t-meta"></div>
+    <div class="topbar-user" title="Perfil (ainda não configurado)" data-goto="configuracoes" id="topbar-user">
+      <span data-icon="userPlain"></span>
+    </div>
+  </header>
+
+  <div class="main-wrapper" id="main-wrapper">
+    <div class="content-area">
+      <main id="main-content">
+        {% include "painel.html" %}
+        {% include "menu.html" %}
+        {% include "automacoes.html" %}
+        {% include "configuracoes.html" %}
+        {% include "primeira_execucao.html" %}
+        {% include "ajuda.html" %}
+      </main>
+    </div>
+  </div>
+
+  <footer class="app-footer" id="app-footer">
+    <span>Auto_Sere</span>
+    <span>—</span>
+    <span class="app-footer-dev">Desenvolvido por Claudio Alex</span>
+    <span>—</span>
+    <span class="app-footer-ver">V1.0</span>
+    <span id="footer-ano"></span>
+  </footer>
+
+</div>
+
+<div class="toast" id="toast">
+  <span data-icon="circleCheck"></span>
+  <span id="toast-msg">Ação concluída</span>
+</div>
+
+<script src="{{ url_for('web.static', filename='js/icons.js') }}"></script>
+<script src="{{ url_for('web.static', filename='js/app.js') }}"></script>
+</body>
+</html>

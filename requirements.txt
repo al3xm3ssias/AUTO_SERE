@@ -1,0 +1,30 @@
+# =============================================================================
+# requirements.txt — dependências do projeto AUTO_SERE
+# Gerado a partir dos imports identificados nos scripts originais.
+# Revise as versões conforme necessário para o ambiente de produção.
+# =============================================================================
+
+playwright>=1.40.0
+openpyxl>=3.1.0
+pandas>=2.0.0
+reportlab>=4.0.0
+qrcode>=7.4.0
+Pillow>=10.0.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+pytesseract>=0.3.10
+pyautogui>=0.9.54
+gspread>=6.0.0
+google-auth>=2.23.0
+google-auth-oauthlib>=1.1.0
+streamlit>=1.30.0
+
+# Testes
+pytest>=7.4.0
+
+
+# Dependências existentes do projeto AUTO_SERE
+# (mantenha aqui as libs que você já tinha: requests, pandas, etc.)
+
+# --- Interface web (novo) ---
+Flask==3.0.3

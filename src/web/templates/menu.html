@@ -1,0 +1,47 @@
+<section class="section" id="sec-turmas" data-title="Turmas">
+  <div class="page-header">
+    <div class="page-header-icon violet"><span data-icon="users"></span></div>
+    <div class="page-header-text">
+      <h1>Turmas</h1>
+      <p>Turmas, salas, etapas e períodos</p>
+    </div>
+  </div>
+  {% set entity = "turmas" %}
+  {% include "partials/tabela_generica.html" %}
+</section>
+
+<section class="section" id="sec-alunos" data-title="Alunos">
+  <div class="page-header">
+    <div class="page-header-icon cyan"><span data-icon="student"></span></div>
+    <div class="page-header-text">
+      <h1>Alunos</h1>
+      <p>Consulta, inclusão, alteração e relatórios</p>
+    </div>
+  </div>
+  {% set entity = "alunos" %}
+  {% include "partials/tabela_generica.html" %}
+</section>
+
+<section class="section" id="sec-prematricula" data-title="Pré matrícula">
+  <div class="page-header">
+    <div class="page-header-icon amber"><span data-icon="clipboard"></span></div>
+    <div class="page-header-text">
+      <h1>Pré matrícula</h1>
+      <p>Fila da pré-matrícula e cadastros</p>
+    </div>
+  </div>
+  {% set entity = "prematricula" %}
+  {% include "partials/tabela_generica.html" %}
+</section>
+
+<section class="section" id="sec-funcionarios" data-title="Funcionários">
+  <div class="page-header">
+    <div class="page-header-icon blue"><span data-icon="badge"></span></div>
+    <div class="page-header-text">
+      <h1>Funcionários</h1>
+      <p>Cadastro e consulta de funcionários, servidores e matrículas</p>
+    </div>
+  </div>
+  {% set entity = "funcionarios" %}
+  {% include "partials/tabela_generica.html" %}
+</section>
