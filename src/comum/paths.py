@@ -60,6 +60,19 @@ def ano_atual() -> str:
     return valor if valor else str(datetime.now().year)
 
 
+def dados_ano(ano: int | str) -> Path:
+    """
+    Pasta de dados de trabalho de um ano letivo ESPECÍFICO:
+        <raiz_do_projeto>/dados/<ano>/
+    Generalização de dados_ano_atual() (adicionada em 05/09/2026, a
+    pedido do usuário, para src.relatorios.compara_transferido — que
+    precisa comparar os dados de dois anos letivos diferentes, não só o
+    atual). Cada ano letivo tem sua própria pasta (dados/2026/,
+    dados/2027/, ...), a mesma organização já usada para o ano corrente.
+    """
+    return DADOS_DIR / str(ano)
+
+
 def dados_ano_atual() -> Path:
     """
     Pasta de dados de trabalho do ano letivo corrente:
@@ -67,7 +80,7 @@ def dados_ano_atual() -> Path:
     Todos os JSONs (turmas, alunos, documentos, cruzamento) e relatórios
     Excel gerados pelos scripts de automação devem ficar aqui.
     """
-    return DADOS_DIR / ano_atual()
+    return dados_ano(ano_atual())
 
 
 def workdir() -> Path:
