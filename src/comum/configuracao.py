@@ -52,8 +52,10 @@ ARQUIVO_CONFIG = CONFIG_DIR / "config_usuario.json"
 
 _PADRAO: dict[str, Any] = {
     "pasta_digitalizacao": None,
+    "pasta_modelos": None,
     "cgm_upload": [],
     "setup_concluido": False,
+    "unidade_escolar": None,
 }
 
 
@@ -127,6 +129,46 @@ def definir_pasta_digitalizacao(caminho: str | Path) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Pasta de modelos (documentos .docx a preencher — ex.: Termo de Ciência)
+# ─────────────────────────────────────────────────────────────────────────
+# Adicionada a pedido do usuário (02/09/2026) para src.automacao.termo_ciencia
+# — antes o modelo era localizado subindo pastas até achar "ESCOLA JUDITH"
+# (caminho fixo do servidor Linux), o que não faz sentido na nova
+# arquitetura (instalação Windows). Configurável separadamente da pasta de
+# digitalização, pois são conceitos diferentes (modelos de documento a
+# preencher vs. documentos escaneados dos alunos).
+
+def pasta_modelos() -> Path | None:
+    """
+    Retorna a pasta de modelos de documento configurada pelo usuário
+    (ex.: onde fica "MODELO DE TERMO DE CIENCIA.docx"), ou None se ainda
+    não foi configurada.
+    """
+    valor = carregar_configuracao().get("pasta_modelos")
+    return Path(valor) if valor else None
+
+
+def pasta_modelos_configurada() -> bool:
+    """
+    True se o usuário já escolheu a pasta de modelos e ela ainda existe
+    no disco.
+    """
+    caminho = pasta_modelos()
+    return caminho is not None and caminho.is_dir()
+
+
+def definir_pasta_modelos(caminho: str | Path) -> None:
+    """
+    Salva a pasta de modelos de documento escolhida pelo usuário. Não
+    valida se a pasta existe — mesma responsabilidade de quem escolhe o
+    caminho, como em definir_pasta_digitalizacao.
+    """
+    configuracao = carregar_configuracao()
+    configuracao["pasta_modelos"] = str(caminho)
+    _salvar_configuracao(configuracao)
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # CGM_UPLOAD (lista de CGMs para os modos --aluno / --alunos)
 # ─────────────────────────────────────────────────────────────────────────
 # Antes, este array vivia duplicado dentro de sere_2026.py, e
@@ -162,4 +204,51 @@ def setup_concluido() -> bool:
 def marcar_setup_concluido() -> None:
     configuracao = carregar_configuracao()
     configuracao["setup_concluido"] = True
+    _salvar_configuracao(configuracao)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Unidade escolar (nome, endereço e CEP da escola do usuário)
+# ─────────────────────────────────────────────────────────────────────────
+# Adicionada a pedido do usuário (03/09/2026), para src.automacao.cep_api.
+# Fluxo de setup decidido pelo usuário: src.automacao.coleta_emails roda
+# primeiro (pré-requisito de instalação, raspa todas as escolas do
+# município), depois o usuário escolhe a sua num seletor pesquisável
+# populado por coleta_emails.listar_nomes_escolas(); nome e endereço vêm
+# dessa escolha (via coleta_emails.buscar_escola_por_nome) — o CEP não é
+# extraído do endereço raspado (é texto livre, não confiável para isso);
+# o usuário digita o CEP manualmente para completar o cadastro.
+
+def unidade_escolar() -> dict | None:
+    """
+    Retorna os dados da unidade escolar configurada (nome, endereço, cep),
+    ou None se ainda não foi configurada.
+    """
+    return carregar_configuracao().get("unidade_escolar")
+
+
+def unidade_escolar_configurada() -> bool:
+    """
+    True se a unidade escolar já foi configurada com nome, endereço e CEP
+    (os três campos preenchidos — sem CEP não dá para usar
+    src.automacao.cep_api).
+    """
+    dados = unidade_escolar()
+    return bool(dados and dados.get("nome") and dados.get("endereco") and dados.get("cep"))
+
+
+def definir_unidade_escolar(nome: str, endereco: str, cep: str) -> None:
+    """
+    Salva os dados da unidade escolar: `nome` e `endereco` vêm da escolha
+    do usuário no seletor (populado a partir de
+    src.automacao.coleta_emails), `cep` é digitado manualmente pelo
+    usuário (decisão do usuário, 03/09/2026 — não é extraído do texto do
+    endereço raspado).
+    """
+    configuracao = carregar_configuracao()
+    configuracao["unidade_escolar"] = {
+        "nome": nome,
+        "endereco": endereco,
+        "cep": cep,
+    }
     _salvar_configuracao(configuracao)
