@@ -1,0 +1,2088 @@
+{
+    "INFANTIL 4 Integral A": [
+        {
+            "N": 1,
+            "CGM": "1028828167",
+            "Nome": "ALICE GABRIELLE RIBEIRO DE OLIVEIRA",
+            "Data Nasc.": "08/05/2021",
+            "Idade": 5,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 2,
+            "CGM": "1034167598",
+            "Nome": "ANA LUZ SILVEIRA",
+            "Data Nasc.": "10/12/2021",
+            "Idade": 4,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 3,
+            "CGM": "1034017472",
+            "Nome": "ANTHONY DE OLIVEIRA MENDES",
+            "Data Nasc.": "29/05/2021",
+            "Idade": 5,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 4,
+            "CGM": "1035728313",
+            "Nome": "ARTHUR RAFAEL FERNANDES DE PROENCA",
+            "Data Nasc.": "26/11/2021",
+            "Idade": 4,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 5,
+            "CGM": "1035727309",
+            "Nome": "BENJAMIN KREITLOW LOURENCO DE SOUZA",
+            "Data Nasc.": "14/09/2021",
+            "Idade": 5,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 6,
+            "CGM": "1035729530",
+            "Nome": "CECILIA CALDEIRA DOS SANTOS",
+            "Data Nasc.": "01/11/2021",
+            "Idade": 4,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 7,
+            "CGM": "1035730008",
+            "Nome": "DAVID LUKAS DA LUZ",
+            "Data Nasc.": "26/01/2022",
+            "Idade": 4,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 8,
+            "CGM": "1032044685",
+            "Nome": "GABRIEL HENRIQUE RIBEIRO",
+            "Data Nasc.": "25/01/2022",
+            "Idade": 4,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 9,
+            "CGM": "1033907113",
+            "Nome": "HELENA DE FREITAS",
+            "Data Nasc.": "10/12/2021",
+            "Idade": 4,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 10,
+            "CGM": "1035731403",
+            "Nome": "LAURA DOS SANTOS MAIA",
+            "Data Nasc.": "16/07/2021",
+            "Idade": 5,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 11,
+            "CGM": "1031626397",
+            "Nome": "LAVÍNIA GOMES DE LIMA",
+            "Data Nasc.": "09/01/2022",
+            "Idade": 4,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 12,
+            "CGM": "1035729123",
+            "Nome": "LUIZ HENRIQUE ANDRADE",
+            "Data Nasc.": "03/05/2021",
+            "Idade": 5,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 13,
+            "CGM": "1035818967",
+            "Nome": "MARIA HELOISE BERNARDO DE ASSIS",
+            "Data Nasc.": "06/04/2021",
+            "Idade": 5,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 14,
+            "CGM": "1033642543",
+            "Nome": "MARIANE DOS SANTOS WOLSKI",
+            "Data Nasc.": "15/04/2021",
+            "Idade": 5,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 15,
+            "CGM": "1031858581",
+            "Nome": "MELINDA FERRAZ MACIEL",
+            "Data Nasc.": "28/06/2021",
+            "Idade": 5,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 16,
+            "CGM": "1035730580",
+            "Nome": "RENATA NATHALIA FERREIRA PINTO",
+            "Data Nasc.": "25/12/2021",
+            "Idade": 4,
+            "Sexo": "Feminino",
+            "Situação": "Transferido",
+            "Data Matricula": "23/06/2026"
+        },
+        {
+            "N": 17,
+            "CGM": "1033642918",
+            "Nome": "RUBENS BENICIO BITTENCOURT ALEIXO",
+            "Data Nasc.": "14/04/2021",
+            "Idade": 5,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 18,
+            "CGM": "1033913415",
+            "Nome": "RYAN VILLENNEVE AGUIAR LOPES",
+            "Data Nasc.": "25/05/2021",
+            "Idade": 5,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 19,
+            "CGM": "1029694130",
+            "Nome": "ISABELLA NICOLE ESTEVÃO",
+            "Data Nasc.": "31/07/2021",
+            "Idade": 5,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "24/03/2026"
+        },
+        {
+            "N": 20,
+            "CGM": "1029140193",
+            "Nome": "JADE GRANISKI",
+            "Data Nasc.": "09/12/2021",
+            "Idade": 4,
+            "Sexo": "Feminino",
+            "Situação": "Transferido",
+            "Data Matricula": "26/05/2026"
+        },
+        {
+            "N": 21,
+            "CGM": "1031626583",
+            "Nome": "MIGUEL LINHARES AMANCIO",
+            "Data Nasc.": "22/04/2021",
+            "Idade": 5,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "25/05/2026"
+        },
+        {
+            "N": 22,
+            "CGM": "1032337879",
+            "Nome": "MELANIE AURORA DA ROSA",
+            "Data Nasc.": "25/03/2022",
+            "Idade": 4,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "29/07/2026"
+        },
+        {
+            "N": 23,
+            "CGM": "1035731748",
+            "Nome": "GABRIELE SILVA DA CRUZ",
+            "Data Nasc.": "07/03/2022",
+            "Idade": 4,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "13/08/2026"
+        }
+    ],
+    "INFANTIL 5 Integral A": [
+        {
+            "N": 1,
+            "CGM": "1034491786",
+            "Nome": "ÁGATHA CARLOS DE LIMA",
+            "Data Nasc.": "28/06/2020",
+            "Idade": 6,
+            "Sexo": "Feminino",
+            "Situação": "Transferido",
+            "Data Matricula": "03/06/2026"
+        },
+        {
+            "N": 2,
+            "CGM": "1027690773",
+            "Nome": "ALICE RASPINI LUZ",
+            "Data Nasc.": "10/12/2020",
+            "Idade": 5,
+            "Sexo": "Feminino",
+            "Situação": "Transferido",
+            "Data Matricula": "02/06/2026"
+        },
+        {
+            "N": 3,
+            "CGM": "1028480012",
+            "Nome": "ANA HELOISE RODRIGUES FLORIANO",
+            "Data Nasc.": "22/05/2020",
+            "Idade": 6,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 4,
+            "CGM": "1030250431",
+            "Nome": "ANDRYO PYETRO KOVALSKI DE SOUZA",
+            "Data Nasc.": "21/08/2020",
+            "Idade": 6,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 5,
+            "CGM": "1033587798",
+            "Nome": "ARTHUR DE OLIVEIRA",
+            "Data Nasc.": "20/01/2021",
+            "Idade": 5,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 6,
+            "CGM": "1028849954",
+            "Nome": "BENTO LUÍ LARA MANFREDO",
+            "Data Nasc.": "27/02/2021",
+            "Idade": 5,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 7,
+            "CGM": "1031696425",
+            "Nome": "GABRIELA ANTUNES VAZ",
+            "Data Nasc.": "13/07/2020",
+            "Idade": 6,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 8,
+            "CGM": "1033588883",
+            "Nome": "GABRIEL DA SILVA COSTA",
+            "Data Nasc.": "04/08/2020",
+            "Idade": 6,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 9,
+            "CGM": "1033881424",
+            "Nome": "GABRIEL GLINSKI VALENTIM",
+            "Data Nasc.": "22/04/2020",
+            "Idade": 6,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 10,
+            "CGM": "1027041473",
+            "Nome": "GHAEL GUSTAVO DE PROENÇA BAÍA",
+            "Data Nasc.": "31/03/2021",
+            "Idade": 5,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 11,
+            "CGM": "1029731248",
+            "Nome": "GUSTAVO STELMATCHUK",
+            "Data Nasc.": "08/01/2021",
+            "Idade": 5,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 12,
+            "CGM": "1031733533",
+            "Nome": "HELENA PEDROSO FERREIRA",
+            "Data Nasc.": "08/07/2020",
+            "Idade": 6,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 13,
+            "CGM": "1031935136",
+            "Nome": "ISAAC EMANOEL DO ROSÁRIO BATISTA",
+            "Data Nasc.": "02/09/2020",
+            "Idade": 6,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 14,
+            "CGM": "1031696735",
+            "Nome": "ISIS PREN KUSTER DE AZEVEDO",
+            "Data Nasc.": "23/11/2020",
+            "Idade": 5,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 15,
+            "CGM": "1028918964",
+            "Nome": "IZZY GULCHINSKI TABOR",
+            "Data Nasc.": "16/10/2020",
+            "Idade": 5,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 16,
+            "CGM": "1032338336",
+            "Nome": "KAUAN GABRIEL SANTOS DE FARIAS",
+            "Data Nasc.": "11/05/2020",
+            "Idade": 6,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 17,
+            "CGM": "1033596010",
+            "Nome": "LORENA DOS SANTOS",
+            "Data Nasc.": "18/10/2020",
+            "Idade": 5,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 18,
+            "CGM": "1033884407",
+            "Nome": "LORENZO MIGUEL GONÇALVES",
+            "Data Nasc.": "07/10/2020",
+            "Idade": 5,
+            "Sexo": "Masculino",
+            "Situação": "Transferido",
+            "Data Matricula": "17/08/2026"
+        },
+        {
+            "N": 19,
+            "CGM": "1030406636",
+            "Nome": "NICOLAS KAUÃ DA SILVA WIECHINIESKI",
+            "Data Nasc.": "03/05/2020",
+            "Idade": 6,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 20,
+            "CGM": "1032059011",
+            "Nome": "RAFAEL FILA IAROSZ",
+            "Data Nasc.": "01/05/2020",
+            "Idade": 6,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 21,
+            "CGM": "1031746872",
+            "Nome": "SOFIA SOARES",
+            "Data Nasc.": "13/07/2020",
+            "Idade": 6,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 22,
+            "CGM": "1032338620",
+            "Nome": "THOMAS HENRIQUE PEDROSO FERREIRA",
+            "Data Nasc.": "16/12/2020",
+            "Idade": 5,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 23,
+            "CGM": "1033596444",
+            "Nome": "VITORIA EDUARDA LOPES MARCAL",
+            "Data Nasc.": "11/05/2020",
+            "Idade": 6,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 24,
+            "CGM": "1029187416",
+            "Nome": "TEREZA VALENTINA GRANISKI",
+            "Data Nasc.": "06/04/2020",
+            "Idade": 6,
+            "Sexo": "Feminino",
+            "Situação": "Transferido",
+            "Data Matricula": "26/05/2026"
+        },
+        {
+            "N": 25,
+            "CGM": "1028847943",
+            "Nome": "ANA CLARA KOLLER PENTEADO",
+            "Data Nasc.": "30/03/2021",
+            "Idade": 5,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "03/06/2026"
+        },
+        {
+            "N": 26,
+            "CGM": "1026769775",
+            "Nome": "BENJAMIN HENRIQUE DOS SANTOS DOS REIS",
+            "Data Nasc.": "27/11/2020",
+            "Idade": 5,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "03/07/2026"
+        },
+        {
+            "N": 27,
+            "CGM": "1031907450",
+            "Nome": "ISIS ELOA TAVARES ANTONECHNE",
+            "Data Nasc.": "14/02/2021",
+            "Idade": 5,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "18/08/2026"
+        },
+        {
+            "N": 28,
+            "CGM": "1025975975",
+            "Nome": "JOAQUIM BAHLS MOTA",
+            "Data Nasc.": "26/02/2021",
+            "Idade": 5,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "31/08/2026"
+        }
+    ],
+    "1º Ano Integral A": [
+        {
+            "N": 1,
+            "CGM": "1028996272",
+            "Nome": "ALICIA BEATRIZ RAMOS SOARES",
+            "Data Nasc.": "10/07/2019",
+            "Idade": 7,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 2,
+            "CGM": "1031702476",
+            "Nome": "ANNA BEATRIZ CAETANO DIAS",
+            "Data Nasc.": "29/02/2020",
+            "Idade": 6,
+            "Sexo": "Feminino",
+            "Situação": "Transferido",
+            "Data Matricula": "13/05/2026"
+        },
+        {
+            "N": 3,
+            "CGM": "1031709454",
+            "Nome": "ARTHUR MIGUEL SCHEIFFER LOPES",
+            "Data Nasc.": "05/10/2019",
+            "Idade": 6,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 4,
+            "CGM": "1026640950",
+            "Nome": "AYLLA SOPHIA MENDES",
+            "Data Nasc.": "25/08/2019",
+            "Idade": 7,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 5,
+            "CGM": "1031341104",
+            "Nome": "EMANUELLY CAMARGO CARDOSO",
+            "Data Nasc.": "22/05/2019",
+            "Idade": 7,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 6,
+            "CGM": "1030553353",
+            "Nome": "EMANUELLY LIMA TEIXEIRA",
+            "Data Nasc.": "06/05/2019",
+            "Idade": 7,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 7,
+            "CGM": "1031342305",
+            "Nome": "ERICK MENDES RIBEIRO",
+            "Data Nasc.": "22/10/2019",
+            "Idade": 6,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 8,
+            "CGM": "1031352378",
+            "Nome": "ESTELLA MARTINS ROSSA",
+            "Data Nasc.": "13/06/2019",
+            "Idade": 7,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 9,
+            "CGM": "1031923987",
+            "Nome": "FELIPE ALVES ANTUNES DE PRUENÇA",
+            "Data Nasc.": "27/12/2019",
+            "Idade": 6,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 10,
+            "CGM": "1031486951",
+            "Nome": "FELIPE FERNANDES DOS SANTOS GALVÃO",
+            "Data Nasc.": "21/12/2019",
+            "Idade": 6,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 11,
+            "CGM": "1031750268",
+            "Nome": "GABRIEL DOS SANTOS",
+            "Data Nasc.": "30/07/2019",
+            "Idade": 7,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 12,
+            "CGM": "1029039867",
+            "Nome": "HELENA DE SOUSA SILVA",
+            "Data Nasc.": "22/11/2019",
+            "Idade": 6,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 13,
+            "CGM": "1026567439",
+            "Nome": "HELENA LAUREN HASSELMANN AMANCIO",
+            "Data Nasc.": "19/07/2019",
+            "Idade": 7,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 14,
+            "CGM": "1031356160",
+            "Nome": "ISABELLA VICTÓRIA MORAIS HAJAKI",
+            "Data Nasc.": "26/11/2019",
+            "Idade": 6,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 15,
+            "CGM": "1028939619",
+            "Nome": "ISIS VERONICA ANTONIACOMI",
+            "Data Nasc.": "21/07/2019",
+            "Idade": 7,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 16,
+            "CGM": "1028930883",
+            "Nome": "JÚLIA ALVES CARDOSO",
+            "Data Nasc.": "25/06/2019",
+            "Idade": 7,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 17,
+            "CGM": "1031356888",
+            "Nome": "LEONARDO FREITAS SANTANA DE ALMEIDA",
+            "Data Nasc.": "11/08/2019",
+            "Idade": 7,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 18,
+            "CGM": "1031413520",
+            "Nome": "LIAH CRUZ RIBEIRO",
+            "Data Nasc.": "26/10/2019",
+            "Idade": 6,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 19,
+            "CGM": "1031713141",
+            "Nome": "MARIA CLARA DOS SANTOS",
+            "Data Nasc.": "10/07/2019",
+            "Idade": 7,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 20,
+            "CGM": "1029532393",
+            "Nome": "MIGUEL OLIVEIRA DO VALE",
+            "Data Nasc.": "20/10/2019",
+            "Idade": 6,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 21,
+            "CGM": "1027953952",
+            "Nome": "MIKELY TAMIRIS ARRUDA MACOPPI",
+            "Data Nasc.": "26/04/2019",
+            "Idade": 7,
+            "Sexo": "Feminino",
+            "Situação": "Transferido",
+            "Data Matricula": "19/03/2026"
+        },
+        {
+            "N": 22,
+            "CGM": "1031349261",
+            "Nome": "MIRELA ROSA",
+            "Data Nasc.": "29/07/2019",
+            "Idade": 7,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 23,
+            "CGM": "1029186207",
+            "Nome": "RENAN APARECIDO KACZMAREK",
+            "Data Nasc.": "27/08/2019",
+            "Idade": 7,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 24,
+            "CGM": "1034793642",
+            "Nome": "SAMUEL LUCCAS OLIVEIRA NASCIMENTO",
+            "Data Nasc.": "11/12/2019",
+            "Idade": 6,
+            "Sexo": "Masculino",
+            "Situação": "Transferido",
+            "Data Matricula": "20/05/2026"
+        },
+        {
+            "N": 25,
+            "CGM": "1031482662",
+            "Nome": "THEO HENRIQUE DA SILVA",
+            "Data Nasc.": "19/07/2019",
+            "Idade": 7,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 26,
+            "CGM": "1029499760",
+            "Nome": "VALENTINA DE MOURA KVIATKOVSKI",
+            "Data Nasc.": "14/12/2019",
+            "Idade": 6,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 27,
+            "CGM": "1031414314",
+            "Nome": "YAGO HENRIQUE DE DEUS",
+            "Data Nasc.": "27/05/2019",
+            "Idade": 7,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 28,
+            "CGM": "1033615287",
+            "Nome": "YVES VILLENNEVE AGUIAR LOPES",
+            "Data Nasc.": "14/08/2019",
+            "Idade": 7,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 29,
+            "CGM": "1027294533",
+            "Nome": "IVAN GUILHERME AIRES",
+            "Data Nasc.": "03/07/2019",
+            "Idade": 7,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "30/06/2026"
+        },
+        {
+            "N": 30,
+            "CGM": "1027644747",
+            "Nome": "BERNARDO HENRIQUE DOS SANTOS DOS REIS",
+            "Data Nasc.": "06/06/2019",
+            "Idade": 7,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "03/07/2026"
+        }
+    ],
+    "2º Ano Integral A": [
+        {
+            "N": 1,
+            "CGM": "1027692008",
+            "Nome": "ANDREY PINHEIRO DE CAMARGO",
+            "Data Nasc.": "01/08/2018",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 2,
+            "CGM": "1029392230",
+            "Nome": "CATARINA ELOAH DOS SANTOS",
+            "Data Nasc.": "06/10/2018",
+            "Idade": 7,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 3,
+            "CGM": "1028856233",
+            "Nome": "CATHARINA CARDOSO MELCHIOR",
+            "Data Nasc.": "15/02/2019",
+            "Idade": 7,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 4,
+            "CGM": "1028955304",
+            "Nome": "ELISA CALDEIRA DOS SANTOS",
+            "Data Nasc.": "26/02/2019",
+            "Idade": 7,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 5,
+            "CGM": "1025156303",
+            "Nome": "EMANUELLI DE MATTOS",
+            "Data Nasc.": "27/08/2018",
+            "Idade": 8,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 6,
+            "CGM": "1027066930",
+            "Nome": "ENZO KOSCIORETSKO DE SOUZA",
+            "Data Nasc.": "22/09/2018",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 7,
+            "CGM": "1029118589",
+            "Nome": "HEITOR MARTINS SANTIAGO",
+            "Data Nasc.": "11/03/2019",
+            "Idade": 7,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 8,
+            "CGM": "1025153339",
+            "Nome": "HELLENA VITORIA KOZIEL FERREIRA ROSA",
+            "Data Nasc.": "18/01/2019",
+            "Idade": 7,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 9,
+            "CGM": "1027933277",
+            "Nome": "HENRIQUE GABRIEL ALVES DA CRUZ",
+            "Data Nasc.": "04/08/2018",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 10,
+            "CGM": "1024381788",
+            "Nome": "ISADORA VALENTINA MAIA NUNES",
+            "Data Nasc.": "21/06/2018",
+            "Idade": 8,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 11,
+            "CGM": "1028849539",
+            "Nome": "JOAO MIGUEL SANTOS VIDAL",
+            "Data Nasc.": "13/07/2018",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 12,
+            "CGM": "1029113609",
+            "Nome": "LUIZ OTAVIO CORDEIRO DA CRUZ",
+            "Data Nasc.": "24/07/2018",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 13,
+            "CGM": "1034491700",
+            "Nome": "MARINA CARLOS DE LIMA",
+            "Data Nasc.": "23/10/2018",
+            "Idade": 7,
+            "Sexo": "Feminino",
+            "Situação": "Transferido",
+            "Data Matricula": "03/06/2026"
+        },
+        {
+            "N": 14,
+            "CGM": "1023125435",
+            "Nome": "PEDRO HENRIQUE DA LUZ GRZEBIELUCKA",
+            "Data Nasc.": "02/03/2019",
+            "Idade": 7,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 15,
+            "CGM": "1028853536",
+            "Nome": "TAYLA OLIVEIRA DA SILVA",
+            "Data Nasc.": "01/03/2019",
+            "Idade": 7,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 16,
+            "CGM": "1028380212",
+            "Nome": "YASMIN BORCATH",
+            "Data Nasc.": "10/12/2018",
+            "Idade": 7,
+            "Sexo": "Feminino",
+            "Situação": "Transferido",
+            "Data Matricula": "29/07/2026"
+        },
+        {
+            "N": 17,
+            "CGM": "1022304727",
+            "Nome": "YASMIN RAFAELI ALVES DE ARRUDA",
+            "Data Nasc.": "15/02/2019",
+            "Idade": 7,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 18,
+            "CGM": "1028855202",
+            "Nome": "ARTHUR MIGUEL DOS ANJOS DOS SANTOS",
+            "Data Nasc.": "10/06/2018",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "11/05/2026"
+        },
+        {
+            "N": 19,
+            "CGM": "1020750460",
+            "Nome": "HELOÍSA SOPHIA SILVA",
+            "Data Nasc.": "27/09/2018",
+            "Idade": 7,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "02/09/2026"
+        }
+    ],
+    "3º Ano Integral A": [
+        {
+            "N": 1,
+            "CGM": "1027160766",
+            "Nome": "ADRYAN RUAN ROSÁRIO BATISTA",
+            "Data Nasc.": "27/01/2018",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 2,
+            "CGM": "1027178207",
+            "Nome": "AGATHA DE SOUZA PRADO",
+            "Data Nasc.": "27/07/2017",
+            "Idade": 9,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 3,
+            "CGM": "1025059715",
+            "Nome": "CECILIA LOUIZE PEDROSO FERREIRA",
+            "Data Nasc.": "03/08/2017",
+            "Idade": 9,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 4,
+            "CGM": "1025059782",
+            "Nome": "DAVI MIGUEL VAZ DE MOURA LEIRIA",
+            "Data Nasc.": "10/01/2018",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 5,
+            "CGM": "1029065930",
+            "Nome": "DERICK MARTINS ROSSA",
+            "Data Nasc.": "31/12/2017",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 6,
+            "CGM": "1027183855",
+            "Nome": "ENZO MIGUEL BITTENCOURT ALEIXO",
+            "Data Nasc.": "12/05/2017",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 7,
+            "CGM": "1028122655",
+            "Nome": "HELENA MIRANDA FONTES DE SOUZA",
+            "Data Nasc.": "14/09/2017",
+            "Idade": 9,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 8,
+            "CGM": "1027068991",
+            "Nome": "HIAGO BRIKI DE OLIVEIRA",
+            "Data Nasc.": "10/08/2017",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 9,
+            "CGM": "1027173795",
+            "Nome": "ISAQUE RIBEIRO DA SILVA",
+            "Data Nasc.": "05/03/2018",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 10,
+            "CGM": "1026307828",
+            "Nome": "JOÃO ALBERTO SILVA",
+            "Data Nasc.": "20/10/2017",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 11,
+            "CGM": "1023037692",
+            "Nome": "JOAO VICTOR AXT INGLES DE LARA",
+            "Data Nasc.": "02/02/2018",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 12,
+            "CGM": "1025161544",
+            "Nome": "JOSUÉ GABRIEL BEZERRA ACOSTA",
+            "Data Nasc.": "18/05/2017",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 13,
+            "CGM": "1027020620",
+            "Nome": "JÚLIA VITÓRIA TUMA INGCHAK",
+            "Data Nasc.": "29/12/2017",
+            "Idade": 8,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 14,
+            "CGM": "1019680963",
+            "Nome": "LAURA FOROSTESKI DUTRA",
+            "Data Nasc.": "27/10/2017",
+            "Idade": 8,
+            "Sexo": "Feminino",
+            "Situação": "Transferido",
+            "Data Matricula": "12/05/2026"
+        },
+        {
+            "N": 15,
+            "CGM": "1027693144",
+            "Nome": "LAURA RASPINI LUZ",
+            "Data Nasc.": "25/12/2017",
+            "Idade": 8,
+            "Sexo": "Feminino",
+            "Situação": "Transferido",
+            "Data Matricula": "02/06/2026"
+        },
+        {
+            "N": 16,
+            "CGM": "1023249231",
+            "Nome": "LOUISE KOVALCZUK",
+            "Data Nasc.": "02/05/2017",
+            "Idade": 9,
+            "Sexo": "Feminino",
+            "Situação": "Transferido",
+            "Data Matricula": "02/06/2026"
+        },
+        {
+            "N": 17,
+            "CGM": "1027173892",
+            "Nome": "MARIA ALICE GARCIA",
+            "Data Nasc.": "17/12/2017",
+            "Idade": 8,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 18,
+            "CGM": "1027037190",
+            "Nome": "MUNICKY GIOVANNA MARQUES DE SOUZA",
+            "Data Nasc.": "11/02/2018",
+            "Idade": 8,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 19,
+            "CGM": "1027195098",
+            "Nome": "MURILO FERREIRA",
+            "Data Nasc.": "03/03/2018",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 20,
+            "CGM": "1023649990",
+            "Nome": "PEDRO VAGULA LACHINSKI",
+            "Data Nasc.": "10/03/2018",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 21,
+            "CGM": "1027043417",
+            "Nome": "YAN FERNANDES GALVÃO MESSIAS",
+            "Data Nasc.": "15/08/2017",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 22,
+            "CGM": "1027045355",
+            "Nome": "YASMIN VITORIA ANTUNES",
+            "Data Nasc.": "29/05/2017",
+            "Idade": 9,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 23,
+            "CGM": "1026280890",
+            "Nome": "JOAO MIGUEL SILVERIO CORDEIRO",
+            "Data Nasc.": "13/07/2017",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "29/04/2026"
+        },
+        {
+            "N": 24,
+            "CGM": "1027161410",
+            "Nome": "ANA LUIZA DA SILVA MENDES BATISTA",
+            "Data Nasc.": "05/03/2018",
+            "Idade": 8,
+            "Sexo": "Feminino",
+            "Situação": "Transferido",
+            "Data Matricula": "21/08/2026"
+        },
+        {
+            "N": 25,
+            "CGM": "1026007972",
+            "Nome": "PEDRO HENRIQUE DE LIMA RIBEIRO",
+            "Data Nasc.": "20/09/2017",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "14/05/2026"
+        },
+        {
+            "N": 26,
+            "CGM": "1023867270",
+            "Nome": "LAÍS VITÓRIA DA LUZ SANTOS",
+            "Data Nasc.": "28/02/2018",
+            "Idade": 8,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "25/08/2026"
+        },
+        {
+            "N": 27,
+            "CGM": "1021841966",
+            "Nome": "LORENZO GABRIEL DE OLIVEIRA FLORES",
+            "Data Nasc.": "28/03/2018",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "16/09/2026"
+        },
+        {
+            "N": 28,
+            "CGM": "1027279267",
+            "Nome": "MATHEUS EDUARDO TEIXEIRA DE LIMA",
+            "Data Nasc.": "13/09/2017",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "23/09/2026"
+        }
+    ],
+    "3º Ano Integral B": [
+        {
+            "N": 1,
+            "CGM": "1021660970",
+            "Nome": "ALICE BUENO MIGUEL",
+            "Data Nasc.": "01/09/2017",
+            "Idade": 9,
+            "Sexo": "Feminino",
+            "Situação": "Transferido",
+            "Data Matricula": "02/09/2026"
+        },
+        {
+            "N": 2,
+            "CGM": "1024801515",
+            "Nome": "ARTHUR MOCELIN",
+            "Data Nasc.": "23/01/2018",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 3,
+            "CGM": "1020899219",
+            "Nome": "ASHLEY ARRUDA VIVI",
+            "Data Nasc.": "05/01/2018",
+            "Idade": 8,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 4,
+            "CGM": "1023529250",
+            "Nome": "BEATRIZ HIDEKO SATO",
+            "Data Nasc.": "01/02/2018",
+            "Idade": 8,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 5,
+            "CGM": "1027024838",
+            "Nome": "BERNARDO GONÇALVES MAÇANEIRO",
+            "Data Nasc.": "27/05/2017",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 6,
+            "CGM": "1026907477",
+            "Nome": "BETINA SOARES CORREIA DA LUZ",
+            "Data Nasc.": "14/12/2017",
+            "Idade": 8,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 7,
+            "CGM": "1023259369",
+            "Nome": "ELIAS MIGUEL GUIMARAES DOS SANTOS",
+            "Data Nasc.": "07/03/2018",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 8,
+            "CGM": "1025154513",
+            "Nome": "FLORA WOICIZACK ARANTES",
+            "Data Nasc.": "08/12/2017",
+            "Idade": 8,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 9,
+            "CGM": "1027232678",
+            "Nome": "HELENA VITÓRIA DA SILVA DE OLIVEIRA",
+            "Data Nasc.": "03/02/2018",
+            "Idade": 8,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 10,
+            "CGM": "1027084598",
+            "Nome": "ISAAC BRIKI DE OLIVEIRA",
+            "Data Nasc.": "10/08/2017",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 11,
+            "CGM": "1027184070",
+            "Nome": "ISABELLA LAROCA KOVARCHUKI",
+            "Data Nasc.": "28/02/2018",
+            "Idade": 8,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 12,
+            "CGM": "1027191653",
+            "Nome": "JOÃO RAFAEL SOARES",
+            "Data Nasc.": "06/05/2017",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 13,
+            "CGM": "1025062562",
+            "Nome": "LUIZ FELIPE ANDRZEGESKI",
+            "Data Nasc.": "12/07/2017",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 14,
+            "CGM": "1026908180",
+            "Nome": "LUIZ FELIPE FERREIRA PINTO",
+            "Data Nasc.": "14/03/2018",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Transferido",
+            "Data Matricula": "23/06/2026"
+        },
+        {
+            "N": 15,
+            "CGM": "1027193923",
+            "Nome": "MAÍSA VARLAN",
+            "Data Nasc.": "27/03/2018",
+            "Idade": 8,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 16,
+            "CGM": "1027038561",
+            "Nome": "RAFAEL PEREIRA DA SILVA",
+            "Data Nasc.": "02/10/2017",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 17,
+            "CGM": "1019619946",
+            "Nome": "RENAN HUDSON NUNES DA SILVA",
+            "Data Nasc.": "04/04/2017",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 18,
+            "CGM": "1027041015",
+            "Nome": "SOPHIA EMANUELI MIRANDA QUEIRÓZ",
+            "Data Nasc.": "20/09/2017",
+            "Idade": 9,
+            "Sexo": "Feminino",
+            "Situação": "Transferido",
+            "Data Matricula": "15/05/2026"
+        },
+        {
+            "N": 19,
+            "CGM": "1025062619",
+            "Nome": "YASMIN VITÓRIA DOS SANTOS FARIA",
+            "Data Nasc.": "18/05/2017",
+            "Idade": 9,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 20,
+            "CGM": "1027439850",
+            "Nome": "YURI EMANUEL VALENTIM RODRIGUES",
+            "Data Nasc.": "12/02/2018",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 21,
+            "CGM": "1027440165",
+            "Nome": "HANNA GABRIELLY VIANA RODRIGUES",
+            "Data Nasc.": "27/12/2017",
+            "Idade": 8,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "12/05/2026"
+        },
+        {
+            "N": 22,
+            "CGM": "1027065461",
+            "Nome": "DAVI MURILO CORDEIRO",
+            "Data Nasc.": "09/11/2017",
+            "Idade": 8,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "08/07/2026"
+        },
+        {
+            "N": 23,
+            "CGM": "1027042933",
+            "Nome": "WALLACE KOLLER PADILHA DA SILVA",
+            "Data Nasc.": "08/06/2017",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "16/09/2026"
+        }
+    ],
+    "4º Ano Integral A": [
+        {
+            "N": 1,
+            "CGM": "1023223216",
+            "Nome": "ARTHUR RAFAEL LARA MANFREDO",
+            "Data Nasc.": "08/12/2016",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 2,
+            "CGM": "1023243390",
+            "Nome": "ARTHUR RAMOS",
+            "Data Nasc.": "08/01/2017",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 3,
+            "CGM": "1015980431",
+            "Nome": "BERNARDO JOSE FERREIRA",
+            "Data Nasc.": "24/11/2016",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 4,
+            "CGM": "1024677164",
+            "Nome": "BRYAN ANTUNES VIEIRA",
+            "Data Nasc.": "23/05/2016",
+            "Idade": 10,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 5,
+            "CGM": "1025853055",
+            "Nome": "DAVI GABRIEL ANTONIACOMI",
+            "Data Nasc.": "25/11/2016",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 6,
+            "CGM": "1023230905",
+            "Nome": "EDUARDA LEMES DE CAMARGO",
+            "Data Nasc.": "08/07/2016",
+            "Idade": 10,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 7,
+            "CGM": "1023066994",
+            "Nome": "ELOÁ LAIS DE MATTOS",
+            "Data Nasc.": "05/01/2017",
+            "Idade": 9,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 8,
+            "CGM": "1024034760",
+            "Nome": "ENDRICK FERNANDES MACHADO",
+            "Data Nasc.": "04/02/2017",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 9,
+            "CGM": "1018871935",
+            "Nome": "ENZO GABRIEL DA LUZ GRZEBIELUCKA",
+            "Data Nasc.": "19/03/2017",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 10,
+            "CGM": "1024960974",
+            "Nome": "GUSTAVO HENRIQUE DE CARVALHO",
+            "Data Nasc.": "18/02/2017",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 11,
+            "CGM": "1023234552",
+            "Nome": "HEITOR GABRIEL LARA MANFREDO",
+            "Data Nasc.": "08/12/2016",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 12,
+            "CGM": "1024961172",
+            "Nome": "HENRIQUE SAMWAYS DE FREITAS",
+            "Data Nasc.": "31/12/2016",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 13,
+            "CGM": "1034464290",
+            "Nome": "JOAO PAULO GOMES TALLEVI",
+            "Data Nasc.": "25/11/2016",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 14,
+            "CGM": "1035725810",
+            "Nome": "JOÃO VITOR LUNELLI DE PAULA",
+            "Data Nasc.": "10/03/2016",
+            "Idade": 10,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 15,
+            "CGM": "1023248804",
+            "Nome": "JULIA MEDINA DE PAULA",
+            "Data Nasc.": "14/02/2017",
+            "Idade": 9,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 16,
+            "CGM": "1027139112",
+            "Nome": "LÍVIA TEIXEIRA DA SILVA",
+            "Data Nasc.": "06/04/2016",
+            "Idade": 10,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 17,
+            "CGM": "1024961474",
+            "Nome": "LUCAS DANIEL RIBEIRO DE LIMA COSTA",
+            "Data Nasc.": "02/01/2017",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 18,
+            "CGM": "1023279386",
+            "Nome": "LUDYENES VITÓRIA LIMA PADILHA",
+            "Data Nasc.": "03/12/2015",
+            "Idade": 10,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 19,
+            "CGM": "1025273903",
+            "Nome": "MARIA CLARA DE SOUSA",
+            "Data Nasc.": "17/05/2016",
+            "Idade": 10,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 20,
+            "CGM": "1024970473",
+            "Nome": "MATHEUS CAMARGO CARDOSO",
+            "Data Nasc.": "19/02/2017",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 21,
+            "CGM": "1024984210",
+            "Nome": "MIGUEL IANZ VIEIRA DOS SANTOS",
+            "Data Nasc.": "12/07/2016",
+            "Idade": 10,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 22,
+            "CGM": "1023037056",
+            "Nome": "MIKAELA YASMIN MARTINS DE MATTOS DE OLIV",
+            "Data Nasc.": "13/09/2014",
+            "Idade": 12,
+            "Sexo": "Feminino",
+            "Situação": "Transferido",
+            "Data Matricula": "25/06/2026"
+        },
+        {
+            "N": 23,
+            "CGM": "1020898271",
+            "Nome": "MYKAELLA LAGOS DE SOUZA",
+            "Data Nasc.": "22/07/2017",
+            "Idade": 9,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 24,
+            "CGM": "1024984261",
+            "Nome": "OTÁVIO AMORIM PINHEIRO",
+            "Data Nasc.": "12/09/2016",
+            "Idade": 10,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 25,
+            "CGM": "1019424673",
+            "Nome": "PEDRO HENRIQUE KEIBER",
+            "Data Nasc.": "23/02/2017",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 26,
+            "CGM": "1025674436",
+            "Nome": "PEDRO HENRIQUE RIBEIRO",
+            "Data Nasc.": "06/06/2016",
+            "Idade": 10,
+            "Sexo": "Masculino",
+            "Situação": "Transferido",
+            "Data Matricula": "17/09/2026"
+        },
+        {
+            "N": 27,
+            "CGM": "1020010939",
+            "Nome": "RUAN ISRAEL FERNANDES DE PROENCA",
+            "Data Nasc.": "31/10/2016",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 28,
+            "CGM": "1027132770",
+            "Nome": "SAMARIA DOS SANTOS JEREMIAS",
+            "Data Nasc.": "06/07/2016",
+            "Idade": 10,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 29,
+            "CGM": "1024495511",
+            "Nome": "ANTÔNIO MACHADO BRUGNEROTTO",
+            "Data Nasc.": "07/06/2016",
+            "Idade": 10,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "07/04/2026"
+        },
+        {
+            "N": 30,
+            "CGM": "1024958414",
+            "Nome": "VICTOR HENRIQUE DA LUZ TERNA",
+            "Data Nasc.": "08/08/2016",
+            "Idade": 10,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "26/05/2026"
+        },
+        {
+            "N": 31,
+            "CGM": "1036731423",
+            "Nome": "RAYANE BONIN DE LIRA",
+            "Data Nasc.": "28/01/2017",
+            "Idade": 9,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "28/08/2026"
+        }
+    ],
+    "5º Ano Integral A": [
+        {
+            "N": 1,
+            "CGM": "1020494251",
+            "Nome": "ALLANA CAROLINA MORAIS PONCE ELBL",
+            "Data Nasc.": "25/04/2016",
+            "Idade": 10,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 2,
+            "CGM": "1025025012",
+            "Nome": "ANNA LAURA LACOMSKI STEPANIENCO",
+            "Data Nasc.": "07/02/2016",
+            "Idade": 10,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 3,
+            "CGM": "1012790747",
+            "Nome": "ARTHUR FOROSTESKI DUTRA",
+            "Data Nasc.": "29/05/2015",
+            "Idade": 11,
+            "Sexo": "Masculino",
+            "Situação": "Transferido",
+            "Data Matricula": "12/05/2026"
+        },
+        {
+            "N": 4,
+            "CGM": "1034491611",
+            "Nome": "BENJAMIN CARLOS DE LIMA",
+            "Data Nasc.": "10/11/2015",
+            "Idade": 10,
+            "Sexo": "Masculino",
+            "Situação": "Transferido",
+            "Data Matricula": "03/06/2026"
+        },
+        {
+            "N": 5,
+            "CGM": "1020228616",
+            "Nome": "ELLEN VITORIA RODRIGUES FERREIRA",
+            "Data Nasc.": "05/07/2015",
+            "Idade": 11,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 6,
+            "CGM": "1021000228",
+            "Nome": "EMANUELA HELENA DE PAULA PADILHA",
+            "Data Nasc.": "15/12/2015",
+            "Idade": 10,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 7,
+            "CGM": "1018645722",
+            "Nome": "GUSTAVO SCHEIFFER LOPES",
+            "Data Nasc.": "05/08/2015",
+            "Idade": 11,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "05/02/2026"
+        },
+        {
+            "N": 8,
+            "CGM": "1019953021",
+            "Nome": "HELENA MARCELINO",
+            "Data Nasc.": "02/11/2016",
+            "Idade": 9,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 9,
+            "CGM": "1023274597",
+            "Nome": "ISAQUE MATHEUS DE SOUZA CONTADOR",
+            "Data Nasc.": "22/05/2015",
+            "Idade": 11,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 10,
+            "CGM": "1020963715",
+            "Nome": "JHULYA SAMPAIO PONZONI",
+            "Data Nasc.": "22/11/2016",
+            "Idade": 9,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "06/02/2026"
+        },
+        {
+            "N": 11,
+            "CGM": "1023277588",
+            "Nome": "JOAQUIM RICARDO MULLER",
+            "Data Nasc.": "22/03/2016",
+            "Idade": 10,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 12,
+            "CGM": "1018026151",
+            "Nome": "LAVÍNIA DE ALMEIDA GONZAGA",
+            "Data Nasc.": "04/03/2016",
+            "Idade": 10,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 13,
+            "CGM": "1018698320",
+            "Nome": "LORRAINY YASMIN DE OLIVEIRA RODRIGUES",
+            "Data Nasc.": "18/01/2016",
+            "Idade": 10,
+            "Sexo": "Feminino",
+            "Situação": "Transferido",
+            "Data Matricula": "29/07/2026"
+        },
+        {
+            "N": 14,
+            "CGM": "1022105414",
+            "Nome": "MARIA EDUARDA GONÇALVES FELIZ DE PAULA",
+            "Data Nasc.": "01/03/2016",
+            "Idade": 10,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 15,
+            "CGM": "1028171605",
+            "Nome": "MARIANA OLIVEIRA DO VALE",
+            "Data Nasc.": "16/01/2016",
+            "Idade": 10,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 16,
+            "CGM": "1022976857",
+            "Nome": "MARIA PIETRA DE LIMA",
+            "Data Nasc.": "15/01/2016",
+            "Idade": 10,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 17,
+            "CGM": "1021529806",
+            "Nome": "MIGUEL CALEBE RAMOS SOARES",
+            "Data Nasc.": "02/04/2015",
+            "Idade": 11,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 18,
+            "CGM": "1023280961",
+            "Nome": "NICOLAS OLIVEIRA FRANCO",
+            "Data Nasc.": "22/06/2015",
+            "Idade": 11,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 19,
+            "CGM": "1023281305",
+            "Nome": "NICOLLY DE ABREU",
+            "Data Nasc.": "27/07/2015",
+            "Idade": 11,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 20,
+            "CGM": "1019563584",
+            "Nome": "RAFAELA FERREIRA PINTO",
+            "Data Nasc.": "22/03/2016",
+            "Idade": 10,
+            "Sexo": "Feminino",
+            "Situação": "Transferido",
+            "Data Matricula": "23/06/2026"
+        },
+        {
+            "N": 21,
+            "CGM": "1018723820",
+            "Nome": "SAYURI CASTANHA SATO",
+            "Data Nasc.": "14/03/2016",
+            "Idade": 10,
+            "Sexo": "Feminino",
+            "Situação": "Transferido",
+            "Data Matricula": "05/05/2026"
+        },
+        {
+            "N": 22,
+            "CGM": "1016450924",
+            "Nome": "SOFIA EMANUELLY MACHADO DE PAULA",
+            "Data Nasc.": "13/07/2016",
+            "Idade": 10,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "04/02/2026"
+        },
+        {
+            "N": 23,
+            "CGM": "1023265822",
+            "Nome": "VALENTINA TABATINE SILVA BUENO",
+            "Data Nasc.": "14/05/2015",
+            "Idade": 11,
+            "Sexo": "Feminino",
+            "Situação": "Transferido",
+            "Data Matricula": "26/05/2026"
+        },
+        {
+            "N": 24,
+            "CGM": "1021199342",
+            "Nome": "AGATHA SOFIA CORDEIRO PINTO",
+            "Data Nasc.": "23/02/2016",
+            "Idade": 10,
+            "Sexo": "Feminino",
+            "Situação": "Matriculado",
+            "Data Matricula": "28/04/2026"
+        },
+        {
+            "N": 25,
+            "CGM": "1021081139",
+            "Nome": "DANILO DE OLIVEIRA",
+            "Data Nasc.": "23/10/2016",
+            "Idade": 9,
+            "Sexo": "Masculino",
+            "Situação": "Matriculado",
+            "Data Matricula": "08/05/2026"
+        }
+    ]
+}

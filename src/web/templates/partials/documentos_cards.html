@@ -1,0 +1,555 @@
+</div>
+    <!-- FILTROS -->
+    <div class="card">
+      <div class="card-header">
+        <i class="fa-solid fa-filter" style="color:var(--txt3);font-size:.8rem"></i>
+        <span class="card-title">Filtros e Busca</span>
+        <span class="card-header-badge" id="func-cnt">${FUNC.total} funcionários</span>
+        <div class="export-toolbar">
+          <button class="export-btn" id="btn-export-csv" title="Exportar CSV">
+            <i class="fa-solid fa-file-csv"></i> CSV
+          </button>
+          <button class="export-btn" id="btn-print" title="Imprimir">
+            <i class="fa-solid fa-print"></i> Imprimir
+          </button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="fbar">
+          <button class="pill active" data-ff="todos">Todos</button>
+          <button class="pill" data-ff="Docente">Docentes</button>
+          <button class="pill" data-ff="Gestor - Diretor(a)">Direção</button>
+          <button class="pill" data-ff="Pedagogo(a)">Pedagogos</button>
+          <button class="pill" data-ff="Auxiliar/Assistente Educacional">Auxiliares</button>
+          <button class="pill" data-ff="Outras funções">Outros</button>
+          <div class="sbox-wrap">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" class="sbox" id="func-q" placeholder="Buscar nome, CPF, e-mail, cargo…">
+          </div>
+        </div>
+        <!-- Filtros avançados -->
+        <div class="adv-filter-grid" style="margin-top:12px">
+          <div class="adv-filter-group">
+            <span class="adv-filter-lbl">Sexo</span>
+            <select class="adv-select" id="filter-sexo">
+              <option value="todos">Todos</option>
+              <option value="F">Feminino</option>
+              <option value="M">Masculino</option>
+            </select>
+          </div>
+          <div class="adv-filter-group">
+            <span class="adv-filter-lbl">Registros por página</span>
+            <select class="adv-select" id="filter-pagesize">
+              <option value="10">10 por página</option>
+              <option value="25" selected>25 por página</option>
+              <option value="50">50 por página</option>
+              <option value="100">100 por página</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- TABELA -->
+    <div class="card">
+      <div class="card-body no-pad">
+        <div class="tbl-wrap" style="border:none;border-radius:0">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:36px"></th>
+                <th data-sort="nome" class="sort-asc">Nome</th>
+                <th data-sort="funcao">Cargo / Função</th>
+                <th data-sort="email" class="hide-sm">E-mail</th>
+                <th data-sort="telefone" class="hide-sm">Telefone</th>
+                <th data-sort="sexo">Sexo</th>
+                <th data-sort="cpf">CPF</th>
+                <th data-sort="escolaridade" class="hide-sm">Formação</th>
+              </tr>
+            </thead>
+            <tbody id="func-tbody"></tbody>
+          </table>
+          <div class="empty" id="func-empty" style="display:none">
+            <i class="fa-solid fa-magnifying-glass"></i>Nenhum funcionário encontrado.
+          </div>
+        </div>
+        <!-- PAGINAÇÃO -->
+        <div class="pag-bar" id="func-pag">
+          <span class="pag-info" id="pag-info"></span>
+          <div class="pag-btns" id="pag-btns"></div>
+        </div>
+      </div>
+    </div>`;
+
+  /* eventos dos filtros */
+  el.querySelectorAll('[data-ff]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      el.querySelectorAll('[data-ff]').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      FUNC_STATE.filterFuncao = btn.dataset.ff;
+      FUNC_STATE.page = 1;
+      renderFuncRows();
+    });
+  });
+
+  el.querySelectorAll('thead th[data-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+      if (FUNC_STATE.sort.col === th.dataset.sort) FUNC_STATE.sort.dir *= -1;
+      else { FUNC_STATE.sort.col = th.dataset.sort; FUNC_STATE.sort.dir = 1; }
+      el.querySelectorAll('thead th').forEach(h => h.classList.remove('sort-asc','sort-desc'));
+      th.classList.add(FUNC_STATE.sort.dir===1?'sort-asc':'sort-desc');
+      FUNC_STATE.page = 1;
+      renderFuncRows();
+    });
+  });
+
+  document.getElementById('func-q').addEventListener('input', e => {
+    FUNC_STATE.search = e.target.value;
+    FUNC_STATE.page = 1;
+    renderFuncRows();
+  });
+
+  document.getElementById('filter-sexo').addEventListener('change', e => {
+    FUNC_STATE.filterSexo = e.target.value;
+    FUNC_STATE.page = 1;
+    renderFuncRows();
+  });
+
+  document.getElementById('filter-pagesize').addEventListener('change', e => {
+    FUNC_STATE.pageSize = parseInt(e.target.value);
+    FUNC_STATE.page = 1;
+    renderFuncRows();
+  });
+
+  document.getElementById('btn-export-csv').addEventListener('click', exportarCSV);
+  document.getElementById('btn-print').addEventListener('click', () => window.print());
+
+  renderFuncRows();
+}
+
+function filtrarFuncionarios() {
+  const q = FUNC_STATE.search.toLowerCase();
+  return FUNC.lista.filter(f => {
+    if (FUNC_STATE.filterFuncao !== 'todos' && f.funcao !== FUNC_STATE.filterFuncao) return false;
+    if (FUNC_STATE.filterSexo  !== 'todos' && f.sexo.toUpperCase() !== FUNC_STATE.filterSexo) return false;
+    if (!q) return true;
+    return [f.nome, f.cpf, f.email, f.telefone, f.funcao, f.rg, f.bairro, f.municipio_end,
+            f.vinculo?.numcad, f.vinculo?.nomloc, f.vinculo?.titcar, f.vinculo?.dessit]
+      .some(v => String(v||'').toLowerCase().includes(q));
+  });
+}
+
+function renderFuncRows() {
+  const { col, dir } = FUNC_STATE.sort;
+  let data = filtrarFuncionarios();
+
+  /* ordenação */
+  data = data.slice().sort((a, b) => {
+    const va = String(a[col]||'').toLowerCase();
+    const vb = String(b[col]||'').toLowerCase();
+    return va.localeCompare(vb) * dir;
+  });
+
+  /* paginação */
+  const total = data.length;
+  const pages = Math.max(1, Math.ceil(total / FUNC_STATE.pageSize));
+  FUNC_STATE.page = Math.min(FUNC_STATE.page, pages);
+  const start = (FUNC_STATE.page - 1) * FUNC_STATE.pageSize;
+  const page_data = data.slice(start, start + FUNC_STATE.pageSize);
+
+  document.getElementById('func-cnt').textContent = `${total} / ${FUNC.total}`;
+
+  const tbody = document.getElementById('func-tbody');
+  const empty = document.getElementById('func-empty');
+  if (!data.length) { tbody.innerHTML = ''; empty.style.display = ''; renderPag(0,1,1); return; }
+  empty.style.display = 'none';
+  renderPag(total, FUNC_STATE.page, pages);
+
+  tbody.innerHTML = page_data.map((f, idx) => {
+    const rowId = `fn-row-${start+idx}`;
+    return `<tr class="fn-main-row" data-row="${rowId}">
+      <td style="width:36px;text-align:center;vertical-align:middle">
+        <button class="fn-expand-btn" data-btn="${rowId}" data-cpf="${f._cpf_norm}" title="Ver detalhes">+</button>
+      </td>
+      <td class="td-name">
+        <div style="display:flex;align-items:center;gap:7px">
+          <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--cyan),var(--violet));display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;color:#fff;flex-shrink:0">
+            ${f.nome.split(' ').filter(Boolean).slice(0,2).map(w=>w[0]).join('')}
+          </div>
+          <span>${f.nome}</span>
+        </div>
+      </td>
+      <td>${funcaoBadge(f.funcao)}</td>
+      <td class="td-mono">${f.email !== '—' ? `<a href="mailto:${f.email}" style="color:var(--cyan);text-decoration:none">${f.email}</a>` : '—'}</td>
+      <td class="td-mono">${formatTel(f.telefone)}</td>
+      <td>${sexoBadge(f.sexo)}</td>
+      <td class="td-mono">${formatCPF(f.cpf)}</td>
+      <td class="td-mono" style="font-size:.72rem;color:var(--txt3)">${f.escolaridade !== '—' ? f.escolaridade : '—'}</td>
+    </tr>
+    <tr class="fn-detail-row" id="${rowId}">
+      <td colspan="8"><div class="fn-detail-inner" id="det-inner-${rowId}"></div></td>
+    </tr>`;
+  }).join('');
+
+  /* remove listeners antigos e adiciona novo via delegação */
+  const newTbody = tbody.cloneNode(true);
+  tbody.parentNode.replaceChild(newTbody, tbody);
+  newTbody.addEventListener('click', function(e) {
+    const btn = e.target.closest('.fn-expand-btn');
+    if (!btn) return;
+    const rowId  = btn.dataset.btn;
+    const cpfKey = btn.dataset.cpf;
+    const detRow = document.getElementById(rowId);
+    const inner  = document.getElementById('det-inner-' + rowId);
+    const open   = detRow.classList.toggle('open');
+    btn.classList.toggle('open', open);
+    btn.title = open ? 'Fechar detalhes' : 'Ver detalhes';
+    if (open && inner && !inner.dataset.loaded) {
+      const func = FUNC.lista.find(f => f._cpf_norm === cpfKey);
+      if (func) { inner.innerHTML = buildDetailHTML(func, rowId); inner.dataset.loaded = '1'; bindTabs(rowId); }
+    }
+  });
+}
+
+function renderPag(total, page, pages) {
+  const info = document.getElementById('pag-info');
+  const btns = document.getElementById('pag-btns');
+  if (!total) { info.textContent = 'Nenhum resultado'; btns.innerHTML = ''; return; }
+  const start = (page-1)*FUNC_STATE.pageSize + 1;
+  const end   = Math.min(page*FUNC_STATE.pageSize, total);
+  info.textContent = `Exibindo ${start}–${end} de ${total}`;
+
+  const range = [];
+  if (pages <= 7) {
+    for (let i=1;i<=pages;i++) range.push(i);
+  } else {
+    range.push(1);
+    if (page > 3) range.push('…');
+    for (let i=Math.max(2,page-1);i<=Math.min(pages-1,page+1);i++) range.push(i);
+    if (page < pages-2) range.push('…');
+    range.push(pages);
+  }
+
+  btns.innerHTML = `
+    <button class="pag-btn" id="pag-prev" ${page===1?'disabled':''} title="Página anterior">‹</button>
+    ${range.map(p => p==='…'
+      ? `<span class="pag-ellipsis">···</span>`
+      : `<button class="pag-btn${p===page?' active':''}" data-p="${p}">${p}</button>`
+    ).join('')}
+    <button class="pag-btn" id="pag-next" ${page===pages?'disabled':''} title="Próxima página">›</button>`;
+
+  btns.querySelectorAll('[data-p]').forEach(b => {
+    b.addEventListener('click', () => { FUNC_STATE.page = parseInt(b.dataset.p); renderFuncRows(); });
+  });
+  document.getElementById('pag-prev').addEventListener('click', () => { if(FUNC_STATE.page>1){FUNC_STATE.page--;renderFuncRows();} });
+  document.getElementById('pag-next').addEventListener('click', () => { if(FUNC_STATE.page<pages){FUNC_STATE.page++;renderFuncRows();} });
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   DETALHE DO FUNCIONÁRIO (abas)
+══════════════════════════════════════════════════════════════════════ */
+function buildDetailHTML(f, rowId) {
+  const tabId = t => `${rowId}-tab-${t}`;
+  const panId = t => `${rowId}-pan-${t}`;
+
+  /* ABA: Dados Pessoais */
+  const dadosPessoais = `
+    <div class="fn-section-ttl">Identificação</div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Nome Completo</span><span class="fn-field-val">${f.nome}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">CPF</span><span class="fn-field-val mono">${formatCPF(f.cpf)}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">RG</span><span class="fn-field-val mono">${f.rg}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Órgão Emissor RG</span><span class="fn-field-val mono">${f.rg_orgao} / ${f.rg_uf}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">NIS / PIS</span><span class="fn-field-val mono">${f.nis}</span></div>
+    <div class="fn-section-ttl">Dados Pessoais</div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Data de Nascimento</span><span class="fn-field-val">${f.data_nascimento}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Sexo</span><span class="fn-field-val">${f.sexo === 'F' ? 'Feminino' : f.sexo === 'M' ? 'Masculino' : f.sexo}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Raça / Cor</span><span class="fn-field-val">${f.raca_cor}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Nome da Mãe</span><span class="fn-field-val">${f.nome_mae}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Município de Nascimento</span><span class="fn-field-val">${f.municipio_nasc} / ${f.uf_nasc}</span></div>`;
+
+  /* ABA: Dados Funcionais */
+  const turmasHTML = f.turmas.length
+    ? f.turmas.map(t =>
+        `<div class="fn-turma-item">
+          <div class="fn-turma-desc">${t.descricao}</div>
+          <div class="fn-disciplinas">${(t.disciplinas||[]).map(d=>`<span class="fn-disc-chip">${d}</span>`).join('')}</div>
+        </div>`
+      ).join('')
+    : `<div style="font-family:var(--mono);font-size:.75rem;color:var(--txt3);padding:8px 0">Sem turmas atribuídas.</div>`;
+
+  const posGrad = f.pos_graduacao.length
+    ? `<ul style="margin:0;padding-left:16px">${f.pos_graduacao.map(p=>`<li style="font-size:.8rem;color:var(--txt2);margin-bottom:4px">${p}</li>`).join('')}</ul>`
+    : `<span style="font-family:var(--mono);font-size:.75rem;color:var(--txt3)">Sem pós-graduação registrada.</span>`;
+
+  const dadosFuncionais = `
+    <div class="fn-section-ttl">Cargo e Vínculo</div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Cargo / Função</span><span class="fn-field-val">${f.funcao}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Escolaridade</span><span class="fn-field-val">${f.escolaridade}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Curso Superior</span><span class="fn-field-val">${f.curso_superior || '—'}</span></div>
+    <div class="fn-section-ttl">Pós-Graduações</div>
+    <div class="fn-field-group" style="grid-column:1/-1">${posGrad}</div>
+    <div class="fn-section-ttl">Turmas Atribuídas (${f.turmas.length})</div>
+    <div class="fn-field-group" style="grid-column:1/-1">${turmasHTML}</div>`;
+
+  /* ABA: Contato */
+  const contato = `
+    <div class="fn-section-ttl">Contato</div>
+    <div class="fn-field-group"><span class="fn-field-lbl">E-mail</span><span class="fn-field-val">${f.email !== '—' ? `<a href="mailto:${f.email}" style="color:var(--cyan)">${f.email}</a>` : '—'}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Telefone</span><span class="fn-field-val">${formatTel(f.telefone)}</span></div>
+    <div class="fn-section-ttl">Endereço</div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Logradouro</span><span class="fn-field-val">${f.endereco}${f.numero !== '—' ? ', ' + f.numero : ''}${f.complemento !== '—' ? ' – ' + f.complemento : ''}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Bairro</span><span class="fn-field-val">${f.bairro}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Município</span><span class="fn-field-val">${f.municipio_end} / ${f.uf_end}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">CEP</span><span class="fn-field-val mono">${f.cep !== '—' ? f.cep.replace(/(\d{5})(\d{3})/,'$1-$2') : '—'}</span></div>`;
+
+  /* ABA: Documentos */
+  const docs = `
+    <div class="fn-section-ttl">Documentos</div>
+    <div class="fn-field-group"><span class="fn-field-lbl">CPF</span><span class="fn-field-val mono">${formatCPF(f.cpf)}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">RG</span><span class="fn-field-val mono">${f.rg} / ${f.rg_orgao}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Data Expedição RG</span><span class="fn-field-val">${f.rg_expedicao}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">NIS / PIS</span><span class="fn-field-val mono">${f.nis}</span></div>
+    <div class="fn-section-ttl">Origem dos Dados</div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Arquivo Básico</span><span class="fn-field-val">${f._source_basico ? badge('Encontrado','bg-lime') : badge('Não encontrado','bg-rose')}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Arquivo Completo</span><span class="fn-field-val">${f._source_completo ? badge('Encontrado','bg-lime') : badge('Não encontrado','bg-rose')}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Arquivo Matrículas (RH)</span><span class="fn-field-val">${f._source_matricula ? badge('Encontrado','bg-lime') : badge('Não encontrado','bg-rose')}</span></div>`;
+
+  /* ABA: Vínculo / RH */
+  const v = f.vinculo || {};
+  const vinculoStatus = v.matricula_encontrada
+    ? badge('Matrícula localizada','bg-lime')
+    : badge('Sem matrícula no RH','bg-rose');
+  const conflitoBadge = v.conflito_multiplas_fontes
+    ? badge('Conflito entre fontes','bg-amber')
+    : badge('Sem conflito','bg-lime');
+  const vinculoDetalhe = v.matricula_encontrada ? `
+    <div class="fn-field-group"><span class="fn-field-lbl">Nº Cadastro</span><span class="fn-field-val mono">${v.numcad}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Nº Empregador</span><span class="fn-field-val mono">${v.numemp}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Empregador</span><span class="fn-field-val">${v.nomemp}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Lotação</span><span class="fn-field-val">${v.nomloc}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Cargo (RH)</span><span class="fn-field-val">${v.titcar}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Data de Admissão</span><span class="fn-field-val">${v.datadm}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Situação</span><span class="fn-field-val">${v.dessit}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Forma de Ingresso</span><span class="fn-field-val">${v.forma_ingresso}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Origem do Vínculo</span><span class="fn-field-val">${v.origem_vinculo}</span></div>` : `
+    <div style="font-family:var(--mono);font-size:.75rem;color:var(--txt3);padding:8px 0">Nenhum registro de matrícula/RH encontrado para este CPF.</div>`;
+  /* "Qualidade do Match" só faz sentido quando existe de fato um candidato
+     de match vindo do processo de matching (score presente). Sem isso, os
+     campos abaixo eram sobras de outra pessoa (falso-positivo visual) —
+     ex.: score 100 e nome preenchidos mesmo com "Sem matrícula no RH". */
+  const temCandidatoMatch = v.match_score !== null && v.match_score !== undefined;
+  const vinculoQualidade = temCandidatoMatch ? `
+    <div class="fn-field-group"><span class="fn-field-lbl">Score do Match</span><span class="fn-field-val mono">${v.match_score}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Nome (API RH)</span><span class="fn-field-val">${v.match_nome_api}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Risco de Homônimo</span><span class="fn-field-val">${v.nome_curto_risco_homonimo ? badge('Sim','bg-amber') : badge('Não','bg-lime')}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Estagiário</span><span class="fn-field-val">${v.estagiario ? badge('Sim','bg-blue') : badge('Não','bg-muted')}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Terceirizado</span><span class="fn-field-val">${v.terceirizado ? badge('Sim','bg-blue') : badge('Não','bg-muted')}</span></div>` : `
+    <div style="font-family:var(--mono);font-size:.75rem;color:var(--txt3);padding:8px 0">Nenhuma tentativa de match contra a base do RH foi registrada para este CPF.</div>`;
+
+  const vinculoTab = `
+    <div class="fn-section-ttl">Situação do Vínculo</div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Status</span><span class="fn-field-val">${vinculoStatus}</span></div>
+    <div class="fn-field-group"><span class="fn-field-lbl">Conflito entre fontes</span><span class="fn-field-val">${conflitoBadge}</span></div>
+    <div class="fn-section-ttl">Dados Funcionais (RH)</div>
+    ${vinculoDetalhe}
+    <div class="fn-section-ttl">Qualidade do Match</div>
+    ${vinculoQualidade}`;
+
+  /* Tabs HTML */
+  return `
+    <div class="fn-tabs-bar">
+      <button class="fn-tab-btn active" data-target="${panId('pessoal')}">
+        <i class="fa-solid fa-user" style="font-size:.7rem;margin-right:4px"></i>Dados Pessoais
+      </button>
+      <button class="fn-tab-btn" data-target="${panId('funcional')}">
+        <i class="fa-solid fa-briefcase" style="font-size:.7rem;margin-right:4px"></i>Dados Funcionais
+      </button>
+      <button class="fn-tab-btn" data-target="${panId('vinculo')}">
+        <i class="fa-solid fa-building-user" style="font-size:.7rem;margin-right:4px"></i>Vínculo / RH
+      </button>
+      <button class="fn-tab-btn" data-target="${panId('contato')}">
+        <i class="fa-solid fa-address-card" style="font-size:.7rem;margin-right:4px"></i>Contato
+      </button>
+      <button class="fn-tab-btn" data-target="${panId('docs')}">
+        <i class="fa-solid fa-file-lines" style="font-size:.7rem;margin-right:4px"></i>Documentos
+      </button>
+    </div>
+    <div class="fn-tab-panel active" id="${panId('pessoal')}">${dadosPessoais}</div>
+    <div class="fn-tab-panel" id="${panId('funcional')}">${dadosFuncionais}</div>
+    <div class="fn-tab-panel" id="${panId('vinculo')}">${vinculoTab}</div>
+    <div class="fn-tab-panel" id="${panId('contato')}">${contato}</div>
+    <div class="fn-tab-panel" id="${panId('docs')}">${docs}</div>`;
+}
+
+function bindTabs(rowId) {
+  const inner = document.getElementById('det-inner-' + rowId);
+  if (!inner) return;
+  inner.querySelectorAll('.fn-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      inner.querySelectorAll('.fn-tab-btn').forEach(b => b.classList.remove('active'));
+      inner.querySelectorAll('.fn-tab-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      const pan = document.getElementById(btn.dataset.target);  // aqui usa dataset.target
+      if (pan) pan.classList.add('active');
+    });
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   RENDER: DOCENTES
+══════════════════════════════════════════════════════════════════════ */
+function renderDocentes() {
+  const el = document.getElementById('sec-func-docentes');
+  const lista = FUNC.docentes;
+  /* agrupa por disciplina */
+  const discMap = {};
+  for (const f of lista) {
+    for (const t of f.turmas) {
+      for (const d of (t.disciplinas||[])) {
+        if (!discMap[d]) discMap[d] = [];
+        if (!discMap[d].find(x=>x._cpf_norm===f._cpf_norm)) discMap[d].push(f);
+      }
+    }
+  }
+  const discEntries = Object.entries(discMap).sort((a,b)=>b[1].length-a[1].length);
+  const maxDisc = discEntries[0]?.[1]?.length || 1;
+
+  el.innerHTML = `
+    ${pageHeader('func-docentes','Docentes','chalkboard-user','blue',`${lista.length} professores cadastrados`)}
+    <div class="stat-grid">
+      ${statCard({label:'Total Docentes', val:lista.length, sub:'professores ativos', cls:'v-blue', icon:'chalkboard-user'})}
+      ${statCard({label:'Disciplinas',    val:discEntries.length, sub:'matérias distintas', cls:'v-cyan', icon:'book'})}
+      ${statCard({label:'Com Pós-Grad.', val:lista.filter(f=>f.pos_graduacao.some(p=>!p.includes('Não tem'))).length, sub:'têm especialização', cls:'v-violet', icon:'graduation-cap'})}
+      ${statCard({label:'Com Turmas',    val:lista.filter(f=>f.turmas.length>0).length, sub:'com aulas atribuídas', cls:'v-lime', icon:'users-rectangle'})}
+    </div>
+    <div class="charts-row">
+      <div class="chart-card">
+        <div class="chart-ttl">Docentes por Disciplina</div>
+        ${discEntries.slice(0,12).map(([d,fs])=>hbar(d,fs.length,maxDisc,'var(--blue)',`${fs.length}`)).join('')}
+      </div>
+      <div class="chart-card">
+        <div class="chart-ttl">Docentes</div>
+        ${lista.map(f=>`
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+            <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--violet));display:flex;align-items:center;justify-content:center;font-size:.6rem;font-weight:700;color:#fff;flex-shrink:0">
+              ${f.nome.split(' ').slice(0,2).map(w=>w[0]).join('')}
+            </div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:.8rem;font-weight:600;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${f.nome}</div>
+              <div style="font-family:var(--mono);font-size:.65rem;color:var(--txt3)">${f.turmas.length} turma(s)</div>
+            </div>
+            ${sexoBadge(f.sexo)}
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   RENDER: GESTÃO
+══════════════════════════════════════════════════════════════════════ */
+function renderGestao() {
+  const el = document.getElementById('sec-func-gestao');
+  const todos = FUNC.lista.filter(f => !['Docente'].includes(f.funcao));
+
+  const grupos = [
+    { label:'Direção',     icone:'building-user',   color:'var(--rose)',   lista:FUNC.gestores    },
+    { label:'Pedagogia',   icone:'graduation-cap',  color:'var(--violet)', lista:FUNC.pedagogos   },
+    { label:'Apoio',       icone:'handshake',        color:'var(--amber)',  lista:FUNC.auxiliares  },
+    { label:'Outros',      icone:'ellipsis',         color:'var(--txt3)',   lista:FUNC.outros      },
+  ];
+
+  el.innerHTML = `
+    ${pageHeader('func-gestao','Gestão e Apoio','building-user','violet',`${todos.length} funcionários não-docentes`)}
+    <div class="stat-grid">
+      ${grupos.map(g=>statCard({label:g.label, val:g.lista.length, sub:'funcionários', cls:'v-muted', icon:g.icone}))}
+    </div>
+    ${grupos.filter(g=>g.lista.length).map(g=>`
+      <div class="card">
+        <div class="card-header">
+          <i class="fa-solid fa-${g.icone}" style="color:${g.color};font-size:.9rem"></i>
+          <span class="card-title">${g.label}</span>
+          <span class="card-header-badge">${g.lista.length}</span>
+        </div>
+        <div class="card-body no-pad">
+          <div class="tbl-wrap" style="border:none;border-radius:0">
+            <table><thead><tr>
+              <th>Nome</th><th>CPF</th><th>E-mail</th><th>Telefone</th><th>Formação</th>
+            </tr></thead><tbody>
+              ${g.lista.map(f=>`<tr>
+                <td class="td-name">${f.nome}</td>
+                <td class="td-mono">${formatCPF(f.cpf)}</td>
+                <td class="td-mono" style="font-size:.75rem">${f.email}</td>
+                <td class="td-mono">${formatTel(f.telefone)}</td>
+                <td class="td-mono" style="font-size:.72rem;color:var(--txt3)">${f.escolaridade}</td>
+              </tr>`).join('')}
+            </tbody></table>
+          </div>
+        </div>
+      </div>`).join('')}`;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   RENDER: GRÁFICOS RH
+══════════════════════════════════════════════════════════════════════ */
+function renderGraficosRH() {
+  const el = document.getElementById('sec-func-graficos');
+  const lista = FUNC.lista;
+
+  /* contagens */
+  const porFuncao = {};
+  for (const f of lista) porFuncao[f.funcao] = (porFuncao[f.funcao]||0)+1;
+  const maxF = Math.max(...Object.values(porFuncao));
+
+  const porSexo = {F:0,M:0,outro:0};
+  for (const f of lista) {
+    if (f.sexo==='F') porSexo.F++;
+    else if (f.sexo==='M') porSexo.M++;
+    else porSexo.outro++;
+  }
+
+  const porEsc = {};
+  for (const f of lista) porEsc[f.escolaridade] = (porEsc[f.escolaridade]||0)+1;
+  const maxE = Math.max(...Object.values(porEsc));
+
+  const porMunEnd = {};
+  for (const f of lista) { const m=f.municipio_end; if(m&&m!=='—') porMunEnd[m]=(porMunEnd[m]||0)+1; }
+  const maxMun = Math.max(...Object.values(porMunEnd));
+
+  const comTurmas = lista.filter(f=>f.turmas.length>0).length;
+  const semTurmas = lista.length - comTurmas;
+  const comPos = lista.filter(f=>f.pos_graduacao.some(p=>!p.includes('Não tem'))).length;
+
+  el.innerHTML = `
+    ${pageHeader('func-graficos','Gráficos RH','chart-bar','amber',`Análises do quadro de funcionários`)}
+    <!-- mini summary -->
+    <div class="stat-grid">
+      ${statCard({label:'Feminino',     val:porSexo.F, sub:`${((porSexo.F/lista.length)*100).toFixed(0)}% do quadro`, cls:'v-violet', icon:'venus'})}
+      ${statCard({label:'Masculino',    val:porSexo.M, sub:`${((porSexo.M/lista.length)*100).toFixed(0)}% do quadro`, cls:'v-blue',   icon:'mars'})}
+      ${statCard({label:'Com Pós-Grad.',val:comPos,    sub:`${((comPos/lista.length)*100).toFixed(0)}% do quadro`,    cls:'v-cyan',   icon:'graduation-cap'})}
+      ${statCard({label:'Com Turmas',   val:comTurmas, sub:`${semTurmas} sem turmas atribuídas`,                      cls:'v-lime',   icon:'chalkboard'})}
+    </div>
+    <div class="charts-row">
+      <div class="chart-card">
+        <div class="chart-ttl">Funcionários por Cargo</div>
+        ${Object.entries(porFuncao).sort((a,b)=>b[1]-a[1]).map(([f,v])=>
+          hbarFunc(f||'—',v,maxF,'var(--cyan)',`${v}`)
+        ).join('')}
+      </div>
+      <div class="chart-card">
+        <div class="chart-ttl">Distribuição por Sexo</div>
+        ${hbarFunc('Feminino',  porSexo.F, lista.length, 'var(--violet)', `${porSexo.F} (${((porSexo.F/lista.length)*100).toFixed(0)}%)`)}
+        ${hbarFunc('Masculino', porSexo.M, lista.length, 'var(--blue)',   `${porSexo.M} (${((porSexo.M/lista.length)*100).toFixed(0)}%)`)}
+      </div>
+      <div class="chart-card">
+        <div class="chart-ttl">Nível de Escolaridade</div>
+        ${Object.entries(porEsc).filter(([k])=>k!=='—').sort((a,b)=>b[1]-a[1]).map(([e,v])=>
+          hbarFunc(e,v,maxE,'var(--amber)',`${v}`)
+        ).join('')}
+      </div>
+      <div class="chart-card">
+        <div class="chart-ttl">Município de Residência</div>
+        ${Object.entries(porMunEnd).sort((a,b)=>b[1]-a[1]).map(([m,v])=>
+          hbarFunc(m,v,maxMun,'var(--lime)',`${v}`)
+        ).join('')}
+      </div>
+    </div>`;
+}

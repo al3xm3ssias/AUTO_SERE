@@ -26,8 +26,17 @@ async function apiPost(path, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body || {}),
   });
-  if (!res.ok) throw new Error(`Erro ao enviar para ${path}`);
-  return res.json();
+  let dados = null;
+  try {
+    dados = await res.json();
+  } catch (e) {
+    // resposta sem corpo JSON (ex.: erro de rede/servidor fora do ar)
+  }
+  if (!res.ok) {
+    const mensagem = (dados && (dados.erro || dados.mensagem)) || `Erro ao enviar para ${path}`;
+    throw new Error(mensagem);
+  }
+  return dados;
 }
 
 /* ---------- Tema ---------- */
@@ -116,7 +125,11 @@ function irPara(view, opts = {}) {
 
   document.getElementById("topbar-title").textContent = TITULOS[view] || view;
 
-  if (view === "turmas" || view === "alunos" || view === "prematricula" || view === "funcionarios") {
+  if (view === "turmas") {
+    carregarTurmas();
+  } else if (view === "alunos") {
+    carregarAlunos();
+  } else if (view === "prematricula" || view === "funcionarios") {
     carregarTabelaGenerica(view);
   }
   if (view === "painel") {
@@ -263,6 +276,261 @@ async function carregarTabelaGenerica(entity) {
     totalLabel.textContent = "—";
     console.warn(`Tabela ${entity}: endpoint ainda não conectado`, e);
   }
+}
+
+/* ---------- Turmas (cards expansíveis por turma) ---------- */
+
+let _turmasCache = [];
+
+function badge(texto, cls) {
+  return `<span class="badge ${cls}">${texto}</span>`;
+}
+
+function renderCardsTurmas(turmas) {
+  const container = document.getElementById("turmas-lista");
+  if (!turmas.length) {
+    container.innerHTML = `<div class="card"><div class="card-body" style="text-align:center; color:var(--txt3); padding:24px;">Nenhuma turma encontrada. Rode a automação "Turmas" (menu Automações) para coletar os dados do SERE.</div></div>`;
+    return;
+  }
+
+  container.innerHTML = turmas.map((t) => {
+    const campos = t.alunos.length ? Object.keys(t.alunos[0]) : [];
+    const linhasAlunos = t.alunos.map((aluno) =>
+      `<tr>${campos.map((campo) => `<td class="td-mono">${aluno[campo] ?? "—"}</td>`).join("")}</tr>`
+    ).join("");
+
+    return `
+      <div class="turma-block">
+        <div class="turma-hdr" onclick="this.classList.toggle('open'); this.nextElementSibling.classList.toggle('open')">
+          <span class="turma-nm"><span data-icon="users" style="margin-right:6px"></span>${t.nome}</span>
+          <div class="turma-badges">
+            ${badge(t.matriculados + " matr.", "bg-cyan")}
+            ${t.transf ? badge(t.transf + " transf.", "bg-rose") : ""}
+            ${t.fem ? badge(t.fem + " F", "bg-violet") : ""}
+            ${t.masc ? badge(t.masc + " M", "bg-blue") : ""}
+          </div>
+          <span class="chev"><span data-icon="chevronDown"></span></span>
+        </div>
+        <div class="turma-body">
+          <div class="tbl-wrap" style="border:none; border-radius:0; max-height:380px; overflow-y:auto">
+            <table>
+              <thead><tr>${campos.map((c) => `<th>${c}</th>`).join("")}</tr></thead>
+              <tbody>${linhasAlunos}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>`;
+  }).join("");
+
+  aplicarIconesDOM(container);
+}
+
+async function carregarTurmas() {
+  const resumo = document.getElementById("turmas-resumo");
+  resumo.textContent = "Carregando…";
+
+  try {
+    const data = await apiGet("/turmas/lista");
+    _turmasCache = data.turmas || [];
+    resumo.textContent = `${data.total_turmas ?? _turmasCache.length} turmas · ${data.total_matriculados ?? 0} matriculados · ${data.total_transferidos ?? 0} transferidos`;
+    renderCardsTurmas(_turmasCache);
+  } catch (e) {
+    resumo.textContent = "—";
+    document.getElementById("turmas-lista").innerHTML =
+      `<div class="card"><div class="card-body" style="text-align:center; color:var(--txt3); padding:24px;">Endpoint /turmas/lista ainda não conectado.</div></div>`;
+    console.warn("Turmas: endpoint ainda não conectado", e);
+    return;
+  }
+
+  const busca = document.getElementById("turmas-busca");
+  busca.oninput = () => {
+    const termo = busca.value.trim().toLowerCase();
+    const filtradas = termo
+      ? _turmasCache.filter((t) => t.nome.toLowerCase().includes(termo))
+      : _turmasCache;
+    renderCardsTurmas(filtradas);
+  };
+}
+
+/* ---------- Alunos (tabela com detalhe expansível) ---------- */
+
+const alunosState = { search: "", sort: { col: "nome", dir: 1 }, filter: "todos" };
+let _alunosCache = [];
+let _alunosCampos = [];
+
+// Grupos de campos do cadastro completo (ver src.automacao.alunos.get_dados_aluno)
+// — nomes de campo exatamente como o SERE devolve.
+const AL_GROUPS = [
+  { label: "Identificação", keys: ["Nome", "CGM", "RG", "CPF", "NIS Estudante", "Nacionalidade"] },
+  { label: "Nascimento", keys: ["Data Nascimento", "Sexo", "Cor", "Estado Civil", "Município Nascimento", "UF Nascimento"] },
+  { label: "Endereço", keys: ["Endereço", "Número", "Complemento", "Bairro", "CEP", "Cidade", "UF"] },
+  { label: "Responsável", keys: ["Mãe", "Pai", "Responsável", "Parentesco", "CPF Responsável", "NIS Responsável", "Celular Aluno", "Celular Responsável", "Telefone Residencial", "Telefone Comercial", "Email Aluno", "Email Responsável"] },
+  { label: "Escola", keys: ["Bolsa Família"] },
+];
+const AL_SKIP_MAIN = new Set(["Email Google"]);
+
+function _getField(aluno, ...chaves) {
+  for (const k of chaves) {
+    const v = aluno[k];
+    if (v !== undefined && v !== null && String(v).trim()) return String(v).trim();
+  }
+  return "—";
+}
+function _getSituacao(aluno) { return _getField(aluno, "_situacao"); }
+function _getTurma(aluno) { return _getField(aluno, "_turma"); }
+
+function _situacaoBadge(situacao) {
+  const s = String(situacao || "").toLowerCase();
+  if (s.includes("matriculado")) return badge("Matriculado", "bg-lime");
+  if (s.includes("transf")) return badge("Transferido", "bg-rose");
+  return badge(situacao || "—", "bg-muted");
+}
+
+function _buildDetailHTML(aluno) {
+  const assigned = new Set();
+  const turma = aluno._turma;
+  const situacao = aluno._situacao;
+
+  const gruposHtml = AL_GROUPS.map((grupo) => {
+    const campos = _alunosCampos.filter((f) => grupo.keys.some((k) => f.toLowerCase() === k.toLowerCase()));
+    const itens = campos.filter((f) => {
+      const v = aluno[f];
+      return v !== undefined && v !== null && String(v).trim() && String(v).trim() !== "—";
+    });
+    itens.forEach((f) => assigned.add(f));
+
+    let extra = "";
+    if (grupo.label === "Escola") {
+      if (turma && turma !== "—") {
+        extra += `<div class="al-field-group"><span class="al-field-lbl">Turma <span style="color:var(--cyan); font-size:.6rem">· turmas.json</span></span><span class="al-field-val">${turma}</span></div>`;
+      }
+      if (situacao && situacao !== "—") {
+        const sitS = String(situacao).toLowerCase();
+        const cor = sitS.includes("matriculado") ? "var(--lime)" : sitS.includes("transf") ? "var(--rose)" : "var(--txt2)";
+        extra += `<div class="al-field-group"><span class="al-field-lbl">Situação <span style="color:var(--cyan); font-size:.6rem">· turmas.json</span></span><span class="al-field-val" style="color:${cor}; font-weight:700">${situacao}</span></div>`;
+      }
+    }
+    if (!itens.length && !extra) return "";
+    return `<div class="al-section-ttl">${grupo.label}</div>` +
+      itens.map((f) => `<div class="al-field-group"><span class="al-field-lbl">${f}</span><span class="al-field-val">${aluno[f]}</span></div>`).join("") + extra;
+  }).join("");
+
+  const resto = _alunosCampos.filter((f) =>
+    !assigned.has(f) && !AL_SKIP_MAIN.has(f) &&
+    aluno[f] !== undefined && aluno[f] !== null && String(aluno[f]).trim() && String(aluno[f]).trim() !== "—"
+  );
+  const restoHtml = resto.length
+    ? `<div class="al-section-ttl">Outros</div>` + resto.map((f) => `<div class="al-field-group"><span class="al-field-lbl">${f}</span><span class="al-field-val mono">${aluno[f]}</span></div>`).join("")
+    : "";
+
+  return gruposHtml + restoHtml;
+}
+
+function renderAlunosRows() {
+  const q = alunosState.search.toLowerCase();
+
+  let dados = _alunosCache.filter((a) => {
+    const sit = _getSituacao(a).toLowerCase();
+    if (alunosState.filter === "matriculado" && !sit.includes("matriculado")) return false;
+    if (alunosState.filter === "transferido" && !sit.includes("transf")) return false;
+    if (!q) return true;
+    return _alunosCampos.some((f) => String(a[f] || "").toLowerCase().includes(q)) ||
+      _getTurma(a).toLowerCase().includes(q);
+  });
+
+  const { col, dir } = alunosState.sort;
+  dados = dados.slice().sort((a, b) => {
+    let va, vb;
+    if (col === "nome") { va = _getField(a, "Nome"); vb = _getField(b, "Nome"); }
+    else if (col === "cgm") { va = _getField(a, "CGM"); vb = _getField(b, "CGM"); }
+    else if (col === "turma") { va = _getTurma(a); vb = _getTurma(b); }
+    else { va = _getSituacao(a); vb = _getSituacao(b); }
+    return va.localeCompare(vb) * dir;
+  });
+
+  const tbody = document.getElementById("alunos-tbody");
+  const vazio = document.getElementById("alunos-empty");
+  document.getElementById("alunos-cnt").textContent = `${dados.length} / ${_alunosCache.length}`;
+
+  if (!dados.length) {
+    tbody.innerHTML = "";
+    vazio.style.display = "";
+    return;
+  }
+  vazio.style.display = "none";
+
+  tbody.innerHTML = dados.map((a, idx) => {
+    const nome = _getField(a, "Nome");
+    const cgm = _getField(a, "CGM");
+    const turma = _getTurma(a);
+    const situacao = _getSituacao(a);
+    const rowId = `al-row-${idx}`;
+    return `<tr class="al-main-row" data-row="${rowId}">
+      <td style="width:36px; text-align:center; vertical-align:middle">
+        <button class="al-expand-btn" data-btn="${rowId}" title="Ver detalhes">+</button>
+      </td>
+      <td class="td-name">${nome}</td>
+      <td class="td-mono">${cgm}</td>
+      <td class="td-mono">${turma}</td>
+      <td>${_situacaoBadge(situacao)}</td>
+    </tr>
+    <tr class="al-detail-row" id="${rowId}">
+      <td colspan="5"><div class="al-detail-inner">${_buildDetailHTML(a)}</div></td>
+    </tr>`;
+  }).join("");
+
+  tbody.querySelectorAll(".al-expand-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const rowId = btn.dataset.btn;
+      const detailRow = document.getElementById(rowId);
+      const aberto = detailRow.classList.toggle("open");
+      btn.classList.toggle("open", aberto);
+      btn.title = aberto ? "Fechar detalhes" : "Ver detalhes";
+    });
+  });
+}
+
+async function carregarAlunos() {
+  const cnt = document.getElementById("alunos-cnt");
+  cnt.textContent = "Carregando…";
+
+  try {
+    const data = await apiGet("/alunos/lista");
+    _alunosCache = data.alunos || [];
+    _alunosCampos = data.campos || [];
+  } catch (e) {
+    cnt.textContent = "—";
+    document.getElementById("alunos-tbody").innerHTML =
+      `<tr><td colspan="5" style="text-align:center; color:var(--txt3); padding:24px;">Endpoint /alunos/lista ainda não conectado.</td></tr>`;
+    console.warn("Alunos: endpoint ainda não conectado", e);
+    return;
+  }
+
+  document.querySelectorAll("#sec-alunos [data-af]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#sec-alunos [data-af]").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      alunosState.filter = btn.dataset.af;
+      renderAlunosRows();
+    });
+  });
+
+  document.querySelectorAll("#sec-alunos thead th[data-sort]").forEach((th) => {
+    th.addEventListener("click", () => {
+      if (alunosState.sort.col === th.dataset.sort) alunosState.sort.dir *= -1;
+      else { alunosState.sort.col = th.dataset.sort; alunosState.sort.dir = 1; }
+      document.querySelectorAll("#sec-alunos thead th").forEach((h) => h.classList.remove("sort-asc", "sort-desc"));
+      th.classList.add(alunosState.sort.dir === 1 ? "sort-asc" : "sort-desc");
+      renderAlunosRows();
+    });
+  });
+
+  document.getElementById("alunos-q").addEventListener("input", (e) => {
+    alunosState.search = e.target.value;
+    renderAlunosRows();
+  });
+
+  renderAlunosRows();
 }
 
 /* ---------- Automações ---------- */
@@ -593,9 +861,9 @@ function initAutomacoes() {
 const DETALHE_CONFIG = {
   senha_sere: `
     <h4 style="margin-bottom:14px; font-size:.9rem;">Salvar senha do SERE</h4>
-    <div class="field"><label>Usuário</label><input type="text" placeholder="usuário do SERE"></div>
-    <div class="field"><label>Senha</label><input type="password" placeholder="••••••••"></div>
-    <button class="btn-primary">Salvar credenciais</button>`,
+    <div class="field"><label>Usuário</label><input type="text" id="cfg-sere-usuario" placeholder="usuário do SERE"></div>
+    <div class="field"><label>Senha</label><input type="password" id="cfg-sere-senha" placeholder="••••••••"></div>
+    <button class="btn-primary" id="cfg-sere-salvar">Salvar credenciais</button>`,
   senha_rco: `
     <h4 style="margin-bottom:14px; font-size:.9rem;">Salvar senha do RCO</h4>
     <div class="field"><label>Usuário</label><input type="text" placeholder="usuário do RCO"></div>
@@ -642,7 +910,35 @@ function initConfiguracoes() {
       document.getElementById("config-detalhe").innerHTML =
         DETALHE_CONFIG[row.dataset.config] || "<p>Configuração não encontrada.</p>";
       aplicarIconesDOM(document.getElementById("config-detalhe"));
+      if (row.dataset.config === "senha_sere") {
+        conectarFormSenhaSere();
+      }
     });
+  });
+}
+
+function conectarFormSenhaSere() {
+  const btn = document.getElementById("cfg-sere-salvar");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const login = document.getElementById("cfg-sere-usuario").value.trim();
+    const senha = document.getElementById("cfg-sere-senha").value;
+    if (!login || !senha) {
+      toast("Preencha usuário e senha do SERE");
+      return;
+    }
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Salvando...";
+    try {
+      const resposta = await apiPost("/wizard/credenciais_sere/executar", { login, senha });
+      toast(resposta.mensagem || "Credenciais salvas");
+    } catch (e) {
+      toast(e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
   });
 }
 
@@ -686,12 +982,29 @@ async function carregarWizard() {
 
   container.querySelectorAll("[data-wizard-run]").forEach((btn) => {
     btn.addEventListener("click", async () => {
+      const chave = btn.dataset.wizardRun;
+      let payload = {};
+
+      if (chave === "credenciais_sere") {
+        const login = window.prompt("Usuário (CPF) do SERE:");
+        if (!login) return;
+        const senha = window.prompt("Senha do SERE:");
+        if (!senha) return;
+        payload = { login, senha };
+      }
+
+      const original = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Executando...";
       try {
-        await apiPost(`/wizard/${btn.dataset.wizardRun}/executar`, {});
-        toast("Passo executado com sucesso");
+        const resposta = await apiPost(`/wizard/${chave}/executar`, payload);
+        toast(resposta.mensagem || "Passo executado com sucesso");
         carregarWizard();
       } catch (e) {
-        toast(`Endpoint /wizard/${btn.dataset.wizardRun}/executar ainda não conectado`);
+        toast(e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = original;
       }
     });
   });
