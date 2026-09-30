@@ -110,6 +110,7 @@ const TITULOS = {
   painel: "Painel principal",
   turmas: "Turmas",
   alunos: "Alunos",
+  documentos: "Análise de documentos",
   prematricula: "Pré matrícula",
   funcionarios: "Funcionários",
   automacoes: "Automações",
@@ -129,6 +130,8 @@ function irPara(view, opts = {}) {
     carregarTurmas();
   } else if (view === "alunos") {
     carregarAlunos();
+  } else if (view === "documentos") {
+    carregarDocumentos();
   } else if (view === "prematricula" || view === "funcionarios") {
     carregarTabelaGenerica(view);
   }
@@ -574,7 +577,7 @@ const CAMPOS_AUTOMACAO = {
     { tipo: "pasta", label: "Pasta raiz dos arquivos" },
   ],
   analisa_pasta: [
-    { tipo: "pasta", label: "Pasta a ser analisada" },
+    { tipo: "pasta", label: "Pasta a ser analisada", destino: "digitalizacao" },
   ],
   analisa_sere: [
     { tipo: "turma" },
@@ -634,7 +637,7 @@ const CAMPOS_AUTOMACAO = {
     { tipo: "pasta", label: "Pasta de saída dos termos" },
   ],
   mapear_pastas: [
-    { tipo: "pasta", label: "Pasta raiz dos alunos" },
+    { tipo: "pasta", label: "Pasta raiz dos alunos", destino: "digitalizacao" },
   ],
   mascara: [
     { tipo: "pasta", label: "Pasta com os dados a mascarar" },
@@ -705,7 +708,7 @@ function campoHTML(campo) {
     return `
       <div class="field">
         <label>${campo.label || "Pasta"}</label>
-        <div class="folder-picker" id="btn-escolher-pasta" data-titulo="${campo.label || "Selecione a pasta"}">
+        <div class="folder-picker" id="btn-escolher-pasta" data-titulo="${campo.label || "Selecione a pasta"}"${campo.destino ? ` data-destino="${campo.destino}"` : ""}>
           <span data-icon="folder"></span>
           Clique para escolher a pasta no explorador de arquivos
           <div class="path" id="pasta-selecionada">Nenhuma pasta selecionada</div>
@@ -772,6 +775,7 @@ async function abrirSeletorDePasta(btnPasta) {
   try {
     const data = await apiPost("/sistema/escolher-pasta", {
       titulo: btnPasta.dataset.titulo || "Selecione a pasta",
+      destino: btnPasta.dataset.destino || undefined,  // "digitalizacao" => grava em config_usuario.json
     });
 
     if (data.erro) {
@@ -1009,6 +1013,518 @@ async function carregarWizard() {
     });
   });
 }
+
+/* ============================================================
+   Análise de documentos — tela única com 3 abas internas
+   (portado de renderDocsPC / renderDocsSistema / renderCruzamento
+   do protótipo index.html). Cada aba é buscada sob demanda.
+   ============================================================ */
+
+const _DOC_ADDR_KW = [
+  "residencia", "residência", "endereço", "endereco",
+  "sanepar", "copel", "compesa", "conta de água", "conta de luz",
+  "comprovante de end", "comprovante de resid",
+];
+const _DOC_SLOTS_IGNORADOS = new Set([
+  "requerimento de matricula", "ficha de saude", "comprovante de trabalho",
+  "guia de transferencia", "historico escolar do ensino medio",
+  "historico escolar do ensino fundamental", "declaracao de matricula",
+  "transferencia escolar", "parecer descritivo",
+]);
+const _DOC_SINONIMOS = {
+  "requerimento de matricula": ["requerimento de matricula", "requerimento", "matricula"],
+  "comprovante de residencia": ["comprovante de residencia", "residencia", "copel", "sanepar", "talao", "comprovante de endereco", "endereco"],
+  "certidao de nascimento do aluno": ["certidao de nascimento", "certidao", "nascimento", "certidao de nascimento do aluno"],
+  "cpf responsavel": ["cpf responsavel", "cpf do responsavel", "documento do responsavel", "rg e cpf do responsavel", "documentos dos responsaveis", "cpf pai", "cpf mae", "documento responsavel", "responsavel", "documentos", "documento"],
+  "cpf do responsavel": ["cpf responsavel", "cpf do responsavel", "documento do responsavel", "rg e cpf do responsavel", "documentos dos responsaveis", "cpf pai", "cpf mae", "documento responsavel", "responsavel", "documentos", "documento"],
+  "carteira de vacinacao": ["carteira de vacinacao", "carteirinha de vacinacao", "cartao de vacinacao", "carteirinha", "carteira"],
+  "comprovante de vacinacao": ["carteira de vacinacao", "carteirinha de vacinacao", "cartao de vacinacao", "carteirinha", "carteira"],
+  "declaracao de vacina": ["declaracao de vacina", "vacinacao", "vacina", "carteira de vacinacao", "carteirinha de vacinacao", "cartao de vacinacao", "carteirinha", "carteira"],
+  "rg do aluno": ["rg do aluno", "rg aluno", "rg"],
+  "cpf do aluno": ["cpf do aluno", "cpf aluno"],
+};
+const _DOC_PALAVRAS_IGNORADAS = new Set(["do", "de", "da", "das", "dos", "em", "com", "para", "por", "aluno", "uma", "num"]);
+const _DOC_SINONIMO_MAP = new Map();
+for (const [slot, termos] of Object.entries(_DOC_SINONIMOS)) {
+  for (const t of termos) _DOC_SINONIMO_MAP.set(t, slot);
+  _DOC_SINONIMO_MAP.set(slot, slot);
+}
+
+const _docNorm = (s) => String(s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+const _docFileToText = (fn) =>
+  _docNorm(String(fn || "").replace(/^\d+[-_]/, "").replace(/[-_]/g, " ").replace(/\.\w{2,4}$/, "").trim());
+const _docIsAddr = (s) => _DOC_ADDR_KW.some((k) => String(s).toLowerCase().includes(k));
+
+function _docMatchSlot(rawText) {
+  const txt = _docNorm(rawText);
+  if (_DOC_SINONIMO_MAP.has(txt)) return _DOC_SINONIMO_MAP.get(txt);
+  for (const [termo, slot] of _DOC_SINONIMO_MAP) {
+    if (txt.includes(termo)) return slot;
+  }
+  const tokens = txt.split(/\s+/).filter((t) => t && !_DOC_PALAVRAS_IGNORADAS.has(t));
+  for (const [termo, slot] of _DOC_SINONIMO_MAP) {
+    const tTokens = termo.split(/\s+/).filter((t) => t && !_DOC_PALAVRAS_IGNORADAS.has(t));
+    if (tTokens.length > 0 && tTokens.every((t) => tokens.includes(t))) return slot;
+  }
+  return null;
+}
+const _docIsBasic = (rawText) => {
+  const s = _docMatchSlot(rawText);
+  return s !== null && !_DOC_SLOTS_IGNORADOS.has(s);
+};
+
+const _docEsc = (v) =>
+  String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function _docStat({ label, val, sub = "", cls = "v-cyan", ic = "" }) {
+  return `<div class="stat-card">
+    ${ic ? `<div class="stat-card-icon">${icon(ic)}</div>` : ""}
+    <div class="stat-lbl">${label}</div>
+    <div class="stat-val ${cls}">${val}</div>
+    <div class="stat-sub">${sub}</div>
+  </div>`;
+}
+
+function _docChips(docs, addrDocs = []) {
+  if (!docs.length) return `<span style="font-family:var(--mono);font-size:.7rem;color:var(--txt3)">—</span>`;
+  const as = new Set(addrDocs);
+  return `<div class="chips">${docs.map((d) =>
+    `<span class="chip${as.has(d) ? " addr" : ""}" title="${_docEsc(d)}">${_docEsc(d.replace(/_\d{8}_\d+/g, "").trim())}</span>`
+  ).join("")}</div>`;
+}
+
+function _docVazio(colspan, mensagem) {
+  return `<tr><td colspan="${colspan}" style="text-align:center;color:var(--txt3);padding:24px">${mensagem}</td></tr>`;
+}
+
+function _docSort(data, col, dir, getters, fallbackCol = "nome") {
+  const get = getters[col] || getters[fallbackCol];
+  return data.slice().sort((a, b) => {
+    const va = get(a), vb = get(b);
+    if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
+    return String(va).localeCompare(String(vb), "pt-BR") * dir;
+  });
+}
+
+function _docBindSort(theadId, estado, render) {
+  document.querySelectorAll(`#${theadId} th[data-sort]`).forEach((th) => {
+    th.style.cursor = "pointer";
+    th.addEventListener("click", () => {
+      const col = th.dataset.sort;
+      if (estado.sort.col === col) estado.sort.dir *= -1;
+      else { estado.sort.col = col; estado.sort.dir = 1; }
+      document.querySelectorAll(`#${theadId} th`).forEach((h) => h.classList.remove("sort-asc", "sort-desc"));
+      th.classList.add(estado.sort.dir === 1 ? "sort-asc" : "sort-desc");
+      render();
+    });
+  });
+}
+
+function _docBindPills(seletor, atributo, estado, chave, render) {
+  document.querySelectorAll(seletor).forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(seletor).forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      estado[chave] = btn.dataset[atributo];
+      render();
+    });
+  });
+}
+
+const _docsEstado = {
+  abaAtiva: "pc",
+  tabsLigadas: false,
+  carregado: { pc: false, pive: false, analise: false },
+  pc:      { dados: [], filter: "all", search: "", sort: { col: "nome", dir: 1 } },
+  pive:    { dados: [], tab: "todos", search: "", sort: { col: "nome", dir: 1 } },
+  analise: { dados: [], meta: {}, filter: "all", search: "", sort: { col: "nome", dir: 1 } },
+};
+
+const _DOC_ORIENTACAO = {
+  pc: 'Rode a automação "Analisa documentos da pasta" (menu Automações) para gerar os dados.',
+  pive: 'Rode a automação "Analisa documentos do SERE" (menu Automações) para gerar os dados.',
+  analise: 'Rode a automação "Cruzamento de docs" (menu Automações) — ela precisa dos dois relatórios anteriores.',
+};
+
+function carregarDocumentos() {
+  if (!_docsEstado.tabsLigadas) {
+    document.querySelectorAll("#doc-tabs [data-doctab]").forEach((btn) => {
+      btn.addEventListener("click", () => mostrarAbaDocumentos(btn.dataset.doctab));
+    });
+    _docsEstado.tabsLigadas = true;
+  }
+  mostrarAbaDocumentos(_docsEstado.abaAtiva);
+}
+
+async function mostrarAbaDocumentos(aba) {
+  _docsEstado.abaAtiva = aba;
+  document.querySelectorAll("#doc-tabs [data-doctab]").forEach((b) =>
+    b.classList.toggle("active", b.dataset.doctab === aba));
+  document.querySelectorAll("#sec-documentos .doc-panel").forEach((p) =>
+    p.classList.toggle("active", p.id === `doc-panel-${aba}`));
+
+  if (_docsEstado.carregado[aba]) return;  // cache: alternar abas não refaz a chamada
+
+  const rota = { pc: "/documentos/digitalizados", pive: "/documentos/pive", analise: "/documentos/analise" }[aba];
+  try {
+    const resp = await apiGet(rota);
+    if (!resp.gerado) {
+      _docMostrarNaoGerado(aba);
+      return;
+    }
+    if (aba === "pc") _docIniciarPC(resp);
+    else if (aba === "pive") _docIniciarPIVE(resp);
+    else _docIniciarAnalise(resp);
+    _docsEstado.carregado[aba] = true;
+  } catch (e) {
+    console.warn(`Documentos (${aba}): endpoint não respondeu`, e);
+    _docMostrarNaoGerado(aba, true);
+  }
+}
+
+function _docMostrarNaoGerado(aba, erro = false) {
+  const ids = { pc: ["dc-stats", "dc-tbody", 5], pive: ["dp-stats", "dp-tbody", 8], analise: ["da-stats", "da-tbody", 8] }[aba];
+  document.getElementById(ids[0]).innerHTML = "";
+  const msg = erro ? "Não foi possível carregar os dados desta aba." : `Ainda não há dados. ${_DOC_ORIENTACAO[aba]}`;
+  document.getElementById(ids[1]).innerHTML = _docVazio(ids[2], msg);
+}
+
+/* ---------- Aba 1 · Documentos Digitalizados ---------- */
+
+function _docIniciarPC(resp) {
+  const st = _docsEstado.pc;
+  st.dados = (resp.alunos || []).map((e) => {
+    const allDocs = e.documentos || [];
+    const addrDocs = allDocs.filter(_docIsAddr);
+    return {
+      cgm: e.cgm, nome: e.nome, turma: e.turma, allDocs, addrDocs,
+      hasAddr: addrDocs.length > 0,
+      hasDocs: allDocs.length > 0,
+      hasBasicDocs: allDocs.some((d) => _docIsBasic(_docFileToText(d))),
+    };
+  });
+  const total = st.dados.length;
+  const comDocs = st.dados.filter((e) => e.hasDocs).length;
+  const withAddr = st.dados.filter((e) => e.hasAddr).length;
+  const noAddr = st.dados.filter((e) => !e.hasAddr && e.hasDocs).length;
+  const noDocs = st.dados.filter((e) => !e.hasBasicDocs).length;
+
+  document.getElementById("doc-cnt-pc").textContent = total;
+  document.getElementById("dc-stats").innerHTML = [
+    _docStat({ label: "Total alunos", val: total, sub: "com pasta digitalizada", cls: "v-cyan", ic: "users" }),
+    _docStat({ label: "Com docs", val: comDocs, sub: "possuem algum documento", cls: "v-lime", ic: "folder" }),
+    _docStat({ label: "Com comp. endereço", val: withAddr, sub: `${((withAddr / Math.max(total, 1)) * 100).toFixed(0)}% do total`, cls: "v-lime", ic: "mapPin" }),
+    _docStat({ label: "Sem comp. endereço", val: noAddr, sub: "têm docs, mas sem endereço", cls: "v-amber", ic: "alertFile" }),
+    _docStat({ label: "Sem docs básicos", val: noDocs, sub: "nenhum doc de matrícula", cls: "v-rose", ic: "alertFile" }),
+  ].join("");
+
+  const rotulos = { "all": "Todos", "has-addr": `Com comp. endereço (${withAddr})`, "no-addr": `Sem comp. (${noAddr})`, "no-docs": `Sem docs básicos (${noDocs})` };
+  document.querySelectorAll("[data-dcf]").forEach((b) => { b.textContent = rotulos[b.dataset.dcf]; });
+
+  _docBindPills("[data-dcf]", "dcf", st, "filter", _docRenderPC);
+  _docBindSort("dc-thead", st, _docRenderPC);
+  document.getElementById("dc-q").addEventListener("input", (e) => { st.search = e.target.value; _docRenderPC(); });
+  _docRenderPC();
+}
+
+function _docRenderPC() {
+  const st = _docsEstado.pc;
+  const q = st.search.toLowerCase();
+  let data = st.dados;
+  if (st.filter === "has-addr") data = data.filter((e) => e.hasAddr);
+  if (st.filter === "no-addr") data = data.filter((e) => !e.hasAddr && e.hasDocs);
+  if (st.filter === "no-docs") data = data.filter((e) => !e.hasBasicDocs);
+  if (q) data = data.filter((e) => e.nome.toLowerCase().includes(q) || e.cgm.includes(q) || e.allDocs.some((d) => d.toLowerCase().includes(q)));
+
+  data = _docSort(data, st.sort.col, st.sort.dir, {
+    nome: (e) => e.nome || "",
+    turma: (e) => e.turma || "",
+    qtd: (e) => e.allDocs.length,
+    addr: (e) => (e.hasAddr ? 1 : 0),
+  });
+
+  document.getElementById("dc-cnt").textContent = `${data.length} de ${st.dados.length} alunos`;
+  const tbody = document.getElementById("dc-tbody");
+  const empty = document.getElementById("dc-empty");
+  if (!data.length) { tbody.innerHTML = ""; empty.style.display = ""; return; }
+  empty.style.display = "none";
+
+  tbody.innerHTML = data.map((e) => {
+    const ab = e.hasAddr ? badge(`${e.addrDocs.length} doc(s)`, "bg-lime")
+      : e.hasDocs ? badge("Não encontrado", "bg-rose") : badge("Sem docs", "bg-muted");
+    return `<tr>
+      <td class="td-name">${_docEsc(e.nome)}<small>CGM: ${_docEsc(e.cgm || "—")}</small></td>
+      <td class="td-mono">${_docEsc(e.turma)}</td>
+      <td class="td-num v-cyan">${e.allDocs.length}</td>
+      <td>${ab}</td>
+      <td>${_docChips(e.allDocs, e.addrDocs)}</td>
+    </tr>`;
+  }).join("");
+}
+
+/* ---------- Aba 2 · Documentos do PIVE ---------- */
+
+function _docIniciarPIVE(resp) {
+  const st = _docsEstado.pive;
+  st.dados = (resp.alunos || []).map((e) => {
+    const dets = e.detalhes || [];
+    const val = dets.filter((d) => d.validado).length;
+    return {
+      ...e,
+      val,
+      pend: dets.length - val,
+      total: e.total || dets.length,
+      tipos: [...new Set(dets.map((d) => d.tipo).filter(Boolean))],
+      isTransferido: String(e.situacao || "").toLowerCase().includes("transf"),
+      hasBasicDocs: dets.some((d) => _docIsBasic(d.tipo || "")),
+    };
+  });
+  const d = st.dados;
+  const totalDocs = d.reduce((s, e) => s + e.total, 0);
+  const validados = d.reduce((s, e) => s + e.val, 0);
+  const nTransf = d.filter((e) => e.isTransferido).length;
+  const nMatric = d.length - nTransf;
+  const comPend = d.filter((e) => e.pend > 0).length;
+  const semBasico = d.filter((e) => !e.hasBasicDocs).length;
+
+  document.getElementById("doc-cnt-pive").textContent = d.length;
+  document.getElementById("dp-stats").innerHTML = [
+    _docStat({ label: "Alunos com docs", val: d.length, sub: "no PIVE/SERE", cls: "v-cyan", ic: "users" }),
+    _docStat({ label: "Matriculados", val: nMatric, sub: "situação atual", cls: "v-lime", ic: "student" }),
+    _docStat({ label: "Transferidos", val: nTransf, sub: "situação atual", cls: "v-rose", ic: "transfer" }),
+    _docStat({ label: "Total arquivos", val: totalDocs, sub: "somando todos", cls: "v-blue", ic: "files" }),
+    _docStat({ label: "Validados", val: validados, sub: "marcados como válidos", cls: "v-lime", ic: "certificate" }),
+    _docStat({ label: "Não validados", val: totalDocs - validados, sub: "aguardando", cls: "v-amber", ic: "clock" }),
+    _docStat({ label: "Sem docs básicos", val: semBasico, sub: "nenhum doc de matrícula", cls: "v-rose", ic: "alertFile" }),
+  ].join("");
+
+  const contagens = { todos: d.length, matriculados: nMatric, transferidos: nTransf, pendentes: comPend };
+  const rotulos = { todos: "Todos", matriculados: "Matriculados", transferidos: "Transferidos", pendentes: "Com pendentes" };
+  document.querySelectorAll("[data-dptab]").forEach((b) => {
+    b.textContent = `${rotulos[b.dataset.dptab]} (${contagens[b.dataset.dptab]})`;
+  });
+
+  _docBindPills("[data-dptab]", "dptab", st, "tab", _docRenderPIVE);
+  _docBindSort("dp-thead", st, _docRenderPIVE);
+  document.getElementById("dp-q").addEventListener("input", (e) => { st.search = e.target.value; _docRenderPIVE(); });
+  _docRenderPIVE();
+}
+
+function _docRenderPIVE() {
+  const st = _docsEstado.pive;
+  const q = st.search.toLowerCase();
+  let data = st.dados;
+  if (st.tab === "matriculados") data = data.filter((e) => !e.isTransferido);
+  if (st.tab === "transferidos") data = data.filter((e) => e.isTransferido);
+  if (st.tab === "pendentes") data = data.filter((e) => e.pend > 0);
+  if (q) data = data.filter((e) => e.nome.toLowerCase().includes(q) || e.cgm.includes(q) || e.tipos.some((t) => t.toLowerCase().includes(q)));
+
+  data = _docSort(data, st.sort.col, st.sort.dir, {
+    nome: (e) => e.nome || "", cgm: (e) => e.cgm || "", turma: (e) => e.turma || "",
+    situacao: (e) => e.situacao || "", total: (e) => e.total, val: (e) => e.val, pend: (e) => e.pend,
+  });
+
+  document.getElementById("dp-cnt").textContent =
+    data.length < st.dados.length ? `${data.length} de ${st.dados.length} alunos` : `${st.dados.length} alunos`;
+  const tbody = document.getElementById("dp-tbody");
+  const empty = document.getElementById("dp-empty");
+  if (!data.length) { tbody.innerHTML = ""; empty.style.display = ""; return; }
+  empty.style.display = "none";
+
+  tbody.innerHTML = data.map((e) => {
+    const chips = (e.detalhes || []).length
+      ? e.detalhes.map((d) =>
+          `<span class="chip ${d.validado ? "chip-val" : "chip-pend"}" title="${_docEsc(d.arquivo || d.tipo)}">${_docEsc(d.tipo)}</span>`).join("")
+      : (e.tipos.map((t) => `<span class="chip">${_docEsc(t)}</span>`).join("") || "—");
+    return `<tr>
+      <td class="td-name">${_docEsc(e.nome)}</td>
+      <td class="td-mono">${_docEsc(e.cgm || "—")}</td>
+      <td class="td-mono">${_docEsc(e.turma)}</td>
+      <td>${_situacaoBadge(e.situacao)}</td>
+      <td class="td-num v-cyan">${e.total}</td>
+      <td>${e.val > 0 ? badge(e.val, "bg-lime") : "—"}</td>
+      <td>${e.pend > 0 ? badge(e.pend, "bg-amber") : "—"}</td>
+      <td><div class="chips">${chips}</div></td>
+    </tr>`;
+  }).join("");
+}
+
+/* ---------- Aba 3 · Análise (cruzamento PC × SERE) ---------- */
+
+const _DOC_STATUS_META = {
+  "Completo — todos PC anexados": { cls: "bg-lime", short: "Completo" },
+  "Parcial — parte anexada": { cls: "bg-amber", short: "Parcial" },
+  "Pendente — nenhum PC anexado": { cls: "bg-rose", short: "Pendente" },
+  "Sem pasta no PC": { cls: "bg-muted", short: "Sem PC" },
+  "Sem registro no SERE": { cls: "bg-muted", short: "Sem SERE" },
+  "Sem docs básicos no PC": { cls: "bg-violet", short: "Sem básicos" },
+};
+const _DOC_FILTRO_STATUS = {
+  completo: "Completo — todos PC anexados",
+  parcial: "Parcial — parte anexada",
+  pendente: "Pendente — nenhum PC anexado",
+  sem_pasta: "Sem pasta no PC",
+  sem_sere: "Sem registro no SERE",
+  sem_basic: "Sem docs básicos no PC",
+};
+const _DOC_BASIC_SLOTS = [
+  "certidao de nascimento do aluno", "comprovante de residencia",
+  "comprovante de vacinacao", "cpf do aluno", "cpf responsavel",
+];
+const _DOC_LABELS = {
+  "certidao de nascimento do aluno": "Certidão de Nascimento do Aluno",
+  "comprovante de residencia": "Comprovante de Residência",
+  "comprovante de vacinacao": "Comprovante de Vacinação",
+  "cpf do aluno": "CPF do Aluno",
+  "cpf responsavel": "CPF Responsável",
+  "rg do aluno": "RG do Aluno",
+  "cpf do responsavel": "CPF do Responsável",
+  "rg": "RG do Aluno",
+};
+const _docLabel = (tipo) => _DOC_LABELS[tipo] || tipo.replace(/\b\w/g, (c) => c.toUpperCase());
+
+function _docIniciarAnalise(resp) {
+  const st = _docsEstado.analise;
+  st.dados = resp.alunos || [];
+  st.meta = { total: resp.total, atualizado: resp.atualizado_em || "—", resumo: resp.resumo || {} };
+  const r = st.meta.resumo;
+
+  document.getElementById("doc-cnt-analise").textContent = st.meta.total;
+  document.getElementById("da-stats").innerHTML = [
+    _docStat({ label: "Total analisados", val: st.meta.total, sub: `atualizado ${_docEsc(st.meta.atualizado)}`, cls: "v-cyan", ic: "fileSearch" }),
+    _docStat({ label: "✓ Completo", val: r.completo || 0, sub: "todos PC → SERE OK", cls: "v-lime", ic: "certificate" }),
+    _docStat({ label: "~ Parcial", val: r.parcial || 0, sub: "faltam alguns no SERE", cls: "v-amber", ic: "alertFile" }),
+    _docStat({ label: "✗ Pendente", val: r.pendente || 0, sub: "nenhum PC foi anexado", cls: "v-rose", ic: "alertFile" }),
+    _docStat({ label: "Sem pasta PC", val: r.sem_pasta_pc || 0, sub: "só no SERE", cls: "v-muted", ic: "folder" }),
+    _docStat({ label: "Sem docs básicos", val: r.sem_docs_basicos || 0, sub: "pasta vazia / sem docs", cls: "v-violet", ic: "files" }),
+  ].join("");
+
+  const rotulos = {
+    all: `Todos (${st.meta.total})`, completo: `Completo (${r.completo || 0})`, parcial: `Parcial (${r.parcial || 0})`,
+    pendente: `Pendente (${r.pendente || 0})`, sem_basic: `Sem básicos (${r.sem_docs_basicos || 0})`,
+  };
+  document.querySelectorAll("[data-daf]").forEach((b) => { b.textContent = rotulos[b.dataset.daf]; });
+
+  _docBarrasPorTipo(st.dados);
+  _docBindPills("[data-daf]", "daf", st, "filter", _docRenderAnalise);
+  _docBindSort("da-thead", st, _docRenderAnalise);
+  document.getElementById("da-q").addEventListener("input", (e) => { st.search = e.target.value; _docRenderAnalise(); });
+  _docRenderAnalise();
+}
+
+/* Barras de progresso por tipo: quantos dos documentos que existem no PC
+   já foram anexados no SERE (Resumo.slots_anexados / Resumo.slots_pc).
+   Observação: o index.html dividia slots_sere por slots_pc, o que passa
+   de 100% quando o SERE tem documento que não existe no PC, e usava as
+   chaves 'rg' e 'Certidao de nascimento', que não existem no JSON (essas
+   duas barras ficavam zeradas). Aqui usamos as chaves reais do JSON. */
+function _docBarrasPorTipo(alunos) {
+  const slotPC = {}, slotAnexado = {};
+  for (const a of alunos) {
+    const r = a.Resumo || {};
+    for (const s of r.slots_pc || []) slotPC[s] = (slotPC[s] || 0) + 1;
+    for (const s of r.slots_anexados || []) slotAnexado[s] = (slotAnexado[s] || 0) + 1;
+  }
+  const tipos = [..._DOC_BASIC_SLOTS, "rg do aluno"];
+  document.getElementById("da-slot-bars").innerHTML = tipos.map((slot) => {
+    const pc = slotPC[slot] || 0, anex = slotAnexado[slot] || 0;
+    const pct = pc > 0 ? Math.round((anex / pc) * 100) : 0;
+    const cor = pct >= 80 ? "var(--lime)" : pct >= 40 ? "var(--amber)" : "var(--rose)";
+    return `<div class="progress-bar-row">
+      <span class="progress-lbl">${_docLabel(slot)}</span>
+      <div class="progress-track"><div class="progress-fill" style="width:${pct}%;background:${cor}"></div></div>
+      <span class="progress-val">${anex} / ${pc} no PC <span style="color:${cor}">(${pct}%)</span></span>
+    </div>`;
+  }).join("");
+}
+
+function _docCartaoTipo(tipo, info) {
+  if (!info) {
+    return `<div class="cruz-doc-card" style="background:rgba(255,94,122,.05);border-color:rgba(255,94,122,.2)">
+      <div class="cruz-doc-lbl">${_docLabel(tipo)}</div>
+      <div class="cruz-doc-status"><div class="dot dot-miss"></div><span style="font-family:var(--mono);font-size:.68rem;color:var(--rose)">Não encontrado</span></div>
+    </div>`;
+  }
+  const { no_pc: noPC, anexado } = info;
+  const dot = anexado ? "dot-ok" : noPC ? "dot-pend" : "dot-miss";
+  const txt = anexado ? "PC ✓  SERE ✓" : noPC ? "No PC, falta no SERE" : "Só no SERE";
+  const bg = anexado ? "rgba(134,239,172,.05)" : noPC ? "rgba(255,179,64,.05)" : "rgba(77,159,255,.05)";
+  const cor = anexado ? "var(--lime)" : noPC ? "var(--amber)" : "var(--blue)";
+  const fn = (icone, d) => `<div class="cruz-doc-fname" title="${_docEsc(d)}">${icone} ${_docEsc(d)}</div>`;
+  return `<div class="cruz-doc-card" style="background:${bg}">
+    <div class="cruz-doc-lbl">${_docLabel(tipo)}</div>
+    <div class="cruz-doc-status"><div class="dot ${dot}"></div><span style="font-family:var(--mono);font-size:.68rem;color:${cor}">${txt}</span></div>
+    ${(info.docs_pc || []).map((d) => fn("📁", d)).join("")}${(info.docs_sere || []).map((d) => fn("🖥", d)).join("")}
+  </div>`;
+}
+
+function _docRenderAnalise() {
+  const st = _docsEstado.analise;
+  const q = st.search.toLowerCase();
+  let data = st.dados;
+  if (st.filter !== "all") {
+    const alvo = _DOC_FILTRO_STATUS[st.filter];
+    if (alvo) data = data.filter((a) => a.Status === alvo);
+  }
+  if (q) data = data.filter((a) => (a.Nome || "").toLowerCase().includes(q) || String(a.CGM || "").includes(q) || (a.Turma || "").toLowerCase().includes(q));
+
+  data = _docSort(data, st.sort.col, st.sort.dir, {
+    nome: (a) => a.Nome || "", turma: (a) => a.Turma || "", status: (a) => a.Status || "",
+    docs_pc: (a) => a.Resumo?.docs_pc_total || 0,
+    docs_sere: (a) => a.Resumo?.docs_sere_total || 0,
+    falta: (a) => a.Resumo?.slots_pc_nao_anexado?.length || 0,
+  });
+
+  document.getElementById("da-cnt").textContent = `${data.length} de ${st.dados.length} alunos`;
+  const tbody = document.getElementById("da-tbody");
+  const empty = document.getElementById("da-empty");
+  if (!data.length) { tbody.innerHTML = ""; empty.style.display = ""; return; }
+  empty.style.display = "none";
+
+  const traco = `<span style="font-family:var(--mono);font-size:.68rem;color:var(--txt3)">—</span>`;
+  const rows = [];
+  for (const a of data) {
+    const r = a.Resumo || {};
+    const meta = _DOC_STATUS_META[a.Status] || { cls: "bg-muted", short: a.Status };
+    const rowId = `cruz-det-${a.CGM}`;
+
+    const conhecidos = new Set([...(r.slots_anexados || []), ...(r.slots_pc_nao_anexado || []), ...(r.slots_sere_sem_pc || [])]);
+    const ausentes = _DOC_BASIC_SLOTS.filter((s) => !conhecidos.has(s));
+    const chip = (cls, s, dica, pref = "") => `<span class="slot-chip ${cls}" title="${s} — ${dica}">${pref}${_docLabel(s)}</span>`;
+
+    const pend = (r.slots_pc_nao_anexado || []).map((s) => chip("slot-pend", s, "no PC mas não no SERE")).join("");
+    const anex = (r.slots_anexados || []).map((s) => chip("slot-ok", s, "PC ✓ SERE ✓")).join("");
+    const soSere = (r.slots_sere_sem_pc || []).map((s) => chip("slot-sere", s, "no SERE mas não no PC")).join("");
+    const aus = ausentes.map((s) => chip("slot-absent", s, "não encontrado no PC nem no SERE", "✕ ")).join("");
+
+    rows.push(`<tr>
+      <td class="td-name">${_docEsc(a.Nome)}<small>CGM: ${_docEsc(a.CGM)} · ${_docEsc(a.Turma || "—")}</small></td>
+      <td class="td-mono">${_docEsc(a.Turma || "—")}</td>
+      <td>${badge(_docEsc(meta.short), meta.cls)}</td>
+      <td class="td-num v-blue">${r.docs_pc_total || 0}</td>
+      <td class="td-num v-cyan">${r.docs_sere_total || 0}</td>
+      <td><div class="slot-grid">${pend || traco}</div></td>
+      <td><div class="slot-grid">${anex}${soSere}${aus}</div></td>
+      <td><button class="cruz-expand-btn" onclick="toggleCruzDetail('${rowId}', this)">▾ ver</button></td>
+    </tr>`);
+
+    const docs = a.Documentos || {};
+    const cartoes = a.Status === "Parcial — parte anexada"
+      ? _DOC_BASIC_SLOTS.map((t) => _docCartaoTipo(t, docs[t])).join("")
+      : Object.entries(docs).map(([t, info]) => _docCartaoTipo(t, info)).join("");
+    rows.push(`<tr class="cruz-detail-row" id="${rowId}">
+      <td colspan="8"><div class="cruz-detail-inner">${cartoes || `<span style="font-family:var(--mono);font-size:.68rem;color:var(--txt3)">Sem documentos mapeados.</span>`}</div></td>
+    </tr>`);
+  }
+  tbody.innerHTML = rows.join("");
+}
+
+window.toggleCruzDetail = function (id, btn) {
+  const row = document.getElementById(id);
+  if (!row) return;
+  row.classList.toggle("open");
+  btn.textContent = row.classList.contains("open") ? "▴ fechar" : "▾ ver";
+};
 
 /* ---------- Init ---------- */
 

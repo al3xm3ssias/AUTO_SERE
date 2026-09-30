@@ -3,21 +3,19 @@ gerar_pastas.py — Gerador da estrutura de pastas de digitalização
 =============================================================================
 Portado de AUTO_SERE/gerar_pastas.py para src/automacao/gerar_pastas.py.
 
-Cria, dentro da pasta de digitalização (a pasta que o usuário escolhe no
-setup inicial — ver src.comum.configuracao.pasta_digitalizacao), uma
-subpasta por turma e, dentro dela, uma subpasta por aluno ativo
-("<N> - <NOME>"), a partir do turmas.json já coletado (ver
+Cria, dentro de dados/<ANO>/DIGITALIZAÇÃO (ver pasta_digitalizacao_ano()),
+uma subpasta por turma e, dentro dela, uma subpasta por aluno ativo
+("<N> - <NOME>", com N e nome vindos do turmas.json já coletado — ver
 src.automacao.turmas). Também identifica e move para uma subpasta
 TRANSFERIDOS as pastas de alunos que:
   1. não constam mais no turmas.json, ou
   2. constam no turmas.json com situação "Transferido".
 
-Este script NÃO escolhe a pasta de digitalização em si — essa escolha é
-feita pelo usuário no setup inicial (credenciais → carregar turmas →
-ESCOLHER PASTA DE DIGITALIZAÇÃO → uso de rotina) e persistida via
-src.comum.configuracao.definir_pasta_digitalizacao(). Este script só cria
-a estrutura de subpastas DENTRO da pasta já escolhida — confirmado com o
-usuário em 01/09/2026.
+A raiz é fixa e derivada do ano atual (src.comum.paths.dados_ano_atual()),
+então o script NÃO pergunta onde criar as pastas: a estrutura é sempre
+dados/<ANO>/DIGITALIZAÇÃO/<TURMA>/<N> - <NOME>, criada (com as pastas-pai)
+se ainda não existir. Decisão do usuário em 29/09/2026, substituindo a
+escolha da pasta no setup inicial (01/09/2026).
 
 MUDANÇAS EM RELAÇÃO AO ORIGINAL:
 
@@ -26,14 +24,11 @@ MUDANÇAS EM RELAÇÃO AO ORIGINAL:
    mesma fonte usada por todos os outros scripts (sere_2026.py,
    analisa_arquivos_sere.py, etc.).
 
-2. DIGITALIZACAO_DIR: antes fixo em BASE/"2026/DIGITALIZAÇÃO". Agora vem de
-   src.comum.configuracao.pasta_digitalizacao() — a pasta escolhida pelo
-   usuário. Como essa pasta pode não estar configurada ainda no momento em
-   que o módulo é importado, DIGITALIZACAO_DIR não é mais uma constante de
-   nível de módulo: é resolvida dentro de main() (e pode ser passada
-   explicitamente via base_dir nas funções que já aceitavam esse parâmetro
-   no original — criar_pastas, verificar_transferidos — preservado para
-   uso em testes, exatamente como no script original).
+2. DIGITALIZACAO_DIR: antes fixo em BASE/"2026/DIGITALIZAÇÃO". Agora
+   é pasta_digitalizacao_ano() = dados_ano_atual() / "DIGITALIZAÇÃO",
+   resolvida em tempo de execução (o ano vem de paths.py). Continua
+   possível passar base_dir explicitamente em criar_pastas e
+   verificar_transferidos (usado nos testes, como no original).
 
 3. Suíte de testes (_Testes, unittest.TestCase, rodar_testes(), a flag
    --teste): portada para tests/test_gerar_pastas.py, convertida para
@@ -56,14 +51,21 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Optional
 
 from src.comum import paths as _paths
-from src.comum.configuracao import pasta_digitalizacao
 
 ARQ_TURMAS = _paths.dados_ano_atual() / "turmas.json"
+
+NOME_PASTA_DIGITALIZACAO = "DIGITALIZAÇÃO"
+
+
+def pasta_digitalizacao_ano() -> Path:
+    """Raiz das pastas de alunos: dados/<ANO>/DIGITALIZAÇÃO."""
+    return _paths.dados_ano_atual() / NOME_PASTA_DIGITALIZACAO
 
 
 # ─────────────────────────────────────────────
@@ -109,9 +111,17 @@ def extrair_alunos(lista_alunos: list) -> list[tuple[int, str]]:
     return sorted(alunos, key=lambda x: x[0])
 
 
+_CARACTERES_INVALIDOS = re.compile(r'[\\/:*?"<>|]')
+
+
 def nome_pasta(n: int, nome: str) -> str:
-    """Formata o nome da pasta: '1 - FULANO DE TAL'"""
-    return f"{n} - {nome}"
+    """
+    Formata o nome da pasta: '1 - FULANO DE TAL'.
+    Caracteres inválidos em nomes de pasta (\\ / : * ? " < > |) viram '-',
+    para nunca gerar subpastas indevidas nem falhar no Windows.
+    """
+    nome_seguro = _CARACTERES_INVALIDOS.sub("-", nome).strip().rstrip(".")
+    return f"{n} - {nome_seguro}"
 
 
 def separar_alunos(lista_alunos: list) -> tuple[set[str], set[str]]:
@@ -156,13 +166,11 @@ def nomes_pastas_validos(lista_alunos: list) -> set[str]:
 
 def criar_pastas(turmas: dict, base_dir: Optional[Path] = None) -> int:
     """
-    Cria estrutura <pasta_de_digitalização> / <TURMA> / <N - NOME> para
+    Cria estrutura <dados/ANO/DIGITALIZAÇÃO> / <TURMA> / <N - NOME> para
     cada turma. Se `base_dir` não for informado, usa
-    src.comum.configuracao.pasta_digitalizacao() (a pasta configurada pelo
-    usuário) — ver main() para a checagem de que ela existe antes de
-    chamar esta função sem base_dir.
+    pasta_digitalizacao_ano(). A raiz (e as pastas-pai) é criada se não existir.
     """
-    alvo = base_dir or pasta_digitalizacao()
+    alvo = base_dir or pasta_digitalizacao_ano()
     os.makedirs(alvo, exist_ok=True)
 
     print(f"\n📁 Criando estrutura de pastas em:")
@@ -192,10 +200,9 @@ def verificar_transferidos(turmas: dict, base_dir: Optional[Path] = None) -> Non
     Move para TRANSFERIDOS as pastas que:
       1. Não constam no JSON, OU
       2. Constam no JSON com situação 'Transferido'
-    Se `base_dir` não for informado, usa
-    src.comum.configuracao.pasta_digitalizacao().
+    Se `base_dir` não for informado, usa pasta_digitalizacao_ano().
     """
-    alvo = base_dir or pasta_digitalizacao()
+    alvo = base_dir or pasta_digitalizacao_ano()
 
     print("\n🔍 Verificando pastas para mover para TRANSFERIDOS...")
 
@@ -257,12 +264,7 @@ def main() -> None:
     print("📂 GERADOR DE PASTAS - DIGITALIZAÇÃO")
     print("=" * 50)
 
-    dir_digitalizacao = pasta_digitalizacao()
-    if dir_digitalizacao is None:
-        print("\n⚠️  A pasta de digitalização ainda não foi configurada.")
-        print("    Rode o setup inicial (escolha da pasta de documentos digitalizados)")
-        print("    antes de gerar a estrutura de pastas.")
-        return
+    dir_digitalizacao = pasta_digitalizacao_ano()
 
     turmas = carregar_json(ARQ_TURMAS)
 
@@ -271,6 +273,7 @@ def main() -> None:
         return
 
     print(f"   ✓ {len(turmas)} turma(s) encontrada(s)")
+    print(f"   📁 Destino: {dir_digitalizacao}")
 
     exibir_resumo(turmas)
     criar_pastas(turmas, base_dir=dir_digitalizacao)

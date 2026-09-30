@@ -645,6 +645,18 @@ SINONIMOS: dict[str, list[str]] = {
         "VACINACAO",
         "VACINAÇÃO",
         "VACINA",
+        # Sinônimos abaixo: mesclados do dicionário SINONIMOS local de
+        # sere_2026.py (divergência real detectada e aprovada pelo usuário
+        # em 29/08/2026) — lá "Declaração de vacina" também casava com
+        # nomes de arquivo de cartão/carteirinha de vacinação.
+        "CARTEIRA DE VACINACAO",
+        "CARTEIRINHA DE VACINACAO",
+        "CARTAO DE VACINACAO",
+        "CARTEIRA DE VACINAÇÃO",
+        "CARTEIRINHA DE VACINAÇÃO",
+        "CARTÃO DE VACINAÇÃO",
+        "CARTEIRINHA",
+        "CARTEIRA",
     ],
     "Ficha de Saúde": [
         "FICHA DE SAUDE",

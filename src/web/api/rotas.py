@@ -262,6 +262,130 @@ def alunos_lista():
     })
 
 
+# ============================================================
+# ANÁLISE DE DOCUMENTOS (tela única com 3 abas internas)
+# ============================================================
+# Aba 1 "Documentos Digitalizados" -> documentos-alunos-pc.json
+#       (src.relatorios.analisa_documentos_pc)
+# Aba 2 "Documentos do PIVE"       -> documentos-alunos.json
+#       (src.automacao.executar_analisa / analisa_sere)
+# Aba 3 "Análise"                  -> cruzamento-documentos.json
+#       (src.relatorios.cruzar_documentos)
+# Cada aba é carregada sob demanda (os JSONs passam de 300 KB cada).
+# Arquivo inexistente => resposta vazia + "gerado": false, para o front
+# orientar qual automação rodar (nunca dado inventado).
+
+def _turma_situacao_por_cgm() -> dict[str, dict]:
+    """CGM -> {turma, situacao, nome} a partir de turmas.json.
+    Mesma lógica de DATA.turmas_cgm_map do index.html: os JSONs de
+    documentos vêm com Turma vazia, então turmas.json é a fonte da turma."""
+    mapa: dict[str, dict] = {}
+    for nome_turma, lista in _carregar_json("turmas.json", {}).items():
+        for aluno in lista:
+            cgm = str(aluno.get("CGM", aluno.get("cgm", ""))).strip()
+            if not cgm:
+                continue
+            mapa[cgm] = {
+                "turma": nome_turma,
+                "situacao": aluno.get("Situação", aluno.get("Situacao", "—")),
+                "nome": aluno.get("Nome", aluno.get("nome", "")),
+            }
+    return mapa
+
+
+def _nome_documento(doc) -> str:
+    """Documentos do PC podem vir como string ou como objeto
+    {nome, nome_arquivo, extensao, nome_completo, data} — normaliza para
+    texto (mesmo docName() do index.html)."""
+    if isinstance(doc, dict):
+        return str(doc.get("nome") or doc.get("nome_arquivo") or doc.get("nome_completo") or "")
+    return str(doc or "")
+
+
+@api_bp.route("/documentos/digitalizados")
+def documentos_digitalizados():
+    """Aba 1 — documentos digitalizados (pastas no PC), um registro por aluno."""
+    bruto = _carregar_json("documentos-alunos-pc.json", [])
+    por_cgm = _turma_situacao_por_cgm()
+
+    alunos = []
+    for e in bruto if isinstance(bruto, list) else []:
+        cgm = str(e.get("CGM", e.get("cgm", ""))).strip()
+        turma = e.get("Turma") or e.get("turma") or (por_cgm.get(cgm) or {}).get("turma") or "—"
+        docs = [_nome_documento(d) for d in (e.get("Documentos") or e.get("documentos") or [])]
+        alunos.append({
+            "cgm": cgm,
+            "nome": e.get("Nome") or e.get("nome") or "—",
+            "turma": turma,
+            "documentos": [d for d in docs if d],
+        })
+
+    return jsonify({
+        "gerado": (_dados_dir() / "documentos-alunos-pc.json").exists(),
+        "atualizado_em": _mtime_formatado("documentos-alunos-pc.json"),
+        "alunos": alunos,
+        "total": len(alunos),
+    })
+
+
+@api_bp.route("/documentos/pive")
+def documentos_pive():
+    """Aba 2 — documentos anexados no SERE/PIVE, com Detalhes (tipo, arquivo,
+    data, validado). Turma e situação resolvidas por turmas.json."""
+    bruto = _carregar_json("documentos-alunos.json", [])
+    por_cgm = _turma_situacao_por_cgm()
+
+    alunos = []
+    for e in bruto if isinstance(bruto, list) else []:
+        cgm = str(e.get("CGM", e.get("cgm", ""))).strip()
+        if not cgm:
+            continue
+        info = por_cgm.get(cgm) or {}
+        detalhes = e.get("Detalhes") or []
+        alunos.append({
+            "cgm": cgm,
+            "nome": e.get("Nome") or e.get("nome") or info.get("nome") or "Sem nome",
+            "turma": e.get("Turma") or info.get("turma") or "—",
+            "situacao": e.get("Situacao") or e.get("Situação") or info.get("situacao") or "—",
+            "total": e.get("Total") or len(detalhes),
+            "detalhes": detalhes,
+        })
+
+    return jsonify({
+        "gerado": (_dados_dir() / "documentos-alunos.json").exists(),
+        "atualizado_em": _mtime_formatado("documentos-alunos.json"),
+        "alunos": alunos,
+        "total": len(alunos),
+    })
+
+
+@api_bp.route("/documentos/analise")
+def documentos_analise():
+    """Aba 3 — cruzamento PC x SERE (cruzamento-documentos.json), repassado
+    como gerado por src.relatorios.cruzar_documentos (Total_Alunos, Data_Hora,
+    Resumo_Geral, Alunos[])."""
+    caminho = _dados_dir() / "cruzamento-documentos.json"
+    cruz = _carregar_json("cruzamento-documentos.json", {})
+    if not isinstance(cruz, dict):
+        cruz = {}
+
+    por_cgm = _turma_situacao_por_cgm()
+    alunos = []
+    for a in cruz.get("Alunos") or []:
+        if not a.get("Turma"):
+            a = dict(a)
+            a["Turma"] = (por_cgm.get(str(a.get("CGM", "")).strip()) or {}).get("turma", "")
+        alunos.append(a)
+
+    return jsonify({
+        "gerado": caminho.exists(),
+        "atualizado_em": cruz.get("Data_Hora") or _mtime_formatado("cruzamento-documentos.json"),
+        "total": cruz.get("Total_Alunos", len(alunos)),
+        "resumo": cruz.get("Resumo_Geral") or {},
+        "alunos": alunos,
+    })
+
+
 def _fila_prematricula() -> list[dict]:
     """
     Lê pre_matricula.json (gerado por src.automacao.prematricula_coleta /
@@ -608,7 +732,7 @@ def automacoes_executar(chave):
             )
 
         elif chave == "prematricula_completa":
-            from src.automacao.prematricula import executar_processo_completo
+            from src.automacao.pre_matricula import executar_processo_completo
             _rodar_coroutine_em_thread(chave, lambda: executar_processo_completo())
 
         else:
