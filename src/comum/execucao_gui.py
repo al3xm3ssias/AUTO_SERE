@@ -68,6 +68,7 @@ Uso (dentro de um dos arquivos executar_*.py — ver exemplos lá):
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import logging
 import sys
 import threading
@@ -85,6 +86,58 @@ class StatusExecucao(str, Enum):
     CONCLUIDO  = "concluido"
     ERRO       = "erro"
     CANCELADO  = "cancelado"
+
+
+class CancelamentoSolicitado(BaseException):
+    """
+    Levantada DENTRO da thread da execução quando o usuário pede para cancelar.
+    Herda de BaseException (e não de Exception) de propósito: os scripts têm
+    muitos blocos `except Exception:` que a engoliriam e o cancelamento
+    simplesmente não aconteceria.
+    """
+
+
+# Execução associada à thread atual — permite que um script (que não recebe a
+# ExecucaoEmBackground como parâmetro) pergunte "me pediram para cancelar?"
+# com `verificar_cancelamento()`, sem mudar a assinatura de nenhuma função.
+_contexto = threading.local()
+
+
+def cancelamento_solicitado() -> bool:
+    """True se a execução em andamento nesta thread recebeu pedido de cancelamento."""
+    execucao = getattr(_contexto, "execucao", None)
+    return bool(execucao is not None and execucao.cancelamento_solicitado)
+
+
+def verificar_cancelamento() -> None:
+    """
+    Ponto de checagem cooperativa: chame nos pontos seguros de um laço longo
+    (ex.: a cada aluno). Se o usuário pediu para cancelar, levanta
+    CancelamentoSolicitado — os `finally` do script rodam normalmente (ex.:
+    fechar o navegador) e a execução termina com status CANCELADO.
+    Fora de uma ExecucaoEmBackground (ex.: rodando o script no terminal) não faz nada.
+    """
+    if cancelamento_solicitado():
+        raise CancelamentoSolicitado()
+
+
+def _injetar_cancelamento(thread: Optional[threading.Thread]) -> bool:
+    """
+    Último recurso para código síncrono que não chama verificar_cancelamento():
+    injeta CancelamentoSolicitado na thread. Só é entregue quando a thread volta
+    a executar bytecode Python (não interrompe uma chamada bloqueante, como um
+    time.sleep longo). Confiável para código síncrono puro; para código asyncio
+    prefira o cancelamento cooperativo.
+    """
+    if thread is None or thread.ident is None or not thread.is_alive():
+        return False
+    afetadas = ctypes.pythonapi.PyThreadState_SetAsyncExc(
+        ctypes.c_ulong(thread.ident), ctypes.py_object(CancelamentoSolicitado)
+    )
+    if afetadas > 1:  # nunca deveria acontecer; desfaz por segurança
+        ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_ulong(thread.ident), None)
+        return False
+    return afetadas == 1
 
 
 class _CallbackLogHandler(logging.Handler):
@@ -177,9 +230,17 @@ class ExecucaoEmBackground:
     resultado: object = None
     erro: Optional[BaseException] = None
 
+    # Segundos de espera antes de forçar o cancelamento de código síncrono que
+    # não faz checagem cooperativa (ver cancelar()).
+    PRAZO_CANCELAMENTO_FORCADO = 8.0
+
     def __post_init__(self) -> None:
         self._thread: Optional[threading.Thread] = None
         self.concluida = threading.Event()
+        self.cancelamento_solicitado = False
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._tarefa: Optional[asyncio.Task] = None
+        self._trava = threading.Lock()
 
     def iniciar(self, alvo) -> "ExecucaoEmBackground":
         """
@@ -208,6 +269,43 @@ class ExecucaoEmBackground:
         """
         return self.concluida.wait(timeout=timeout)
 
+    def cancelar(self) -> bool:
+        """
+        Pede o cancelamento da execução. Retorna False se ela já terminou.
+        Não bloqueia: o término (status CANCELADO) chega pelo callback e pelo
+        atributo `status`, assim que a execução parar.
+
+          - Coroutine: cancela a tarefa asyncio (os `finally` rodam).
+          - Código síncrono: marca o pedido; scripts que chamam
+            `verificar_cancelamento()` param no próximo ponto seguro. Se ainda
+            estiver rodando após PRAZO_CANCELAMENTO_FORCADO segundos, injeta
+            CancelamentoSolicitado na thread como último recurso.
+        """
+        if self.concluida.is_set():
+            return False
+        with self._trava:
+            if self.cancelamento_solicitado:
+                return True
+            self.cancelamento_solicitado = True
+            loop, tarefa = self._loop, self._tarefa
+
+        if self.callback:
+            try:
+                self.callback("[CANCELANDO] Pedido de cancelamento recebido…")
+            except Exception:
+                pass
+
+        if loop is not None and tarefa is not None and not loop.is_closed():
+            loop.call_soon_threadsafe(tarefa.cancel)
+        elif loop is None:
+            def _forcar() -> None:
+                if not self.concluida.is_set():
+                    _injetar_cancelamento(self._thread)
+            temporizador = threading.Timer(self.PRAZO_CANCELAMENTO_FORCADO, _forcar)
+            temporizador.daemon = True
+            temporizador.start()
+        return True
+
     def _executar_na_thread(self, alvo) -> None:
         handler_log: Optional[_CallbackLogHandler] = None
         stdout_original = sys.stdout
@@ -218,24 +316,32 @@ class ExecucaoEmBackground:
             logger_sere.addHandler(handler_log)
             sys.stdout = _StdoutParaCallback(stdout_original, self.callback)
 
+        _contexto.execucao = self
         try:
             if asyncio.iscoroutine(alvo):
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
-                    self.resultado = loop.run_until_complete(alvo)
+                    tarefa = loop.create_task(alvo)
+                    with self._trava:
+                        self._loop, self._tarefa = loop, tarefa
+                        pedido_antes = self.cancelamento_solicitado
+                    if pedido_antes:  # cancelar() chegou antes da tarefa existir
+                        tarefa.cancel()
+                    self.resultado = loop.run_until_complete(tarefa)
                 finally:
                     loop.close()
             else:
                 # Chamada síncrona (ex.: modo_analisa, que já gerencia seu
                 # próprio asyncio.run() internamente) — roda direto na
                 # thread, sem event loop desta camada.
+                verificar_cancelamento()
                 self.resultado = alvo()
 
             self.status = StatusExecucao.CONCLUIDO
             if self.callback:
                 self.callback("[CONCLUÍDO]")
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, CancelamentoSolicitado):
             self.status = StatusExecucao.CANCELADO
             if self.callback:
                 self.callback("[CANCELADO]")
@@ -249,4 +355,5 @@ class ExecucaoEmBackground:
             if handler_log:
                 logger_sere.removeHandler(handler_log)
             sys.stdout = stdout_original
+            _contexto.execucao = None
             self.concluida.set()

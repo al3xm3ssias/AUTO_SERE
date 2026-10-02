@@ -12,6 +12,10 @@ import pytest
 from automacao import rematricula as rem
 from comum import arquivos_json, paths
 
+# A fixture abaixo troca asyncio.sleep por um no-op no processo todo; as pausas
+# reais que o teste do Chromium precisa usam esta referência guardada antes.
+_SLEEP_REAL = asyncio.sleep
+
 
 # ----------------------------------------------------------
 # infraestrutura
@@ -196,7 +200,7 @@ def com_pagina(html, teste):
                 await page.set_content(html)
 
                 async def espera_curta(_ms):
-                    await asyncio.sleep(0.01)
+                    await _SLEEP_REAL(0.05)
 
                 page.wait_for_timeout = espera_curta
                 return await teste(page)
@@ -238,12 +242,17 @@ def test_js_obter_cpf_responsavel():
 @precisa_chromium
 def test_selecionar_turma_exata_parcial_e_inexistente():
     async def t(page):
+        # navegação "javascript:" é assíncrona no Chromium: dá um respiro antes de ler o efeito
         exata = await rem.selecionar_turma(page, "2º Ano - B")
+        await _SLEEP_REAL(0.3)
         clicado_exata = await page.evaluate("window.__clicado")
+        await page.evaluate("window.__clicado = null")
         parcial = await rem.selecionar_turma(page, "infantil 4")
+        await _SLEEP_REAL(0.3)
         clicado_parcial = await page.evaluate("window.__clicado")
         await page.evaluate("window.__clicado = null")
         nao = await rem.selecionar_turma(page, "8º Ano - Z")
+        await _SLEEP_REAL(0.3)
         return exata, clicado_exata, parcial, clicado_parcial, nao, await page.evaluate("window.__clicado")
 
     exata, c1, parcial, c2, nao, c3 = com_pagina(HTML_SERE, t)

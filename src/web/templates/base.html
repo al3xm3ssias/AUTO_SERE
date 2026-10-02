@@ -55,6 +55,10 @@
         <span class="nav-item-icon" data-icon="badge"></span>
         <span class="nav-item-label">Funcionários</span>
       </div>
+      <div class="nav-item" data-view="calendario">
+        <span class="nav-item-icon" data-icon="calendar"></span>
+        <span class="nav-item-label">Calendário letivo</span>
+      </div>
 
       <div class="nav-item" data-view="documentos">
         <span class="nav-item-icon" data-icon="files"></span>
@@ -196,6 +200,7 @@
       <main id="main-content">
         {% include "painel.html" %}
         {% include "menu.html" %}
+        {% include "calendario.html" %}
         {% include "automacoes.html" %}
         {% include "configuracoes.html" %}
         {% include "primeira_execucao.html" %}
@@ -222,5 +227,6 @@
 
 <script src="{{ url_for('web.static', filename='js/icons.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('web.static', filename='js/calendario.js') }}"></script>
 </body>
 </html>

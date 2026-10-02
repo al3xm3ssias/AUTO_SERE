@@ -39,6 +39,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from pathlib import Path
 from src.comum.credenciais import LOGIN, SENHA
 from src.comum.configuracao import cgm_upload as _cgm_upload_configurado
+from src.comum.execucao_gui import verificar_cancelamento
 from src.comum.sere_normalizacao import SERE_SLOTS, IDTIPO_PARA_SLOT, SINONIMOS, SINONIMOS_LOWER
 from src.comum import paths as _paths
 
@@ -517,6 +518,10 @@ async def coletar_documentos(
     situacoes_por_cgm = obter_situacao_por_cgm(TURMAS_JSON)
 
     for aluno in alunos:
+        # Ponto seguro de cancelamento (botão "Cancelar" da interface): se o
+        # usuário pediu, levanta CancelamentoSolicitado aqui — o `finally` de
+        # executar() fecha o navegador. Fora da interface não faz nada.
+        verificar_cancelamento()
         cgm      = aluno["CGM"]
         nome     = aluno.get("Nome", "SemNome")
         turma    = aluno.get("Turma", "")
@@ -951,26 +956,101 @@ def gerar_relatorio(documentos_data: list[dict], caminho: str):
 # ============================================================
 #  FLUXO PRINCIPAL
 # ============================================================
-async def executar(alunos: list[dict], gerenciador_erros: GerenciadorErros):
-    async with async_playwright() as p:
-        browser = await p.firefox.launch(headless=True)
-        page    = await browser.new_page()
+def _headless() -> bool:
+    """
+    Firefox sem janela por padrão. Para ver o navegador durante um
+    diagnóstico, defina a variável de ambiente AUTO_SERE_HEADLESS=0 antes de
+    iniciar o servidor (no WSL isso exige WSLg/servidor X).
+    """
+    return os.getenv("AUTO_SERE_HEADLESS", "1").strip().lower() not in ("0", "false", "no", "nao", "não")
 
-        print("🌐 Acessando o SERE...")
-        await page.goto(URL)
 
-        await page.fill("#CHAVE", LOGIN)
-        await page.fill("#CHAVE_ENCRIPT", SENHA)
-        await page.click("//input[@value='Entrar']")
-        await page.wait_for_timeout(5000)
+async def _registrar_falha_login(page, motivo: str) -> str:
+    """
+    Guarda evidências de uma falha de login (captura de tela + URL + trecho do
+    texto da página) e devolve um resumo curto para entrar na mensagem de
+    erro. Nunca levanta exceção — é só diagnóstico. Não registra a senha.
+    """
+    partes = [motivo]
+    try:
+        partes.append(f"URL atual: {page.url}")
+    except Exception:
+        pass
+    try:
+        texto = await page.evaluate("() => (document.body && document.body.innerText) || ''")
+        texto = " ".join(str(texto).split())[:400]
+        if texto:
+            partes.append(f"Texto na página: \"{texto}\"")
+    except Exception:
+        pass
+    try:
+        captura = SERE / "debug_login_sere.png"
+        await page.screenshot(path=str(captura), full_page=True)
+        partes.append(f"Captura de tela: {captura}")
+    except Exception:
+        pass
+    resumo = " | ".join(partes)
+    print(f"   ❌ {resumo}")
+    return resumo
 
-        await navigate_to_por_aluno(page)
 
-        documentos_data, cgms_ok = await coletar_documentos(
-            page, alunos, gerenciador_erros
+async def _fazer_login(page) -> None:
+    """
+    Login no SERE com verificação real: só segue quando o menu principal
+    aparece. Antes, o script clicava em Entrar, esperava 5 s fixos e seguia —
+    qualquer falha de login só aparecia depois, como o enganoso
+    "Não encontrou o menu principal".
+    """
+    if not LOGIN or not SENHA:
+        raise RuntimeError(
+            "Credenciais do SERE não configuradas (login/senha vazios). "
+            "Salve em Configurações > Salvar senha do SERE e rode de novo."
         )
 
-        await browser.close()
+    print("🌐 Acessando o SERE...")
+    try:
+        await page.goto(URL, wait_until="domcontentloaded", timeout=60_000)
+    except PlaywrightTimeoutError:
+        raise RuntimeError(f"O SERE não respondeu em 60 s ({URL}). Verifique a internet ou se o site está no ar.")
+
+    try:
+        await page.wait_for_selector("#CHAVE", timeout=20_000)
+    except PlaywrightTimeoutError:
+        detalhe = await _registrar_falha_login(page, "A tela de login não carregou (campo #CHAVE não apareceu em 20 s)")
+        raise RuntimeError(f"Falha ao abrir a tela de login do SERE. {detalhe}")
+
+    await page.fill("#CHAVE", LOGIN)
+    await page.fill("#CHAVE_ENCRIPT", SENHA)
+    await page.click("//input[@value='Entrar']")
+
+    try:
+        await page.wait_for_selector("#divoCMenu0_0", state="attached", timeout=30_000)
+    except PlaywrightTimeoutError:
+        detalhe = await _registrar_falha_login(
+            page, "O menu principal não apareceu em 30 s após clicar em Entrar (login recusado, site lento ou layout alterado)"
+        )
+        raise RuntimeError(f"Login no SERE não foi concluído. {detalhe}")
+
+    await page.wait_for_timeout(1000)
+    print("✅ Login realizado.")
+
+
+async def executar(alunos: list[dict], gerenciador_erros: GerenciadorErros):
+    async with async_playwright() as p:
+        browser = await p.firefox.launch(headless=_headless())
+        try:
+            page = await browser.new_page()
+
+            await _fazer_login(page)
+            await navigate_to_por_aluno(page)
+
+            documentos_data, cgms_ok = await coletar_documentos(
+                page, alunos, gerenciador_erros
+            )
+        finally:
+            # Fecha o navegador também quando algo falha (antes, um erro
+            # deixava o Firefox aberto em segundo plano).
+            await browser.close()
 
     return documentos_data, cgms_ok
 

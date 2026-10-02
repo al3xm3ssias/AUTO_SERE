@@ -113,6 +113,7 @@ const TITULOS = {
   documentos: "Análise de documentos",
   prematricula: "Pré matrícula",
   funcionarios: "Funcionários",
+  calendario: "Calendário letivo",
   automacoes: "Automações",
   configuracoes: "Configurações",
   "primeira-execucao": "1ª execução do sistema",
@@ -134,6 +135,8 @@ function irPara(view, opts = {}) {
     carregarDocumentos();
   } else if (view === "prematricula" || view === "funcionarios") {
     carregarTabelaGenerica(view);
+  } else if (view === "calendario") {
+    carregarCalendario();
   }
   if (view === "painel") {
     carregarPainel();
@@ -868,6 +871,16 @@ const DETALHE_CONFIG = {
     <div class="field"><label>Usuário</label><input type="text" id="cfg-sere-usuario" placeholder="usuário do SERE"></div>
     <div class="field"><label>Senha</label><input type="password" id="cfg-sere-senha" placeholder="••••••••"></div>
     <button class="btn-primary" id="cfg-sere-salvar">Salvar credenciais</button>`,
+  pasta_digitalizacao: `
+    <h4 style="margin-bottom:14px; font-size:.9rem;">Pasta de digitalização</h4>
+    <p style="color:var(--txt3); font-size:.82rem; margin-bottom:12px;">Pasta raiz onde ficam os documentos digitalizados dos alunos (as pastas das turmas). Por padrão é <code>dados/&lt;ano&gt;/DIGITALIZAÇÃO</code>.</p>
+    <div class="field"><label>Caminho completo</label><input type="text" id="cfg-pasta-caminho" placeholder="/home/usuario/.../DIGITALIZAÇÃO"></div>
+    <div id="cfg-pasta-status" style="font-family:var(--mono); font-size:.72rem; color:var(--txt3); margin-bottom:6px;">Carregando…</div>
+    <div id="cfg-pasta-padrao" style="font-family:var(--mono); font-size:.68rem; color:var(--txt3); margin-bottom:14px; word-break:break-all;"></div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <button class="btn-primary" id="cfg-pasta-salvar">Salvar pasta</button>
+      <button class="btn-sm" id="cfg-pasta-usar-padrao" style="padding:9px 16px;font-size:.78rem">Usar pasta padrão</button>
+    </div>`,
   senha_rco: `
     <h4 style="margin-bottom:14px; font-size:.9rem;">Salvar senha do RCO</h4>
     <div class="field"><label>Usuário</label><input type="text" placeholder="usuário do RCO"></div>
@@ -917,8 +930,64 @@ function initConfiguracoes() {
       if (row.dataset.config === "senha_sere") {
         conectarFormSenhaSere();
       }
+      if (row.dataset.config === "pasta_digitalizacao") {
+        conectarFormPastaDigitalizacao();
+      }
     });
   });
+}
+
+async function conectarFormPastaDigitalizacao() {
+  const input = document.getElementById("cfg-pasta-caminho");
+  const status = document.getElementById("cfg-pasta-status");
+  const infoPadrao = document.getElementById("cfg-pasta-padrao");
+  const btnSalvar = document.getElementById("cfg-pasta-salvar");
+  const btnPadrao = document.getElementById("cfg-pasta-usar-padrao");
+  if (!input || !status || !btnSalvar || !btnPadrao) return;
+
+  const mostrar = (d) => {
+    // Campo: pasta em uso; se nada em uso, sugere a padrão.
+    input.value = d.caminho || d.padrao || "";
+    if (d.configurada && d.usando_padrao) {
+      status.innerHTML = '<span style="color:var(--lime)">✓ Usando a pasta padrão do ano</span>';
+    } else if (d.configurada) {
+      status.innerHTML = '<span style="color:var(--lime)">✓ Configurada (pasta personalizada)</span>';
+    } else if (!d.usando_padrao && d.caminho) {
+      status.innerHTML = '<span style="color:var(--rose)">✗ O caminho salvo não existe neste computador</span>';
+    } else {
+      status.innerHTML = '<span style="color:var(--amber)">Pendente — a pasta padrão ainda não existe</span>';
+    }
+    infoPadrao.textContent = "Padrão: " + d.padrao + (d.padrao_existe ? "" : " (ainda não existe)");
+  };
+
+  const enviar = async (corpo, botao, textoEspera) => {
+    const original = botao.textContent;
+    btnSalvar.disabled = btnPadrao.disabled = true;
+    botao.textContent = textoEspera;
+    try {
+      const resp = await apiPost("/configuracoes/pasta-digitalizacao", corpo);
+      mostrar(resp);
+      toast(resp.mensagem || "Pasta salva");
+    } catch (e) {
+      toast(e.message);  // ex.: "A pasta não existe neste computador: ..."
+    } finally {
+      btnSalvar.disabled = btnPadrao.disabled = false;
+      botao.textContent = original;
+    }
+  };
+
+  try {
+    mostrar(await apiGet("/configuracoes/pasta-digitalizacao"));
+  } catch (e) {
+    status.textContent = "Não foi possível ler a configuração atual.";
+  }
+
+  btnSalvar.addEventListener("click", () => {
+    const caminho = input.value.trim();
+    if (!caminho) { toast("Informe o caminho da pasta"); return; }
+    enviar({ caminho }, btnSalvar, "Salvando...");
+  });
+  btnPadrao.addEventListener("click", () => enviar({ usar_padrao: true }, btnPadrao, "Aplicando..."));
 }
 
 function conectarFormSenhaSere() {

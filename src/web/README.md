@@ -30,11 +30,13 @@ Acesse **http://127.0.0.1:5000** no navegador.
 src/web/
 ├── app.py                     # cria o Flask app e registra os blueprints
 ├── api/
-│   └── rotas.py                # TODOS os endpoints de API (hoje com dados mock)
+│   ├── rotas.py                # endpoints de API (painel, listas, automações, wizard)
+│   └── calendario.py           # API do calendário letivo (blueprint próprio)
 ├── templates/
 │   ├── base.html                # shell da aplicação: sidebar + topbar + temas
 │   ├── painel.html               # tela "Painel principal"
 │   ├── menu.html                 # inclui as 4 telas de listagem (turmas/alunos/...)
+│   ├── calendario.html           # tela "Calendário letivo"
 │   ├── automacoes.html           # lista de automações + tela de execução
 │   ├── configuracoes.html        # telas de credenciais/config
 │   ├── primeira_execucao.html    # wizard de 1ª execução obrigatória
@@ -44,8 +46,45 @@ src/web/
 └── static/
     ├── css/styles.css           # design system completo: tokens, 3 temas, componentes
     ├── js/icons.js                # ícones SVG inline (sem CDN — ver nota abaixo)
-    └── js/app.js                  # navegação SPA + todas as chamadas fetch()
+    ├── js/app.js                  # navegação SPA + todas as chamadas fetch()
+    └── js/calendario.js           # lógica da tela Calendário (IIFE; expõe carregarCalendario)
 ```
+
+## Calendário letivo
+
+Tela **Menu → Calendário letivo** (view `calendario`). Mostra o mês/ano com
+feriados nacionais (BrasilAPI), recessos, feriados municipais e períodos
+letivos, e conta os dias letivos (dia útil, dentro de um período, sem
+feriado nem recesso).
+
+| Método | Rota | O que faz |
+|---|---|---|
+| GET | `/web/api/calendario/dados` | eventos + períodos cadastrados |
+| GET | `/web/api/calendario/feriados/<ano>` | feriados nacionais (cache de 30 dias) |
+| GET | `/web/api/calendario/fixos/<ano>` | feriados fixos de Ponta Grossa + Quarta-feira de Cinzas + datas comemorativas |
+| POST | `/web/api/calendario/eventos` | cria `recesso`, `emenda`, `htpc`, `municipal` ou `outro` |
+| DELETE | `/web/api/calendario/eventos/<id>` | exclui |
+| POST | `/web/api/calendario/periodos` | cria período (`tipo`: `letivo` ou `ferias`) |
+| DELETE | `/web/api/calendario/periodos/<id>` | exclui |
+
+**Padrão de cores:** feriado (nacional, municipal e Quarta-feira de Cinzas) =
+vermelho · recesso e emenda de feriado = azul claro · HTPC = verde-limão ·
+férias escolares = amarelo · data comemorativa = ★ roxa (não tira o dia
+letivo) · dia letivo = sem cor. Quando um dia cai em mais de uma categoria, a
+prioridade é feriado > recesso/emenda > HTPC > outro > férias.
+
+**Datas fixas embutidas** (constantes no topo de `src/web/api/calendario.py`):
+26/07 Padroeira, 15/09 Aniversário da cidade, Quarta-feira de Cinzas
+(calculada pela Páscoa) e as datas comemorativas (30/05, 22/08, 30/09, 15/10,
+30/10, 31/10, 12/11). O Dia do Servidor (28/10) não entra, pois muda por
+decreto; se for decretado, cadastre como evento.
+
+Dados em `dados/calendario/calendario.json` e
+`dados/calendario/feriados_cache/AAAA.json`. É um arquivo único (não por ano
+letivo) porque férias e recessos atravessam a virada do ano. Sem internet, a
+tela usa o cache de feriados já baixado; sem cache para o ano, mostra um aviso.
+
+Testes: `pytest tests/test_calendario.py`.
 
 ## Ícones: por que SVG inline em vez de Font Awesome
 

@@ -50,6 +50,8 @@ const ICONS = {
 
   // ---- Ações / genéricos ----
   bell: (c = "") => svg(c, `<path d="M6 10a6 6 0 0 1 12 0c0 4.5 1.5 6 2 6.5H4C4.5 16 6 14.5 6 10Z"/><path d="M10 19.5a2.2 2.2 0 0 0 4 0"/>`),
+  calendar: (c = "") => svg(c, `<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 17.2h.01M12 17.2h.01"/>`),
+  chevronLeft: (c = "") => svg(c, `<path d="m15 6-6 6 6 6"/>`),
   chevronRight: (c = "") => svg(c, `<path d="m9 6 6 6-6 6"/>`),
   chevronDown: (c = "") => svg(c, `<path d="m6 9 6 6 6-6"/>`),
   arrowRight: (c = "") => svg(c, `<path d="M4 12h15M13 6l6 6-6 6"/>`),

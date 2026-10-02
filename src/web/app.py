@@ -15,6 +15,7 @@ A aplicação sobe em http://127.0.0.1:5000
 
 from flask import Flask, Blueprint, render_template
 
+from src.web.api.calendario import calendario_bp
 from src.web.api.rotas import api_bp
 
 # Blueprint da interface (páginas HTML + estáticos), isolado sob /web
@@ -40,6 +41,7 @@ def create_app() -> Flask:
 
     app.register_blueprint(web_bp)
     app.register_blueprint(api_bp, url_prefix="/web/api")
+    app.register_blueprint(calendario_bp, url_prefix="/web/api/calendario")
 
     return app
 

@@ -41,6 +41,13 @@ Uso:
 """
 import os
 
+# Carrega credenciais/.env no ambiente ANTES de ler as variáveis abaixo.
+# Sem isto, quem importa este módulo fora do fluxo "salvar credenciais"
+# (ex.: ao reiniciar o servidor) só enxerga os valores placeholder.
+from dotenv import load_dotenv
+from .paths import CREDENCIAIS_DIR
+load_dotenv(CREDENCIAIS_DIR / ".env")
+
 LOGIN = os.getenv("SERE_LOGIN", "cpf")
 SENHA = os.getenv("SERE_SENHA", "senha_sere")
 

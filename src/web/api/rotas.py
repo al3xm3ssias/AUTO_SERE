@@ -512,70 +512,8 @@ def _callback_para(chave: str):
     return _callback
 
 
-def _rodar_funcao_sincrona_em_thread(chave: str, funcao, *args, **kwargs) -> None:
-    """
-    Para automações que ainda não têm wrapper ExecucaoEmBackground (ex.:
-    gerar_pastas.main, cruzar_documentos.main — funções síncronas que só
-    imprimem no console) — roda numa thread própria e captura o resultado
-    ou a exceção no mesmo formato de registro usado pelas demais,
-    para que o polling de status funcione igual para todas as automações.
-    """
-    registro = _registrar_execucao(chave)
-
-    def _alvo():
-        try:
-            resultado = funcao(*args, **kwargs)
-            with _EXECUCOES_LOCK:
-                registro["status"] = StatusExecucao.CONCLUIDO.value
-                registro["resultado"] = resultado
-        except BaseException as exc:  # noqa: BLE001 — reportar qualquer falha ao polling
-            with _EXECUCOES_LOCK:
-                registro["status"] = StatusExecucao.ERRO.value
-                registro["erro"] = "".join(traceback.format_exception_only(type(exc), exc)).strip()
-                registro["logs"].append(f"[ERRO] {registro['erro']}")
-
-    threading.Thread(target=_alvo, daemon=True).start()
-
-
-def _rodar_coroutine_em_thread(chave: str, coroutine_factory) -> None:
-    """
-    Para automações async que não têm wrapper ExecucaoEmBackground dedicado
-    (ex.: src.automacao.sisreg.consultar_encaminhamentos_sisreg,
-    src.automacao.rematricula.executar_rematricula,
-    src.automacao.prematricula.executar_processo_completo) — mesmo
-    propósito de _rodar_funcao_sincrona_em_thread, mas para uma coroutine.
-    `coroutine_factory` é uma função zero-argumentos que RETORNA a
-    coroutine (ex.: `lambda: minha_funcao_async(x, y)`) — só é chamada
-    dentro da thread de background, para não criar a coroutine antes de
-    haver um event loop rodando.
-    """
-    registro = _registrar_execucao(chave)
-
-    def _alvo():
-        try:
-            resultado = asyncio.run(coroutine_factory())
-            with _EXECUCOES_LOCK:
-                registro["status"] = StatusExecucao.CONCLUIDO.value
-                registro["resultado"] = resultado
-        except BaseException as exc:  # noqa: BLE001
-            with _EXECUCOES_LOCK:
-                registro["status"] = StatusExecucao.ERRO.value
-                registro["erro"] = "".join(traceback.format_exception_only(type(exc), exc)).strip()
-                registro["logs"].append(f"[ERRO] {registro['erro']}")
-
-    threading.Thread(target=_alvo, daemon=True).start()
-
-
-def _iniciar_via_execucao_gui(chave: str, funcao_executar, **kwargs) -> None:
-    """
-    Para automações que JÁ têm um wrapper `executar_<modo>` pronto (ver
-    src/automacao/executar_*.py) — estes retornam um ExecucaoEmBackground
-    e o próprio módulo já cuida da thread e da captura de print/log.
-    """
-    registro = _registrar_execucao(chave)
-    execucao = funcao_executar(callback=_callback_para(chave), **kwargs)
-    registro["execucao"] = execucao
-
+def _observar_execucao(registro: dict, execucao: ExecucaoEmBackground) -> None:
+    """Espera a execução terminar (em thread própria) e copia status/resultado/erro para o registro."""
     def _observar():
         execucao.aguardar()
         with _EXECUCOES_LOCK:
@@ -587,6 +525,50 @@ def _iniciar_via_execucao_gui(chave: str, funcao_executar, **kwargs) -> None:
                 ).strip()
 
     threading.Thread(target=_observar, daemon=True).start()
+
+
+def _rodar_funcao_sincrona_em_thread(chave: str, funcao, *args, **kwargs) -> None:
+    """
+    Para automações que ainda não têm wrapper executar_<modo> (ex.:
+    gerar_pastas.main, cruzar_documentos.main, analisa_documentos_pc.main —
+    funções síncronas). Roda num ExecucaoEmBackground, como as demais, para
+    que TODAS tenham o mesmo comportamento: logs (print/log) capturados para
+    o polling de status e cancelamento pelo botão "Cancelar".
+    """
+    registro = _registrar_execucao(chave)
+    execucao = ExecucaoEmBackground(callback=_callback_para(chave))
+    registro["execucao"] = execucao
+    execucao.iniciar(lambda: funcao(*args, **kwargs))
+    _observar_execucao(registro, execucao)
+
+
+def _rodar_coroutine_em_thread(chave: str, coroutine_factory) -> None:
+    """
+    Para automações async sem wrapper dedicado (ex.:
+    src.automacao.sisreg.consultar_encaminhamentos_sisreg,
+    src.automacao.rematricula.executar_rematricula,
+    src.automacao.prematricula.executar_processo_completo). Mesmo propósito
+    de _rodar_funcao_sincrona_em_thread, mas para uma coroutine — o
+    cancelamento aqui cancela a tarefa asyncio (os `finally` do script rodam).
+    `coroutine_factory` é uma função zero-argumentos que RETORNA a coroutine.
+    """
+    registro = _registrar_execucao(chave)
+    execucao = ExecucaoEmBackground(callback=_callback_para(chave))
+    registro["execucao"] = execucao
+    execucao.iniciar(coroutine_factory())
+    _observar_execucao(registro, execucao)
+
+
+def _iniciar_via_execucao_gui(chave: str, funcao_executar, **kwargs) -> None:
+    """
+    Para automações que JÁ têm um wrapper `executar_<modo>` pronto (ver
+    src/automacao/executar_*.py) — estes retornam um ExecucaoEmBackground
+    e o próprio módulo já cuida da thread e da captura de print/log.
+    """
+    registro = _registrar_execucao(chave)
+    execucao = funcao_executar(callback=_callback_para(chave), **kwargs)
+    registro["execucao"] = execucao
+    _observar_execucao(registro, execucao)
 
 
 AUTOMACOES_DISPONIVEIS = [
@@ -637,6 +619,14 @@ def automacoes_executar(chave):
             "mensagem": f"Automação '{chave}' ainda não foi implementada no código-fonte.",
         }), 501
 
+    with _EXECUCOES_LOCK:
+        em_andamento = (_EXECUCOES.get(chave) or {}).get("status") == StatusExecucao.EXECUTANDO.value
+    if em_andamento:
+        return jsonify({
+            "status": "erro",
+            "mensagem": "Esta automação já está em execução. Aguarde terminar ou cancele.",
+        }), 409
+
     payload = request.get_json(silent=True) or {}
     turmas_selecionadas = payload.get("turmas") or []
     modo_teste = bool(payload.get("modo_teste", False))
@@ -650,7 +640,11 @@ def automacoes_executar(chave):
 
         elif chave == "analisa_sere":
             from src.automacao.executar_analisa import executar_analisa
-            args_extras = ["--turma"] if turmas_selecionadas else []
+            # Flags ligadas na aba Configuração (ex.: --rapido) + --turma se o
+            # usuário marcou turmas nesta execução (comportamento anterior).
+            args_extras = _args_das_flags(chave)
+            if turmas_selecionadas and "--turma" not in args_extras:
+                args_extras.append("--turma")
             _iniciar_via_execucao_gui(chave, executar_analisa, args_extras=args_extras)
 
         elif chave == "documentos":
@@ -766,13 +760,161 @@ def automacoes_status(chave):
         registro = _EXECUCOES.get(chave)
         if registro is None:
             return jsonify({"status": "nunca_executado", "logs": []})
+        execucao = registro.get("execucao")
         return jsonify({
             "status": registro["status"],
+            "cancelando": bool(execucao is not None and execucao.cancelamento_solicitado
+                               and registro["status"] == StatusExecucao.EXECUTANDO.value),
             "logs": registro["logs"][-200:],
             "erro": registro["erro"],
             "iniciado_em": registro["iniciado_em"],
             "tem_resultado": registro["resultado"] is not None,
         })
+
+
+@api_bp.route("/automacoes/<string:chave>/cancelar", methods=["POST"])
+def automacoes_cancelar(chave):
+    """
+    Pede o cancelamento da execução em andamento desta automação. Responde na
+    hora; o término de fato (status "cancelado") aparece no /status — pode levar
+    alguns segundos (ex.: a análise do SERE para no próximo aluno e fecha o
+    navegador).
+    """
+    with _EXECUCOES_LOCK:
+        registro = _EXECUCOES.get(chave)
+        execucao = registro.get("execucao") if registro else None
+        executando = bool(registro and registro["status"] == StatusExecucao.EXECUTANDO.value)
+
+    if not executando or execucao is None:
+        return jsonify({"status": "erro", "mensagem": "Nenhuma execução em andamento para cancelar."}), 409
+
+    execucao.cancelar()
+    return jsonify({"status": "ok", "mensagem": "Cancelamento solicitado. Encerrando…"})
+
+
+# ============================================================
+# FLAGS DAS AUTOMAÇÕES (aba "Configuração" de cada automação)
+# ============================================================
+# As flags NÃO são listadas à mão: são lidas do próprio script, procurando as
+# chamadas parser.add_argument("--x", action="store_true", help="...") no
+# código-fonte (via ast, sem importar o módulo — importar executaria código do
+# script). Só automações cujo wrapper aceita argumentos entram aqui; hoje é a
+# análise do SERE (executar_analisa recebe args_extras). Para incluir outra,
+# basta mapear a chave ao módulo abaixo (e o wrapper dela repassar os args).
+
+_MODULOS_COM_FLAGS = {
+    "analisa_sere": "src.relatorios.analisa_arquivos_sere",
+}
+
+# Flags que são MODOS excludentes, na ordem de prioridade do script (um
+# if/elif: a primeira que estiver ligada vence). Mostradas como escolha única.
+_FLAGS_MODO = {
+    "analisa_sere": ["--todos", "--transferidos", "--turma", "--rapido", "--alunos", "--erros"],
+}
+
+_ROTULOS_FLAGS = {
+    "--todos": "Todos os alunos (matriculados e transferidos)",
+    "--transferidos": "Somente transferidos",
+    "--turma": "Escolher turmas",
+    "--rapido": "Modo rápido (só os não completos)",
+    "--alunos": "Somente os CGMs de CGM_ANALISE",
+    "--erros": "Reprocessar só os que falharam",
+}
+
+_AVISOS_FLAGS = {
+    "--turma": "Abre a escolha de turmas no terminal onde o servidor está rodando — responda lá.",
+    "--alunos": "Usa a lista CGM_ANALISE definida no topo do script.",
+}
+
+
+def _flags_do_script(chave: str) -> list[dict]:
+    """Lê do código-fonte do script as flags booleanas (store_true), na ordem em que aparecem."""
+    import ast
+    import importlib.util
+
+    modulo = _MODULOS_COM_FLAGS.get(chave)
+    if not modulo:
+        return []
+    try:
+        spec = importlib.util.find_spec(modulo)
+        if spec is None or not spec.origin:
+            return []
+        arvore = ast.parse(Path(spec.origin).read_text(encoding="utf-8"))
+    except (ImportError, OSError, SyntaxError, ValueError):
+        return []
+
+    achadas = []
+    for no in ast.walk(arvore):
+        if not (isinstance(no, ast.Call) and isinstance(no.func, ast.Attribute) and no.func.attr == "add_argument"):
+            continue
+        nomes = [a.value for a in no.args
+                 if isinstance(a, ast.Constant) and isinstance(a.value, str) and a.value.startswith("--")]
+        kw = {k.arg: k.value for k in no.keywords}
+        acao = kw.get("action")
+        if not nomes or not (isinstance(acao, ast.Constant) and acao.value == "store_true"):
+            continue
+        ajuda = kw.get("help")
+        achadas.append((no.lineno, nomes[0], ajuda.value if isinstance(ajuda, ast.Constant) else ""))
+
+    grupo_modo = set(_FLAGS_MODO.get(chave, []))
+    return [
+        {
+            "flag": flag,
+            "rotulo": _ROTULOS_FLAGS.get(flag, flag),
+            "descricao": ajuda,
+            "aviso": _AVISOS_FLAGS.get(flag, ""),
+            "grupo": "modo" if flag in grupo_modo else None,
+        }
+        for _, flag, ajuda in sorted(achadas)
+    ]
+
+
+def _args_das_flags(chave: str) -> list[str]:
+    """Flags salvas para a automação, filtradas pelas que o script realmente tem; no
+    máximo UM modo (o de maior prioridade, como o script faria)."""
+    conhecidas = {f["flag"]: f for f in _flags_do_script(chave)}
+    salvas = [f for f in _config.flags_automacao(chave) if f in conhecidas]
+    modos = [f for f in _FLAGS_MODO.get(chave, []) if f in salvas]
+    return [f for f in salvas if conhecidas[f]["grupo"] != "modo"] + modos[:1]
+
+
+def _estado_flags(chave: str) -> dict:
+    ativas = set(_args_das_flags(chave))
+    flags = [dict(f, ativa=f["flag"] in ativas) for f in _flags_do_script(chave)]
+    return {"chave": chave, "flags": flags}
+
+
+@api_bp.route("/automacoes/<string:chave>/flags", methods=["GET"])
+def automacoes_flags_obter(chave):
+    """Flags do script desta automação e quais estão ligadas (lista vazia se não houver)."""
+    return jsonify(_estado_flags(chave))
+
+
+@api_bp.route("/automacoes/<string:chave>/flags", methods=["POST"])
+def automacoes_flags_salvar(chave):
+    """
+    Salva as flags ligadas. payload: {"flags": ["--rapido"]}
+    Rejeita flag que o script não tem e mais de um modo ao mesmo tempo.
+    """
+    conhecidas = {f["flag"]: f for f in _flags_do_script(chave)}
+    if not conhecidas:
+        return jsonify({"erro": "Esta automação não tem opções configuráveis."}), 400
+
+    payload = request.get_json(silent=True) or {}
+    pedidas = payload.get("flags")
+    if not isinstance(pedidas, list) or not all(isinstance(f, str) for f in pedidas):
+        return jsonify({"erro": "Envie 'flags' como uma lista de textos."}), 400
+
+    desconhecidas = [f for f in pedidas if f not in conhecidas]
+    if desconhecidas:
+        return jsonify({"erro": f"Opção inexistente neste script: {', '.join(desconhecidas)}"}), 400
+    if len([f for f in pedidas if conhecidas[f]["grupo"] == "modo"]) > 1:
+        return jsonify({"erro": "Escolha apenas um modo de execução."}), 400
+
+    _config.definir_flags_automacao(chave, list(dict.fromkeys(pedidas)))
+    resposta = _estado_flags(chave)
+    resposta["mensagem"] = "Opções salvas."
+    return jsonify(resposta)
 
 
 # ============================================================
@@ -836,6 +978,86 @@ def escolher_pasta():
             "caminho": None,
             "erro": f"Não foi possível abrir o explorador de arquivos neste ambiente: {exc}",
         }), 500
+
+
+# ============================================================
+# CONFIGURAÇÕES — pasta de digitalização (GET lê, POST grava com validação)
+# ============================================================
+
+def _estado_pasta_digitalizacao() -> dict:
+    """Estado completo da pasta de digitalização, usado por GET e POST."""
+    em_uso = _config.pasta_digitalizacao()
+    padrao = _config.pasta_digitalizacao_padrao()
+    return {
+        "caminho": str(em_uso) if em_uso else None,
+        "configurada": _config.pasta_digitalizacao_configurada(),
+        "usando_padrao": not _config.pasta_digitalizacao_personalizada(),
+        "padrao": str(padrao),
+        "padrao_existe": padrao.is_dir(),
+    }
+
+
+@api_bp.route("/configuracoes/pasta-digitalizacao", methods=["GET"])
+def configuracao_pasta_digitalizacao_obter():
+    """
+    Estado da pasta de digitalização. Sem escolha do usuário, vale a pasta
+    padrão dados/<ano atual>/DIGITALIZAÇÃO (se existir).
+    """
+    return jsonify(_estado_pasta_digitalizacao())
+
+
+@api_bp.route("/configuracoes/pasta-digitalizacao", methods=["POST"])
+def configuracao_pasta_digitalizacao_salvar():
+    """
+    Define a pasta de digitalização.
+
+    payload: {"usar_padrao": true}
+        Volta para a pasta padrão dados/<ano>/DIGITALIZAÇÃO (cria a pasta se
+        ainda não existir). Não grava caminho fixo: acompanha o ano.
+    payload: {"caminho": "/home/usuario/.../DIGITALIZAÇÃO"}
+        Pasta personalizada. Ao contrário de
+        configuracao.definir_pasta_digitalizacao (que grava sem validar),
+        aqui só é salva se for absoluta e existir como pasta NESTE
+        computador.
+    """
+    payload = request.get_json(silent=True) or {}
+
+    if payload.get("usar_padrao"):
+        padrao = _config.pasta_digitalizacao_padrao()
+        criada = not padrao.is_dir()
+        try:
+            padrao.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            return jsonify({"erro": f"Não foi possível criar a pasta padrão {padrao}: {exc}"}), 500
+        _config.usar_pasta_digitalizacao_padrao()
+        resposta = _estado_pasta_digitalizacao()
+        resposta.update({
+            "status": "ok",
+            "mensagem": ("Pasta padrão criada e em uso." if criada else "Usando a pasta padrão."),
+        })
+        return jsonify(resposta)
+
+    bruto = str(payload.get("caminho") or "").strip().strip('"').strip("'")
+    if not bruto:
+        return jsonify({"erro": "Informe o caminho completo da pasta."}), 400
+
+    # Caminho de Windows (C:\\...) num servidor que roda em Linux/WSL.
+    if os.name != "nt" and len(bruto) > 2 and bruto[1] == ":" and bruto[0].isalpha():
+        letra = bruto[0].lower()
+        sugestao = "/mnt/" + letra + "/" + bruto[3:].replace("\\", "/")
+        return jsonify({
+            "erro": "Este servidor está rodando em Linux/WSL e não enxerga caminhos "
+                    "no formato do Windows (letra de unidade). Use o formato Linux, por exemplo: " + sugestao,
+        }), 400
+
+    caminho = Path(os.path.abspath(os.path.expanduser(bruto)))
+    if not caminho.is_dir():
+        return jsonify({"erro": f"A pasta não existe neste computador: {caminho}"}), 400
+
+    _config.definir_pasta_digitalizacao(caminho)
+    resposta = _estado_pasta_digitalizacao()
+    resposta.update({"status": "ok", "mensagem": "Pasta de digitalização salva."})
+    return jsonify(resposta)
 
 
 # ============================================================
@@ -931,6 +1153,18 @@ def wizard_executar_passo(passo):
     })
 
 
+def _formatar_valor_env(valor: str) -> str:
+    """
+    Escreve o valor entre aspas simples para o python-dotenv ler de volta
+    exatamente o que foi digitado. Sem aspas, o dotenv corrompe valores com
+    " #" (vira comentário), com aspas nas pontas, ou com espaços nas pontas —
+    problema típico em senhas. Barra invertida e aspa simples são escapadas.
+    (Limitação do próprio dotenv: um trecho ${NOME} ainda é interpolado.)
+    """
+    valor = str(valor)
+    return "'" + valor.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
 def _persistir_env(valores: dict[str, str]) -> None:
     """
     Atualiza (ou cria) credenciais/.env com os pares chave=valor
@@ -949,12 +1183,12 @@ def _persistir_env(valores: dict[str, str]) -> None:
     for linha in linhas_existentes:
         chave = linha.split("=", 1)[0].strip()
         if chave in chaves_pendentes:
-            novas_linhas.append(f"{chave}={chaves_pendentes.pop(chave)}\n")
+            novas_linhas.append(f"{chave}={_formatar_valor_env(chaves_pendentes.pop(chave))}\n")
         else:
             novas_linhas.append(linha)
 
     for chave, valor in chaves_pendentes.items():
-        novas_linhas.append(f"{chave}={valor}\n")
+        novas_linhas.append(f"{chave}={_formatar_valor_env(valor)}\n")
 
     with open(caminho_env, "w", encoding="utf-8") as f:
         f.writelines(novas_linhas)

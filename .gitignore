@@ -15,7 +15,9 @@ credenciais/*.env
 qrcode_key.key
 
 # ==== Dados de alunos/servidores (dados sensíveis / LGPD) ====
-dados/*.json
+dados/**/*.json
+# Pasta de digitalização (documentos dos alunos), em dados/ ou dados/<ano>/
+dados/**/DIGITALIZAÇÃO/
 dados/backup/*
 !dados/backup/.gitkeep
 *.csv

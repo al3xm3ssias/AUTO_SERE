@@ -43,10 +43,11 @@ Uso:
 from __future__ import annotations
 
 import json
+import unicodedata
 from pathlib import Path
 from typing import Any
 
-from .paths import CONFIG_DIR
+from .paths import CONFIG_DIR, dados_ano_atual
 
 ARQUIVO_CONFIG = CONFIG_DIR / "config_usuario.json"
 
@@ -56,6 +57,7 @@ _PADRAO: dict[str, Any] = {
     "cgm_upload": [],
     "setup_concluido": False,
     "unidade_escolar": None,
+    "flags_automacoes": {},
 }
 
 
@@ -97,20 +99,61 @@ def _salvar_configuracao(configuracao: dict[str, Any]) -> None:
 # Pasta de digitalização (documentos PDF/imagem dos alunos)
 # ─────────────────────────────────────────────────────────────────────────
 
+# Nome padrão da pasta de digitalização dentro de dados/<ano>/ (é o mesmo
+# que src.automacao.gerar_pastas usa: DADOS/<ANO>/DIGITALIZAÇÃO/<TURMA>/...).
+NOME_PASTA_DIGITALIZACAO = "DIGITALIZAÇÃO"
+
+
+def _normalizar_nome(nome: str) -> str:
+    """Minúsculas e sem acentos, para comparar 'Digitalização' com 'DIGITALIZAÇÃO'
+    (em Linux o sistema de arquivos diferencia maiúsculas de minúsculas)."""
+    decomposto = unicodedata.normalize("NFD", nome)
+    return "".join(c for c in decomposto if unicodedata.category(c) != "Mn").lower()
+
+
+def pasta_digitalizacao_padrao() -> Path:
+    """
+    Pasta de digitalização PADRÃO: dados/<ano atual>/DIGITALIZAÇÃO.
+
+    Se já existir uma pasta com esse nome em dados/<ano>/ (qualquer
+    combinação de maiúsculas/minúsculas e acentos), devolve a existente;
+    senão devolve o caminho com o nome padrão (que pode ainda não existir).
+    Muda sozinha na virada do ano, pois depende de dados_ano_atual().
+    """
+    base = dados_ano_atual()
+    alvo = _normalizar_nome(NOME_PASTA_DIGITALIZACAO)
+    if base.is_dir():
+        for filho in sorted(base.iterdir()):
+            if filho.is_dir() and _normalizar_nome(filho.name) == alvo:
+                return filho
+    return base / NOME_PASTA_DIGITALIZACAO
+
+
+def pasta_digitalizacao_personalizada() -> bool:
+    """True se o usuário escolheu uma pasta própria (em vez de usar a padrão)."""
+    return bool(carregar_configuracao().get("pasta_digitalizacao"))
+
+
 def pasta_digitalizacao() -> Path | None:
     """
-    Retorna a pasta de digitalização configurada pelo usuário, ou None se
-    ainda não foi configurada (setup inicial pendente).
+    Retorna a pasta de digitalização em uso:
+      1. a pasta que o usuário escolheu, se houver; senão
+      2. a pasta padrão dados/<ano>/DIGITALIZAÇÃO, se ela já existir; senão
+      3. None (setup pendente).
     """
     valor = carregar_configuracao().get("pasta_digitalizacao")
-    return Path(valor) if valor else None
+    if valor:
+        return Path(valor)
+    padrao = pasta_digitalizacao_padrao()
+    return padrao if padrao.is_dir() else None
 
 
 def pasta_digitalizacao_configurada() -> bool:
     """
-    True se o usuário já escolheu a pasta de digitalização e ela ainda
-    existe no disco. Scripts que dependem dessa pasta devem checar isto
-    antes de prosseguir, e orientar o usuário a rodar o setup caso False.
+    True se há uma pasta de digitalização em uso (escolhida pelo usuário ou
+    a padrão do ano) e ela existe no disco. Scripts que dependem dessa pasta
+    devem checar isto antes de prosseguir, e orientar o usuário a rodar o
+    setup caso False.
     """
     caminho = pasta_digitalizacao()
     return caminho is not None and caminho.is_dir()
@@ -118,13 +161,23 @@ def pasta_digitalizacao_configurada() -> bool:
 
 def definir_pasta_digitalizacao(caminho: str | Path) -> None:
     """
-    Salva a pasta de digitalização escolhida pelo usuário. Não valida se
-    a pasta existe — quem escolhe o caminho (ex.: um diálogo do Windows
-    Explorer no script de setup) é responsável por garantir isso antes
-    de chamar esta função.
+    Salva uma pasta de digitalização PERSONALIZADA escolhida pelo usuário.
+    Não valida se a pasta existe — quem escolhe o caminho (ex.: a rota de
+    Configurações, que valida antes) é responsável por garantir isso.
     """
     configuracao = carregar_configuracao()
     configuracao["pasta_digitalizacao"] = str(caminho)
+    _salvar_configuracao(configuracao)
+
+
+def usar_pasta_digitalizacao_padrao() -> None:
+    """
+    Volta a usar a pasta padrão (dados/<ano>/DIGITALIZAÇÃO): remove a pasta
+    personalizada da configuração. Nada é gravado como caminho fixo, então
+    na virada do ano a pasta em uso acompanha o novo ano automaticamente.
+    """
+    configuracao = carregar_configuracao()
+    configuracao["pasta_digitalizacao"] = None
     _salvar_configuracao(configuracao)
 
 
@@ -189,6 +242,26 @@ def definir_cgm_upload(cgms: list[int]) -> None:
     """Substitui a lista de CGMs configurada (equivalente a editar o array CGM_UPLOAD)."""
     configuracao = carregar_configuracao()
     configuracao["cgm_upload"] = list(cgms)
+    _salvar_configuracao(configuracao)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Flags das automações (opções de linha de comando ligadas/desligadas na
+# aba "Configuração" de cada automação)
+# ─────────────────────────────────────────────────────────────────────────
+
+def flags_automacao(chave: str) -> list[str]:
+    """Flags (ex.: ["--rapido"]) que o usuário deixou ligadas para esta automação."""
+    todas = carregar_configuracao().get("flags_automacoes") or {}
+    return list(todas.get(chave, []))
+
+
+def definir_flags_automacao(chave: str, flags: list[str]) -> None:
+    """Substitui as flags ligadas para a automação `chave` (as demais automações ficam como estão)."""
+    configuracao = carregar_configuracao()
+    todas = dict(configuracao.get("flags_automacoes") or {})
+    todas[chave] = list(flags)
+    configuracao["flags_automacoes"] = todas
     _salvar_configuracao(configuracao)
 
 

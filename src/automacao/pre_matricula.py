@@ -40,10 +40,8 @@ from __future__ import annotations
 
 import asyncio
 import csv
-import json
 import os
 import re
-import tempfile
 import unicodedata
 from collections import defaultdict
 from datetime import datetime
@@ -53,6 +51,11 @@ from pathlib import Path
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
 from comum import paths
+from comum.arquivos_json import (
+    ArquivoJsonCorrompidoError,
+    carregar_json,
+    salvar_json_atomico,
+)
 
 
 # ==========================================================
@@ -86,7 +89,7 @@ COLUNAS_CONTATOS_PADRAO = [
 ]
 
 
-class PreMatriculaCorrompidaError(Exception):
+class PreMatriculaCorrompidaError(ArquivoJsonCorrompidoError):
     """pre_matricula.json existe mas não pôde ser lido. O arquivo NÃO é tocado."""
 
 
@@ -149,47 +152,18 @@ def carregar_pre_matricula() -> dict:
     manual). Nunca devolve "vazio" no lugar de um arquivo corrompido: isso
     faria a próxima gravação apagar todo o histórico.
     """
-    caminho = caminho_pre_matricula()
-    if not caminho.exists():
-        return _base_vazia()
-
-    try:
-        dados = json.loads(caminho.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        raise PreMatriculaCorrompidaError(
-            f"{caminho} está ilegível ({e}). O arquivo não foi alterado; "
-            "corrija-o ou restaure um backup antes de rodar de novo."
-        ) from e
-
-    if not isinstance(dados, dict):
-        raise PreMatriculaCorrompidaError(
-            f"{caminho} não tem o formato esperado (objeto JSON). Arquivo não alterado."
-        )
-
+    dados = carregar_json(
+        caminho_pre_matricula(), _base_vazia, tipo_esperado=dict, erro=PreMatriculaCorrompidaError
+    )
     dados.setdefault("turmas_intencao", {})
     dados.setdefault("cadastros", {})
     return dados
 
 
 def salvar_pre_matricula(dados: dict) -> None:
-    """Grava o pre_matricula.json de forma atômica (temporário + os.replace)."""
+    """Grava o pre_matricula.json de forma atômica, atualizando o timestamp."""
     dados["atualizado_em"] = datetime.now().isoformat(timespec="seconds")
-    caminho = caminho_pre_matricula()
-    caminho.parent.mkdir(parents=True, exist_ok=True)
-
-    fd, tmp = tempfile.mkstemp(dir=str(caminho.parent), prefix=caminho.name + ".", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(dados, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, caminho)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    salvar_json_atomico(caminho_pre_matricula(), dados, indent=2)
 
 
 def mesclar_turmas_intencao(turmas_antigas, turmas_novas):

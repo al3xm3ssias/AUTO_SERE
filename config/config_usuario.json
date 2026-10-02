@@ -1,7 +1,12 @@
 {
-  "pasta_digitalizacao": "C:\\caminho\\da\\pasta",
+  "pasta_digitalizacao": "/home/sambauser/compartilhado/ARQUIVOS/ESCOLA JUDITH/PYTHON/AUTO_SERE/dados/2026/DIGITALIZAÇÃO",
   "pasta_modelos": null,
   "cgm_upload": [],
   "setup_concluido": false,
-  "unidade_escolar": null
+  "unidade_escolar": null,
+  "flags_automacoes": {
+    "analisa_sere": [
+      "--alunos"
+    ]
+  }
 }
