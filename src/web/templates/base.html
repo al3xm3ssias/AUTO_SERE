@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Auto SERE</title>
+  <!-- PWA: permite instalar como aplicativo no Chrome (janela própria, sem barra de endereço) -->
+  <link rel="manifest" href="{{ url_for('web.manifest') }}">
+  <meta name="theme-color" content="#161b27">
   <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('web.static', filename='img/favicon-32.png') }}">
   <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('web.static', filename='img/favicon-16.png') }}">
   <link rel="shortcut icon" href="{{ url_for('web.static', filename='img/favicon-32.png') }}">
@@ -228,5 +231,11 @@
 <script src="{{ url_for('web.static', filename='js/icons.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/app.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/calendario.js') }}"></script>
+<script>
+  // Service worker (necessário para o Chrome oferecer "Instalar"). Falha silenciosa.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register("{{ url_for('web.service_worker') }}", { scope: '/' }).catch(function () {});
+  }
+</script>
 </body>
 </html>

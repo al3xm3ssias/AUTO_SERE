@@ -5,8 +5,6 @@
   "setup_concluido": false,
   "unidade_escolar": null,
   "flags_automacoes": {
-    "analisa_sere": [
-      "--alunos"
-    ]
+    "analisa_sere": []
   }
 }

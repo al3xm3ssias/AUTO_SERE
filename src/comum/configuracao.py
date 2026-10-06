@@ -325,3 +325,15 @@ def definir_unidade_escolar(nome: str, endereco: str, cep: str) -> None:
         "cep": cep,
     }
     _salvar_configuracao(configuracao)
+
+
+def definir_unidade_escolar_completa(dados: dict) -> None:
+    """
+    Grava o bloco completo "unidade_escolar" (nome, nome_abreviado, cep,
+    logradouro, numero, bairro, cidade, uf, endereco, codigo, inep,
+    telefone, email, responsavel). Quem valida e monta os campos é
+    src.comum.escola; use essa camada em vez de chamar esta função direto.
+    """
+    configuracao = carregar_configuracao()
+    configuracao["unidade_escolar"] = dict(dados)
+    _salvar_configuracao(configuracao)

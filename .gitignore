@@ -7,6 +7,9 @@ venv/
 env/
 *.egg-info/
 
+# ==== Python e navegadores locais (instalados pelo INSTALAR_WINDOWS) ====
+runtime/
+
 # ==== Credenciais e segredos (NUNCA versionar) ====
 credenciais/credenciais.py
 credenciais/*.env
@@ -29,6 +32,7 @@ logs/*.log
 logs/*.txt
 !logs/.gitkeep
 locks/*.lock
+locks/*.pid
 !locks/.gitkeep
 
 # ==== VS Code (mantemos apenas os arquivos de configuração do projeto) ====

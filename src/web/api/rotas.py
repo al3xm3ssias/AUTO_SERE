@@ -44,6 +44,8 @@ from flask import Blueprint, jsonify, request
 from src.comum import paths as _paths
 from src.comum.execucao_gui import ExecucaoEmBackground, StatusExecucao
 from src.comum import configuracao as _config
+from src.comum import cep_consulta as _cep
+from src.comum import escola as _escola
 
 api_bp = Blueprint("api", __name__)
 
@@ -547,7 +549,7 @@ def _rodar_coroutine_em_thread(chave: str, coroutine_factory) -> None:
     Para automações async sem wrapper dedicado (ex.:
     src.automacao.sisreg.consultar_encaminhamentos_sisreg,
     src.automacao.rematricula.executar_rematricula,
-    src.automacao.prematricula.executar_processo_completo). Mesmo propósito
+    src.automacao.pre_matricula.executar_processo_completo). Mesmo propósito
     de _rodar_funcao_sincrona_em_thread, mas para uma coroutine — o
     cancelamento aqui cancela a tarefa asyncio (os `finally` do script rodam).
     `coroutine_factory` é uma função zero-argumentos que RETORNA a coroutine.
@@ -559,14 +561,17 @@ def _rodar_coroutine_em_thread(chave: str, coroutine_factory) -> None:
     _observar_execucao(registro, execucao)
 
 
-def _iniciar_via_execucao_gui(chave: str, funcao_executar, **kwargs) -> None:
+def _iniciar_via_execucao_gui(chave: str, funcao_executar, log_inicial: str | None = None, **kwargs) -> None:
     """
     Para automações que JÁ têm um wrapper `executar_<modo>` pronto (ver
     src/automacao/executar_*.py) — estes retornam um ExecucaoEmBackground
     e o próprio módulo já cuida da thread e da captura de print/log.
     """
     registro = _registrar_execucao(chave)
-    execucao = funcao_executar(callback=_callback_para(chave), **kwargs)
+    callback = _callback_para(chave)
+    if log_inicial:
+        callback(log_inicial)
+    execucao = funcao_executar(callback=callback, **kwargs)
     registro["execucao"] = execucao
     _observar_execucao(registro, execucao)
 
@@ -645,7 +650,10 @@ def automacoes_executar(chave):
             args_extras = _args_das_flags(chave)
             if turmas_selecionadas and "--turma" not in args_extras:
                 args_extras.append("--turma")
-            _iniciar_via_execucao_gui(chave, executar_analisa, args_extras=args_extras)
+            _iniciar_via_execucao_gui(
+                chave, executar_analisa, args_extras=args_extras,
+                log_inicial="[OPÇÕES] " + (", ".join(args_extras) if args_extras else "nenhuma — modo completo"),
+            )
 
         elif chave == "documentos":
             idtipo = payload.get("idtipo")
@@ -918,7 +926,7 @@ def automacoes_flags_salvar(chave):
 
 
 # ============================================================
-# SISTEMA — seleção de pasta via janela nativa do Windows (tkinter)
+# SISTEMA — seleção de pasta via janela nativa do Windows (PowerShell/WinForms)
 # ============================================================
 # Como o Flask roda localmente na mesma máquina Windows que tem o
 # SERE, o jeito mais direto de escolher uma pasta é abrir a janela
@@ -948,17 +956,11 @@ def escolher_pasta():
     destino = payload.get("destino")
 
     try:
-        import tkinter as tk
-        from tkinter import filedialog
+        from src.comum.dialogo_pasta import escolher_pasta as _dialogo_pasta
 
-        # Janela raiz invisível: existe só para o filedialog funcionar,
-        # não deve aparecer na tela.
-        root = tk.Tk()
-        root.withdraw()
-        root.wm_attributes("-topmost", 1)  # traz o diálogo para frente
-
-        caminho = filedialog.askdirectory(title=titulo)
-        root.destroy()
+        # Windows: seletor nativo via PowerShell (sem depender do tkinter);
+        # WSL/Linux: tkinter. Ver src/comum/dialogo_pasta.py.
+        caminho = _dialogo_pasta(titulo)
 
         if not caminho:
             # Usuário cancelou o diálogo
@@ -1061,6 +1063,43 @@ def configuracao_pasta_digitalizacao_salvar():
 
 
 # ============================================================
+# ESCOLA — nome, CEP, endereço e identificação (fonte única: src.comum.escola)
+# ============================================================
+
+@api_bp.route("/configuracoes/escola", methods=["GET"])
+def escola_ler():
+    return jsonify({"dados": _escola.carregar(), "configurada": _escola.configurada()})
+
+
+@api_bp.route("/configuracoes/escola", methods=["POST"])
+def escola_salvar():
+    payload = request.get_json(silent=True) or {}
+    try:
+        _escola.salvar(payload)
+    except _escola.ValidacaoErro as exc:
+        return jsonify({"erro": exc.mensagem(), "campos": exc.erros}), 400
+    return jsonify({
+        "status": "ok",
+        "mensagem": "Dados da escola salvos.",
+        "dados": _escola.carregar(),
+        "configurada": _escola.configurada(),
+    })
+
+
+@api_bp.route("/cep/<string:cep>", methods=["GET"])
+def cep_consultar(cep):
+    """Preenche logradouro/bairro/cidade/UF a partir do CEP (ViaCEP → BrasilAPI)."""
+    try:
+        return jsonify(_cep.consultar_cep(cep))
+    except _cep.CepInvalido:
+        return jsonify({"erro": "CEP inválido: informe 8 dígitos."}), 400
+    except _cep.CepNaoEncontrado:
+        return jsonify({"erro": "CEP não encontrado. Preencha o endereço manualmente."}), 404
+    except _cep.ErroConsultaCep:
+        return jsonify({"erro": "Não foi possível consultar o CEP agora (sem internet?). Preencha o endereço manualmente."}), 502
+
+
+# ============================================================
 # WIZARD — 1ª execução obrigatória
 # ============================================================
 
@@ -1077,6 +1116,7 @@ def wizard_status():
     alunos_ok = (_dados_dir() / "alunos.json").exists()
 
     return jsonify({
+        "escola": _config.unidade_escolar_configurada(),
         "credenciais_sere": credenciais_sere,
         "turmas": turmas_ok,
         "gerar_pastas": _config.pasta_digitalizacao_configurada(),
@@ -1132,6 +1172,13 @@ def wizard_executar_passo(passo):
                 # .env já está correto e um reinício normal resolve.
                 mensagem = "Credenciais salvas em credenciais/.env. Reinicie o Auto SERE para aplicá-las."
             return jsonify({"status": "ok", "mensagem": mensagem})
+
+        elif passo == "escola":
+            try:
+                _escola.salvar(payload)
+            except _escola.ValidacaoErro as exc:
+                return jsonify({"erro": exc.mensagem(), "campos": exc.erros}), 400
+            return jsonify({"status": "ok", "mensagem": "Dados da escola salvos."})
 
         elif passo in ("google_api", "whatsapp"):
             return jsonify({

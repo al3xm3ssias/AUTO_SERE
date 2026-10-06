@@ -13,6 +13,8 @@ estruturado, versionável e multiplataforma (Windows / Linux / WSL).
 **Este bootstrap NUNCA apaga arquivos existentes.** Pode ser executado
 novamente a qualquer momento — ele só cria o que ainda estiver faltando.
 
+> **Windows:** para instalar e usar como aplicativo (atalho + Chrome), veja [`docs/WINDOWS.md`](docs/WINDOWS.md).
+
 ## Estrutura de pastas
 
 ```

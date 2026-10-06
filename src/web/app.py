@@ -10,10 +10,16 @@ Para rodar (a partir da raiz do projeto AUTO_SERE):
     pip install -r requirements.txt
     python -m src.web.app
 
-A aplicação sobe em http://127.0.0.1:5000
+No Windows, o jeito normal é o atalho "AUTO SERE" (ou AUTO_SERE.bat), que
+usa src.launcher: sobe este servidor uma única vez e abre o Chrome em modo
+aplicativo. Host e porta vêm de src.comum.servidor (padrão 127.0.0.1:8000).
 """
 
-from flask import Flask, Blueprint, render_template
+import os
+
+from flask import Flask, Blueprint, jsonify, render_template, send_from_directory
+
+from src.comum import servidor as _servidor
 
 from src.web.api.calendario import calendario_bp
 from src.web.api.rotas import api_bp
@@ -36,6 +42,46 @@ def index():
     return render_template("base.html")
 
 
+@web_bp.route("/web/api/ping")
+def ping():
+    """Usado pelo launcher para saber se JÁ existe um AUTO SERE rodando."""
+    return jsonify({"app": "auto-sere", "ok": True, "pid": os.getpid()})
+
+
+@web_bp.route("/manifest.webmanifest")
+def manifest():
+    """Manifest do PWA (nome, ícones e modo standalone)."""
+    img = "/web/static/img/"
+    resposta = jsonify({
+        "name": "Auto SERE",
+        "short_name": "Auto SERE",
+        "description": "Automações do portal SERE — Escola Municipal Profª Judith Macedo Silveira",
+        "id": "/web",
+        "start_url": "/web",
+        "scope": "/",
+        "display": "standalone",
+        "background_color": "#0f1117",
+        "theme_color": "#161b27",
+        "lang": "pt-BR",
+        "icons": [
+            {"src": img + "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+            {"src": img + "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+            {"src": img + "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+        ],
+    })
+    resposta.mimetype = "application/manifest+json"
+    return resposta
+
+
+@web_bp.route("/sw.js")
+def service_worker():
+    """Service worker na raiz (escopo "/"). Sem cache: os dados são dinâmicos."""
+    resposta = send_from_directory(web_bp.static_folder, "sw.js", mimetype="text/javascript")
+    resposta.headers["Cache-Control"] = "no-cache"
+    resposta.headers["Service-Worker-Allowed"] = "/"
+    return resposta
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
 
@@ -49,5 +95,14 @@ def create_app() -> Flask:
 app = create_app()
 
 if __name__ == "__main__":
-    # debug=True facilita o desenvolvimento (auto-reload); desligar em produção.
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    # Sem debug/reloader por padrão: o reloader sobe o processo duas vezes e
+    # quebraria o launcher ("não abrir várias instâncias"). Para desenvolver
+    # com auto-reload, defina AUTO_SERE_DEBUG=1.
+    _debug = _servidor.modo_debug()
+    app.run(
+        host=_servidor.servidor_host(),
+        port=_servidor.servidor_porta(),
+        debug=_debug,
+        use_reloader=_debug,
+        threaded=True,
+    )

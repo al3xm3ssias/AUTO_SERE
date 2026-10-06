@@ -1646,3 +1646,18 @@ tbody td{padding:11px 14px;vertical-align:middle}
   .cal-chip{font-size:.58rem;padding:0 3px}
   .cal-titulo{min-width:0}
 }
+
+
+/* ---------- Modal e formulário da escola ---------- */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;
+  justify-content:center;z-index:10000;padding:16px}
+.modal-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:22px;
+  width:100%;max-width:580px;max-height:90vh;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.45)}
+.modal-card h3{font-size:1rem;margin-bottom:16px}
+.modal-acoes{display:flex;gap:10px;justify-content:flex-end;margin-top:8px}
+.form-linha{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.cep-linha{display:flex;gap:8px;align-items:center}
+.cep-linha input{flex:1;min-width:0}
+.cep-msg{font-size:.72rem;color:var(--txt3);margin-top:6px;min-height:1em}
+.esc-opcional{margin:4px 0 8px}
+.esc-opcional summary{cursor:pointer;font-size:.8rem;color:var(--txt3);margin-bottom:4px}

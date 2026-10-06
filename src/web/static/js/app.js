@@ -113,7 +113,6 @@ const TITULOS = {
   documentos: "Análise de documentos",
   prematricula: "Pré matrícula",
   funcionarios: "Funcionários",
-  calendario: "Calendário letivo",
   automacoes: "Automações",
   configuracoes: "Configurações",
   "primeira-execucao": "1ª execução do sistema",
@@ -135,8 +134,6 @@ function irPara(view, opts = {}) {
     carregarDocumentos();
   } else if (view === "prematricula" || view === "funcionarios") {
     carregarTabelaGenerica(view);
-  } else if (view === "calendario") {
-    carregarCalendario();
   }
   if (view === "painel") {
     carregarPainel();
@@ -687,6 +684,10 @@ function abrirAutomacao(chave, nome) {
   document.getElementById("topbar-title").textContent = nome || chave;
   renderizarCamposAutomacao(chave);
   abrirAcordeonAutomacoes();
+  ligarControlesExecucao();
+  _execResetar();
+  carregarFlagsAutomacao(chave);
+  sincronizarExecucao(chave);
 }
 
 /** Monta o HTML de um campo do formulário conforme seu tipo. */
@@ -818,49 +819,313 @@ async function carregarTurmasParaSelect() {
 
 function initAutomacoes() {
   carregarListaAutomacoes();
+}
 
-  document.getElementById("btn-voltar-automacoes").addEventListener("click", () => {
-    document.getElementById("automacoes-lista").style.display = "block";
-    document.getElementById("automacoes-execucao").style.display = "none";
-    document.getElementById("topbar-title").textContent = "Automações";
-  });
 
-  document.getElementById("btn-executar-tarefa").addEventListener("click", async () => {
-    const btn = document.getElementById("btn-executar-tarefa");
-    const original = btn.innerHTML;
-    btn.innerHTML = `<span class="spin">${icon("loader")}</span> Executando...`;
+/* ---------- Execução de automações: executar / cancelar / acompanhar ---------- */
+/* O botão "Executar tarefa" vira "Cancelar execução" enquanto a automação roda
+   (acompanhada por polling em /automacoes/<chave>/status) e volta ao normal
+   quando ela termina, é cancelada ou falha. Os handlers usam `onclick`, e não
+   addEventListener: antes cada abertura de automação empilhava mais um listener
+   no mesmo botão e um clique disparava várias execuções. */
+
+let _execTimer = null;
+
+const _execBotao = () => document.getElementById("btn-executar-tarefa");
+
+function _execEstadoBotao(estado) {
+  const btn = _execBotao();
+  if (!btn) return;
+  if (btn.dataset.rotuloOriginal === undefined) btn.dataset.rotuloOriginal = btn.innerHTML;
+  btn.dataset.estado = estado;
+  if (estado === "executando") {
+    btn.disabled = false;
+    btn.style.background = "var(--rose)";
+    btn.style.borderColor = "var(--rose)";
+    btn.style.color = "#fff";
+    btn.innerHTML = `<span class="spin">${icon("loader")}</span> Cancelar execução`;
+  } else if (estado === "cancelando") {
     btn.disabled = true;
+    btn.style.background = "var(--rose)";
+    btn.style.borderColor = "var(--rose)";
+    btn.style.color = "#fff";
+    btn.innerHTML = `<span class="spin">${icon("loader")}</span> Cancelando…`;
+  } else {
+    btn.disabled = false;
+    btn.style.background = "";
+    btn.style.borderColor = "";
+    btn.style.color = "";
+    btn.innerHTML = btn.dataset.rotuloOriginal;
+  }
+}
 
-    const payload = { automacao: automacaoAtual };
+function _execLogBox(criar) {
+  let box = document.getElementById("exec-log");
+  const btn = _execBotao();
+  if (!box && criar && btn) {
+    box = document.createElement("pre");
+    box.id = "exec-log";
+    box.style.cssText =
+      "margin-top:14px;max-height:240px;overflow:auto;padding:12px 14px;" +
+      "background:var(--surface2,#0d1117);border:1px solid var(--border);border-radius:8px;" +
+      "font-family:var(--mono);font-size:.7rem;line-height:1.5;color:var(--txt2);" +
+      "white-space:pre-wrap;word-break:break-word;";
+    (btn.closest(".form-card") || btn.parentElement).insertAdjacentElement("afterend", box);
+  }
+  return box;
+}
 
-    const switchTurma = document.getElementById("switch-por-turma");
-    if (switchTurma) {
-      payload.por_turma = switchTurma.classList.contains("on");
-      payload.turmas = Array.from(
-        document.querySelectorAll("#checklist-turmas input:checked")
-      ).map((el) => el.value);
+function _execMostrarLogs(logs) {
+  if (!logs || !logs.length) return;
+  const box = _execLogBox(true);
+  const noFim = box.scrollTop + box.clientHeight >= box.scrollHeight - 8;
+  box.textContent = logs.slice(-60).join("\n");
+  if (noFim) box.scrollTop = box.scrollHeight;
+}
+
+function _execParar() {
+  if (_execTimer) clearInterval(_execTimer);
+  _execTimer = null;
+}
+
+/** Zera o estado visual ao abrir outra automação (a anterior segue rodando no servidor). */
+function _execResetar() {
+  _execParar();
+  document.getElementById("exec-log")?.remove();
+  _execEstadoBotao("ocioso");
+}
+
+async function _execConsultar(chave, avisarAoTerminar) {
+  let s;
+  try {
+    s = await apiGet(`/automacoes/${chave}/status`);
+  } catch (e) {
+    return;  // falha momentânea de rede: tenta de novo no próximo ciclo
+  }
+  if (chave !== automacaoAtual) { _execParar(); return; }  // usuário abriu outra automação
+  _execMostrarLogs(s.logs);
+
+  if (s.status === "executando") {
+    _execEstadoBotao(s.cancelando ? "cancelando" : "executando");
+    return;
+  }
+  _execParar();
+  _execEstadoBotao("ocioso");
+  if (!avisarAoTerminar) return;
+  if (s.status === "concluido") toast("Automação concluída");
+  else if (s.status === "cancelado") toast("Execução cancelada");
+  else if (s.status === "erro") toast(`Erro: ${s.erro || "veja o registro abaixo"}`);
+}
+
+function _execAcompanhar(chave) {
+  _execParar();
+  _execTimer = setInterval(() => _execConsultar(chave, true), 2000);
+  _execConsultar(chave, true);
+}
+
+/** Ao abrir uma automação já em execução, volta a mostrar "Cancelar" e retoma o acompanhamento. */
+async function sincronizarExecucao(chave) {
+  try {
+    const s = await apiGet(`/automacoes/${chave}/status`);
+    if (chave !== automacaoAtual) return;
+    if (s.status === "executando") {
+      _execMostrarLogs(s.logs);
+      _execEstadoBotao(s.cancelando ? "cancelando" : "executando");
+      _execAcompanhar(chave);
     }
+  } catch (e) { /* sem status ainda: tela fica no estado normal */ }
+}
 
-    const campoPasta = document.getElementById("pasta-selecionada");
-    if (campoPasta) {
-      payload.pasta = campoPasta.textContent;
-    }
+function _execMontarPayload() {
+  const payload = { automacao: automacaoAtual };
 
-    // Coleta qualquer outro campo dinâmico (texto/select) pelo id
-    document.querySelectorAll("#campos-automacao input[type=text], #campos-automacao select").forEach((el) => {
-      if (el.id && el.id !== "select-turmas") payload[el.id] = el.value;
-    });
+  const switchTurma = document.getElementById("switch-por-turma");
+  if (switchTurma) {
+    payload.por_turma = switchTurma.classList.contains("on");
+    payload.turmas = Array.from(
+      document.querySelectorAll("#checklist-turmas input:checked")
+    ).map((el) => el.value);
+  }
 
-    try {
-      await apiPost(`/automacoes/${automacaoAtual}/executar`, payload);
-      toast("Tarefa executada com sucesso");
-    } catch (e) {
-      toast(`Endpoint /automacoes/${automacaoAtual}/executar ainda não conectado`);
-    } finally {
-      btn.innerHTML = original;
-      btn.disabled = false;
-    }
+  const campoPasta = document.getElementById("pasta-selecionada");
+  if (campoPasta) payload.pasta = campoPasta.textContent;
+
+  // Qualquer outro campo dinâmico (texto/select) pelo id
+  document.querySelectorAll("#campos-automacao input[type=text], #campos-automacao select").forEach((el) => {
+    if (el.id && el.id !== "select-turmas") payload[el.id] = el.value;
   });
+  return payload;
+}
+
+async function _execAoClicar() {
+  const btn = _execBotao();
+  const chave = automacaoAtual;
+  if (!btn || !chave) return;
+
+  // Já executando: o clique significa "cancelar".
+  if (btn.dataset.estado === "executando") {
+    _execEstadoBotao("cancelando");
+    try {
+      await apiPost(`/automacoes/${chave}/cancelar`, {});
+      toast("Cancelamento solicitado…");
+    } catch (e) {
+      toast(e.message);
+      _execEstadoBotao("executando");
+    }
+    return;
+  }
+  if (btn.dataset.estado === "cancelando") return;
+
+  _execEstadoBotao("executando");
+  document.getElementById("exec-log")?.remove();
+  try {
+    await apiPost(`/automacoes/${chave}/executar`, _execMontarPayload());
+    toast("Automação iniciada");
+    _execAcompanhar(chave);
+  } catch (e) {
+    _execEstadoBotao("ocioso");
+    toast(e.message);
+  }
+}
+
+function ligarControlesExecucao() {
+  const voltar = document.getElementById("btn-voltar-automacoes");
+  if (voltar) {
+    voltar.onclick = () => {
+      document.getElementById("automacoes-lista").style.display = "block";
+      document.getElementById("automacoes-execucao").style.display = "none";
+      document.getElementById("topbar-title").textContent = "Automações";
+    };
+  }
+  const exec = _execBotao();
+  if (exec) exec.onclick = _execAoClicar;
+}
+
+/* ---------- Flags (opções) de cada automação ---------- */
+/* As flags vêm do próprio script (GET /automacoes/<chave>/flags) e cada
+   alteração é salva na hora. O painel vai para o elemento #flags-automacao
+   (aba "Configuração"); enquanto esse elemento não existir no template, aparece
+   como um bloco recolhível "Opções do script" logo abaixo dos campos. */
+
+function _flagsContainer() {
+  const fixo = document.getElementById("flags-automacao");
+  if (fixo) return fixo;
+  let auto = document.getElementById("flags-automacao-auto");
+  if (!auto) {
+    const campos = document.getElementById("campos-automacao");
+    if (!campos) return null;
+    auto = document.createElement("details");
+    auto.id = "flags-automacao-auto";
+    auto.style.cssText = "margin:0 0 16px;padding:10px 14px;border:1px solid var(--border);border-radius:8px;";
+    campos.insertAdjacentElement("afterend", auto);
+  }
+  return auto;
+}
+
+function _flagsLinha(f, tipo) {
+  const aviso = f.aviso
+    ? `<div style="color:var(--amber);font-size:.68rem;margin-top:2px;">⚠ ${_docEsc(f.aviso)}</div>` : "";
+  const desc = f.descricao
+    ? `<div style="color:var(--txt3);font-size:.7rem;margin-top:2px;">${_docEsc(f.descricao)}</div>` : "";
+  return `
+    <label style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;cursor:pointer;">
+      <input type="${tipo}" ${tipo === "radio" ? 'name="flag-modo"' : ""} data-flag="${_docEsc(f.flag)}" ${f.ativa ? "checked" : ""} style="margin-top:3px;">
+      <span>
+        <span style="font-size:.84rem;">${_docEsc(f.rotulo)}</span>
+        <code style="margin-left:6px;font-size:.66rem;color:var(--txt3);">${_docEsc(f.flag)}</code>
+        ${desc}${aviso}
+      </span>
+    </label>`;
+}
+
+function _flagsResumo(flags) {
+  const ativas = flags.filter((f) => f.ativa);
+  return ativas.length
+    ? `<span style="color:var(--amber)">${ativas.map((f) => _docEsc(f.rotulo)).join(" + ")}</span>`
+    : `<span style="color:var(--txt3)">padrão (completo)</span>`;
+}
+
+async function carregarFlagsAutomacao(chave) {
+  document.getElementById("flags-automacao-auto")?.remove();
+  const fixo = document.getElementById("flags-automacao");
+  if (fixo) fixo.innerHTML = "";
+
+  let dados;
+  try {
+    dados = await apiGet(`/automacoes/${chave}/flags`);
+  } catch (e) {
+    return;
+  }
+  if (chave !== automacaoAtual) return;
+
+  const cont = _flagsContainer();
+  if (!cont) return;
+  if (!dados.flags || !dados.flags.length) {
+    if (cont.id === "flags-automacao") {
+      cont.innerHTML = `<p style="color:var(--txt3);font-size:.82rem;">Esta automação não tem opções configuráveis.</p>`;
+    } else {
+      cont.remove();
+    }
+    return;
+  }
+
+  const modos = dados.flags.filter((f) => f.grupo === "modo");
+  const outras = dados.flags.filter((f) => f.grupo !== "modo");
+  const nenhumModo = !modos.some((f) => f.ativa);
+  // O resumo na barra recolhida mostra o modo SALVO, para que uma opção
+  // diferente do padrão nunca fique escondida.
+  const titulo = cont.tagName === "DETAILS"
+    ? `<summary style="cursor:pointer;font-size:.84rem;">Opções do script — <span class="flags-resumo">${_flagsResumo(dados.flags)}</span></summary>`
+    : "";
+  if (cont.tagName === "DETAILS" && dados.flags.some((f) => f.ativa)) cont.open = true;
+
+  cont.innerHTML = `
+    ${titulo}
+    ${modos.length ? `
+      <div style="margin-top:10px;font-family:var(--mono);font-size:.66rem;color:var(--txt3);letter-spacing:.08em;text-transform:uppercase;">Modo de execução</div>
+      <label style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;cursor:pointer;">
+        <input type="radio" name="flag-modo" data-flag="" ${nenhumModo ? "checked" : ""} style="margin-top:3px;">
+        <span style="font-size:.84rem;">Completo (padrão)</span>
+      </label>
+      ${modos.map((f) => _flagsLinha(f, "radio")).join("")}` : ""}
+    ${outras.length ? `
+      <div style="margin-top:10px;font-family:var(--mono);font-size:.66rem;color:var(--txt3);letter-spacing:.08em;text-transform:uppercase;">Opções</div>
+      ${outras.map((f) => _flagsLinha(f, "checkbox")).join("")}` : ""}
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px;">
+      <button type="button" class="btn-sm" data-acao="salvar" disabled>Salvar opções</button>
+      <button type="button" class="btn-sm" data-acao="padrao">Voltar ao padrão</button>
+      <span class="flags-status" style="font-family:var(--mono);font-size:.68rem;color:var(--txt3);"></span>
+    </div>`;
+
+  const status = cont.querySelector(".flags-status");
+  const btnSalvar = cont.querySelector('[data-acao="salvar"]');
+  const btnPadrao = cont.querySelector('[data-acao="padrao"]');
+  const marcadas = () => Array.from(cont.querySelectorAll("input[data-flag]:checked"))
+    .map((i) => i.dataset.flag).filter(Boolean);
+
+  // Nada é gravado ao marcar: só quando você clica em "Salvar opções".
+  cont.querySelectorAll("input[type=radio],input[type=checkbox]").forEach((el) => {
+    el.addEventListener("change", () => {
+      btnSalvar.disabled = false;
+      status.innerHTML = '<span style="color:var(--amber)">Alterações não salvas</span>';
+    });
+  });
+
+  const gravar = async (flags) => {
+    btnSalvar.disabled = btnPadrao.disabled = true;
+    status.textContent = "Salvando…";
+    try {
+      await apiPost(`/automacoes/${chave}/flags`, { flags });
+      await carregarFlagsAutomacao(chave);  // redesenha com o que ficou realmente salvo
+      const novo = document.querySelector("#flags-automacao .flags-status, #flags-automacao-auto .flags-status");
+      if (novo) novo.innerHTML = '<span style="color:var(--lime)">✓ Salvo — vale a partir da próxima execução</span>';
+    } catch (e) {
+      btnPadrao.disabled = false;
+      status.innerHTML = `<span style="color:var(--rose)">✗ ${_docEsc(e.message)}</span>`;
+    }
+  };
+  btnSalvar.addEventListener("click", () => gravar(marcadas()));
+  btnPadrao.addEventListener("click", () => gravar([]));
 }
 
 /* ---------- Configurações ---------- */
@@ -871,6 +1136,9 @@ const DETALHE_CONFIG = {
     <div class="field"><label>Usuário</label><input type="text" id="cfg-sere-usuario" placeholder="usuário do SERE"></div>
     <div class="field"><label>Senha</label><input type="password" id="cfg-sere-senha" placeholder="••••••••"></div>
     <button class="btn-primary" id="cfg-sere-salvar">Salvar credenciais</button>`,
+  escola: `
+    <h4 style="margin-bottom:14px; font-size:.9rem;">Dados da escola</h4>
+    <div id="cfg-escola-form"></div>`,
   pasta_digitalizacao: `
     <h4 style="margin-bottom:14px; font-size:.9rem;">Pasta de digitalização</h4>
     <p style="color:var(--txt3); font-size:.82rem; margin-bottom:12px;">Pasta raiz onde ficam os documentos digitalizados dos alunos (as pastas das turmas). Por padrão é <code>dados/&lt;ano&gt;/DIGITALIZAÇÃO</code>.</p>
@@ -932,6 +1200,9 @@ function initConfiguracoes() {
       }
       if (row.dataset.config === "pasta_digitalizacao") {
         conectarFormPastaDigitalizacao();
+      }
+      if (row.dataset.config === "escola") {
+        montarFormEscola(document.getElementById("cfg-escola-form"), {});
       }
     });
   });
@@ -1015,9 +1286,181 @@ function conectarFormSenhaSere() {
   });
 }
 
+/* ---------- Modal genérico ---------- */
+
+// Abre um modal; `montar(corpo, fechar)` preenche o conteúdo.
+// Esc ou o botão Cancelar fecham. Clicar fora NÃO fecha (evita perder o que foi digitado).
+function abrirModal(titulo, montar, aoFechar) {
+  const fundo = document.createElement("div");
+  fundo.className = "modal-overlay";
+  const card = document.createElement("div");
+  card.className = "modal-card";
+  card.setAttribute("role", "dialog");
+  card.setAttribute("aria-modal", "true");
+  const h = document.createElement("h3");
+  h.textContent = titulo;
+  const corpo = document.createElement("div");
+  card.append(h, corpo);
+  fundo.appendChild(card);
+
+  const onEsc = (e) => { if (e.key === "Escape") fechar(); };
+  const fechar = () => {
+    document.removeEventListener("keydown", onEsc);
+    fundo.remove();
+    if (aoFechar) aoFechar();
+  };
+  document.addEventListener("keydown", onEsc);
+  document.body.appendChild(fundo);
+  montar(corpo, fechar);
+  const primeiro = corpo.querySelector("input, select, textarea");
+  if (primeiro) primeiro.focus();
+  return fechar;
+}
+
+// Pede usuário e senha do SERE. Resolve {login, senha} ou null (cancelado).
+function pedirCredenciaisSere() {
+  return new Promise((resolve) => {
+    abrirModal("Credenciais do SERE", (corpo, fechar) => {
+      corpo.innerHTML = `
+        <div class="field"><label>Usuário (CPF)</label><input type="text" id="mdl-sere-login" autocomplete="username"></div>
+        <div class="field"><label>Senha</label><input type="password" id="mdl-sere-senha" autocomplete="current-password"></div>
+        <div class="modal-acoes">
+          <button class="btn-sm" id="mdl-cancelar" style="padding:9px 16px;font-size:.78rem">Cancelar</button>
+          <button class="btn-primary" id="mdl-ok">Salvar</button>
+        </div>`;
+      const enviar = () => {
+        const login = corpo.querySelector("#mdl-sere-login").value.trim();
+        const senha = corpo.querySelector("#mdl-sere-senha").value;
+        if (!login || !senha) { toast("Preencha usuário e senha do SERE"); return; }
+        resolve({ login, senha });
+        fechar();
+      };
+      corpo.querySelector("#mdl-ok").addEventListener("click", enviar);
+      corpo.querySelector("#mdl-sere-senha").addEventListener("keydown", (e) => { if (e.key === "Enter") enviar(); });
+      corpo.querySelector("#mdl-cancelar").addEventListener("click", fechar);
+    }, () => resolve(null));   // resolve(null) é ignorado se já resolveu com os dados
+  });
+}
+
+/* ---------- Dados da escola (wizard e Configurações usam o mesmo formulário) ---------- */
+
+function abrirModalEscola(aoSalvar) {
+  abrirModal("Dados da escola", (corpo, fechar) => {
+    montarFormEscola(corpo, { aoSalvar: () => { fechar(); if (aoSalvar) aoSalvar(); }, aoCancelar: fechar });
+  });
+}
+
+function mascararCep(valor) {
+  const d = String(valor || "").replace(/\D/g, "").slice(0, 8);
+  return d.length > 5 ? d.slice(0, 5) + "-" + d.slice(5) : d;
+}
+
+async function montarFormEscola(container, { aoSalvar, aoCancelar } = {}) {
+  if (!container) return;
+  container.innerHTML = `
+    <div class="field"><label>Nome da escola *</label><input type="text" id="esc-nome" maxlength="150"></div>
+    <div class="field"><label>Nome abreviado</label><input type="text" id="esc-nome_abreviado" maxlength="60"></div>
+    <div class="field">
+      <label>CEP *</label>
+      <div class="cep-linha">
+        <input type="text" id="esc-cep" inputmode="numeric" placeholder="00000-000" maxlength="9">
+        <button class="btn-sm" id="esc-buscar-cep" type="button" style="padding:9px 16px;font-size:.78rem">Buscar endereço</button>
+      </div>
+      <div id="esc-cep-msg" class="cep-msg"></div>
+    </div>
+    <div class="form-linha">
+      <div class="field" style="grid-column:span 2"><label>Endereço (rua/avenida) *</label><input type="text" id="esc-logradouro"></div>
+      <div class="field"><label>Número</label><input type="text" id="esc-numero" maxlength="10"></div>
+    </div>
+    <div class="form-linha">
+      <div class="field"><label>Bairro</label><input type="text" id="esc-bairro"></div>
+      <div class="field"><label>Cidade</label><input type="text" id="esc-cidade"></div>
+      <div class="field"><label>Estado (UF)</label><input type="text" id="esc-uf" maxlength="2" style="text-transform:uppercase"></div>
+    </div>
+    <details class="esc-opcional">
+      <summary>Identificação (opcional)</summary>
+      <div class="form-linha" style="margin-top:12px">
+        <div class="field"><label>Código da escola</label><input type="text" id="esc-codigo"></div>
+        <div class="field"><label>INEP</label><input type="text" id="esc-inep" inputmode="numeric" maxlength="8"></div>
+      </div>
+      <div class="form-linha">
+        <div class="field"><label>Telefone</label><input type="text" id="esc-telefone" inputmode="tel"></div>
+        <div class="field"><label>E-mail</label><input type="text" id="esc-email" inputmode="email"></div>
+      </div>
+      <div class="field"><label>Responsável</label><input type="text" id="esc-responsavel"></div>
+    </details>
+    <div id="esc-status" style="font-family:var(--mono); font-size:.72rem; color:var(--txt3); margin:6px 0 12px;">Carregando…</div>
+    <div class="modal-acoes" style="justify-content:flex-start">
+      <button class="btn-primary" id="esc-salvar">Salvar dados da escola</button>
+      ${aoCancelar ? '<button class="btn-sm" id="esc-cancelar" style="padding:9px 16px;font-size:.78rem">Cancelar</button>' : ""}
+    </div>`;
+
+  const $ = (id) => container.querySelector("#esc-" + id);
+  const CAMPOS = ["nome", "nome_abreviado", "cep", "logradouro", "numero", "bairro", "cidade", "uf",
+                  "codigo", "inep", "telefone", "email", "responsavel"];
+  const msgCep = $("cep-msg");
+
+  const preencher = (d) => {
+    CAMPOS.forEach((c) => { $(c).value = c === "cep" ? (d.cep_formatado || "") : (d[c] || ""); });
+  };
+
+  const buscarCep = async (sobrescrever) => {
+    const digitos = $("cep").value.replace(/\D/g, "");
+    if (digitos.length !== 8) { if (sobrescrever) msgCep.textContent = "Digite o CEP com 8 dígitos."; return; }
+    msgCep.textContent = "Buscando…";
+    try {
+      const r = await apiGet("/cep/" + digitos);
+      // Botão: substitui o endereço. Ao sair do campo: só completa o que estiver vazio.
+      [["logradouro", r.logradouro], ["bairro", r.bairro], ["cidade", r.cidade], ["uf", r.uf]].forEach(([c, v]) => {
+        if (v && (sobrescrever || !$(c).value.trim())) $(c).value = v;
+      });
+      msgCep.innerHTML = '<span style="color:var(--lime)">✓ Endereço preenchido — confira e informe o número.</span>';
+    } catch (e) {
+      msgCep.innerHTML = '<span style="color:var(--amber)"></span>';
+      msgCep.firstChild.textContent = "Não foi possível buscar: preencha o endereço manualmente.";
+    }
+  };
+
+  $("cep").addEventListener("input", () => { $("cep").value = mascararCep($("cep").value); });
+  $("cep").addEventListener("blur", () => buscarCep(false));
+  $("buscar-cep").addEventListener("click", () => buscarCep(true));
+  if (aoCancelar) $("cancelar").addEventListener("click", aoCancelar);
+
+  $("salvar").addEventListener("click", async () => {
+    const corpo = {};
+    CAMPOS.forEach((c) => { corpo[c] = $(c).value; });
+    const btn = $("salvar");
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Salvando...";
+    try {
+      const r = await apiPost("/configuracoes/escola", corpo);
+      toast(r.mensagem || "Dados da escola salvos");
+      $("status").innerHTML = '<span style="color:var(--lime)">✓ Dados salvos</span>';
+      if (aoSalvar) aoSalvar(r);
+    } catch (e) {
+      toast(e.message);   // ex.: "Informe o nome da escola.; CEP inválido: informe 8 dígitos."
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  });
+
+  try {
+    const r = await apiGet("/configuracoes/escola");
+    preencher(r.dados);
+    $("status").innerHTML = r.configurada
+      ? '<span style="color:var(--lime)">✓ Escola configurada</span>'
+      : '<span style="color:var(--amber)">Pendente — preencha nome, CEP e endereço</span>';
+  } catch (e) {
+    $("status").textContent = "Não foi possível ler a configuração atual.";
+  }
+}
+
 /* ---------- Wizard primeira execução ---------- */
 
 const PASSOS_WIZARD = [
+  { chave: "escola", nome: "Dados da escola (nome, CEP e endereço)", desc: "Informe a escola uma vez; todos os scripts passam a usar esses dados." },
   { chave: "credenciais_sere", nome: "Salvar credenciais do SERE (obrigatório)", desc: "O usuário deve salvar as credenciais do SERE para continuar." },
   { chave: "turmas", nome: "Executar Turmas (turmas.py)", desc: "Pega os alunos e turmas da escola." },
   { chave: "gerar_pastas", nome: "Executar Gerar Pastas (gerar_pastas.py)", desc: "Gera as pastas dos alunos automaticamente." },
@@ -1058,12 +1501,16 @@ async function carregarWizard() {
       const chave = btn.dataset.wizardRun;
       let payload = {};
 
+      if (chave === "escola") {
+        abrirModalEscola(() => carregarWizard());
+        return;
+      }
+
       if (chave === "credenciais_sere") {
-        const login = window.prompt("Usuário (CPF) do SERE:");
-        if (!login) return;
-        const senha = window.prompt("Senha do SERE:");
-        if (!senha) return;
-        payload = { login, senha };
+        // Modal com campo de senha mascarado (window.prompt exibiria a senha em texto).
+        const dados = await pedirCredenciaisSere();
+        if (!dados) return;
+        payload = dados;
       }
 
       const original = btn.textContent;
@@ -1595,6 +2042,24 @@ window.toggleCruzDetail = function (id, btn) {
   btn.textContent = row.classList.contains("open") ? "▴ fechar" : "▾ ver";
 };
 
+/* ---------- Assistente de 1ª execução ---------- */
+
+// Se a escola ainda não foi configurada, abre sozinho o assistente (1ª execução).
+// Só age se o usuário ainda estiver no painel, para não "puxar" quem já navegou.
+async function abrirAssistenteSeNecessario() {
+  try {
+    const status = await apiGet("/wizard/status");
+    const painelAtivo = document.getElementById("sec-painel")?.classList.contains("active");
+    if (status.escola === false && painelAtivo) {
+      document.querySelectorAll(".nav-item").forEach((n) => n.classList.remove("active"));
+      document.querySelector('.nav-item[data-view="primeira-execucao"]')?.classList.add("active");
+      irPara("primeira-execucao");
+    }
+  } catch (e) {
+    // endpoint indisponível: continua no painel
+  }
+}
+
 /* ---------- Init ---------- */
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -1606,4 +2071,5 @@ document.addEventListener("DOMContentLoaded", () => {
   initAutomacoes();
   initConfiguracoes();
   carregarPainel();
+  abrirAssistenteSeNecessario();
 });
