@@ -101,7 +101,7 @@ if __name__ == "__main__":
     _debug = _servidor.modo_debug()
     app.run(
         host=_servidor.servidor_host(),
-        port=_servidor.servidor_porta(),
+        port=5000,
         debug=_debug,
         use_reloader=_debug,
         threaded=True,
