@@ -62,9 +62,9 @@ from comum.arquivos_json import (
 # CONSTANTES
 # ==========================================================
 
-LOGIN_URL = "https://web.pontagrossa.pr.gov.br/prematricula/login"
-INTENCOES_URL = "https://web.pontagrossa.pr.gov.br/prematricula/intencoes_vaga"
-CONSULTA_URL = "https://web.pontagrossa.pr.gov.br/prematricula/consulta_cpf"
+LOGIN_URL = "https://sme.pontagrossa.pr.gov.br/prematricula/login"
+INTENCOES_URL = "https://sme.pontagrossa.pr.gov.br/prematricula/intencoes_vaga"
+CONSULTA_URL = "https://sme.pontagrossa.pr.gov.br/prematricula/consulta_cpf"
 
 NOME_ESCOLA_BUSCA = "Judith"
 NOME_ESCOLA_ALVO = "Judith Macedo Silveira"
