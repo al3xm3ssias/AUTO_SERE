@@ -1,0 +1,38 @@
+{# Variáveis opcionais, definidas antes do include:
+     filtro_turma  (true/false)  mostra o seletor de turma (preenchido com as turmas presentes nos dados)
+     acao_auto     (chave)       mostra "Atualizar dados", que abre essa automação (ex.: "sus", "cep") #}
+<div class="filters-bar">
+  {% if filtro_turma|default(false) %}
+  <select class="js-filtro" data-key="turma"><option value="">Todas as turmas</option></select>
+  {% endif %}
+  <input type="text" class="js-filtro" data-key="texto" placeholder="Filtro livre...">
+  <div class="search-box">
+    <span data-icon="search"></span>
+    <input type="text" class="js-busca" placeholder="Buscar...">
+  </div>
+</div>
+<div class="tbl-resumo js-resumo"></div>
+
+<div class="card" id="view-{{ entity }}">
+  <div class="card-header">
+    <span class="card-title js-total">Carregando…</span>
+    <div class="card-header-actions">
+      {% if acao_auto|default('') %}
+      <button class="btn-sm js-atualizar" data-auto="{{ acao_auto }}" title="Abre a automação que coleta estes dados"><span data-icon="refresh"></span> Atualizar dados</button>
+      {% endif %}
+      <button class="btn-sm js-exportar"><span data-icon="download"></span> Exportar</button>
+    </div>
+  </div>
+  <div class="card-body no-pad">
+    <div class="tbl-wrap">
+      <table class="js-tabela-generica" data-entity="{{ entity }}">
+        <thead>
+          <tr id="thead-{{ entity }}"></tr>
+        </thead>
+        <tbody id="tbody-{{ entity }}">
+          <tr><td colspan="8" style="text-align:center; color:var(--txt3); padding:24px;">Carregando dados de {{ entity }}…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

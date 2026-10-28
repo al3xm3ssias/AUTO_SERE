@@ -1,0 +1,18 @@
+{# Mesma estrutura da seção "Encaminhamentos" do index.html: stat-grid, gráfico, barra de filtros e um card por aluno.
+   Dados: GET /web/api/encaminhamentos/lista (JS: carregarEncaminhamentos em app.js). #}
+<div class="stat-grid" id="cartoes-encaminhamentos"></div>
+<div class="charts-row" id="grafico-encaminhamentos" style="display:none"></div>
+<div class="card">
+  <div class="card-body">
+    <div class="fbar">
+      <button class="pill active" data-ef="all">Todos</button>
+      <button class="pill" data-ef="com">Com encaminhamentos</button>
+      <button class="pill" data-ef="sem-cpf">CPF inválido</button>
+      <div class="sbox-wrap">
+        <span data-icon="search"></span>
+        <input type="text" class="sbox" id="enc-q" placeholder="Buscar nome, CPF, procedimento…">
+      </div>
+    </div>
+  </div>
+</div>
+<div id="encam-list"></div>

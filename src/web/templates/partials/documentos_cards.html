@@ -1,0 +1,206 @@
+{# ============================================================
+   partials/documentos_cards.html
+   Tela única "Análise de documentos" com 3 abas internas:
+     1. Documentos Digitalizados  (documentos-alunos-pc.json)
+     2. Documentos do PIVE        (documentos-alunos.json)
+     3. Análise                   (cruzamento-documentos.json)
+   Visual portado do index.html (renderDocsPC / renderDocsSistema /
+   renderCruzamento). Os dados entram via app.js (carregarDocumentos).
+   ============================================================ #}
+
+<style>
+  /* Classes portadas do index.html. Se algumas já existirem no styles.css,
+     pode apagar daqui — são idempotentes. */
+  .doc-tabs{display:flex;gap:6px;margin-bottom:18px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+  .doc-tab{
+    background:none;border:none;border-bottom:2px solid transparent;
+    color:var(--txt3);font-family:var(--mono);font-size:.78rem;font-weight:600;
+    padding:10px 16px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;
+    transition:color .15s,border-color .15s;margin-bottom:-1px;
+  }
+  .doc-tab:hover{color:var(--txt)}
+  .doc-tab.active{color:var(--cyan);border-bottom-color:var(--cyan)}
+  .doc-tab .doc-tab-cnt{
+    font-size:.65rem;padding:1px 7px;border-radius:10px;
+    background:var(--surface3);color:var(--txt3);
+  }
+  .doc-tab.active .doc-tab-cnt{background:var(--badge-cyan-bg);color:var(--cyan)}
+  .doc-panel{display:none}
+  .doc-panel.active{display:block}
+
+  .doc-stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px;margin-bottom:22px}
+  .doc-stats.cruz{grid-template-columns:repeat(6,1fr)}
+  @media (max-width:1100px){.doc-stats.cruz{grid-template-columns:repeat(3,1fr)}}
+  @media (max-width:640px){.doc-stats.cruz{grid-template-columns:1fr 1fr}}
+
+  .chips{display:flex;flex-wrap:wrap;gap:3px;max-width:280px}
+  .chip{
+    font-family:var(--mono);font-size:.65rem;padding:2px 6px;border-radius:4px;
+    background:var(--surface3);color:var(--txt3);border:1px solid var(--border);
+    white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis;
+  }
+  .chip.addr{background:rgba(134,239,172,.07);color:var(--lime);border-color:rgba(134,239,172,.2)}
+  .chip.chip-val{background:rgba(134,239,172,.1);color:var(--lime);border-color:rgba(134,239,172,.3)}
+  .chip.chip-pend{background:rgba(255,179,64,.1);color:var(--amber);border-color:rgba(255,179,64,.3)}
+
+  .cruz-progress-wrap{background:var(--card-bg);border:1px solid var(--card-brd);border-radius:var(--radius-lg);padding:16px 20px;margin-bottom:18px;box-shadow:var(--shadow)}
+  .cruz-progress-ttl{font-family:var(--mono);font-size:.67rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--txt3);margin-bottom:14px;display:flex;align-items:center;gap:8px}
+  .cruz-progress-ttl::before{content:'';width:3px;height:12px;background:var(--blue);border-radius:2px}
+  .progress-bar-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .progress-lbl{font-size:.76rem;color:var(--txt2);width:220px;flex-shrink:0}
+  .progress-track{flex:1;height:14px;background:var(--surface3);border-radius:4px;overflow:hidden}
+  .progress-fill{height:100%;border-radius:4px;transition:width .6s ease}
+  .progress-val{font-family:var(--mono);font-size:.72rem;color:var(--txt3);min-width:80px;text-align:right}
+
+  .slot-grid{display:flex;flex-wrap:wrap;gap:3px;max-width:340px}
+  .slot-chip{font-family:var(--mono);font-size:.6rem;padding:2px 7px;border-radius:4px;display:inline-flex;align-items:center;gap:3px;white-space:nowrap}
+  .slot-chip::before{content:'';width:4px;height:4px;border-radius:50%;background:currentColor;flex-shrink:0}
+  .slot-ok{background:var(--badge-lime-bg);color:var(--lime);border:1px solid var(--badge-lime-brd)}
+  .slot-pend{background:var(--badge-amber-bg);color:var(--amber);border:1px solid var(--badge-amber-brd)}
+  .slot-absent{background:rgba(244,63,94,.18);color:var(--rose);border:1px solid rgba(244,63,94,.5);font-weight:700}
+  .slot-sere{background:var(--badge-blue-bg);color:var(--blue);border:1px solid var(--badge-blue-brd)}
+
+  .cruz-expand-btn{background:none;border:1px solid var(--border);border-radius:6px;color:var(--txt3);font-family:var(--mono);font-size:.68rem;padding:4px 10px;cursor:pointer;white-space:nowrap;transition:all .15s}
+  .cruz-expand-btn:hover{border-color:var(--cyan);color:var(--cyan)}
+  .cruz-detail-row{display:none;background:var(--card-bg)}
+  .cruz-detail-row.open{display:table-row}
+  .cruz-detail-inner{padding:14px 16px 16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+  .cruz-doc-card{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px}
+  .cruz-doc-lbl{font-family:var(--mono);font-size:.65rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--txt3);margin-bottom:6px}
+  .cruz-doc-status{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+  .cruz-doc-fname{font-family:var(--mono);font-size:.65rem;color:var(--txt2);margin-top:3px;word-break:break-all}
+  .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+  .dot-ok{background:var(--lime)}
+  .dot-pend{background:var(--amber)}
+  .dot-miss{background:var(--rose)}
+</style>
+
+<div class="doc-tabs" id="doc-tabs" role="tablist">
+  <button class="doc-tab active" data-doctab="pc" role="tab">
+    <span data-icon="folder"></span> Documentos Digitalizados
+    <span class="doc-tab-cnt" id="doc-cnt-pc">—</span>
+  </button>
+  <button class="doc-tab" data-doctab="pive" role="tab">
+    <span data-icon="files"></span> Documentos do PIVE
+    <span class="doc-tab-cnt" id="doc-cnt-pive">—</span>
+  </button>
+  <button class="doc-tab" data-doctab="analise" role="tab">
+    <span data-icon="compare"></span> Análise
+    <span class="doc-tab-cnt" id="doc-cnt-analise">—</span>
+  </button>
+</div>
+
+{# ───────── ABA 1 · DOCUMENTOS DIGITALIZADOS ───────── #}
+<div class="doc-panel active" id="doc-panel-pc">
+  <div class="doc-stats" id="dc-stats"></div>
+  <div class="card">
+    <div class="card-body">
+      <div class="fbar">
+        <button class="pill active" data-dcf="all">Todos</button>
+        <button class="pill" data-dcf="has-addr">Com comp. endereço</button>
+        <button class="pill" data-dcf="no-addr">Sem comp.</button>
+        <button class="pill" data-dcf="no-docs">Sem docs básicos</button>
+        <div class="sbox-wrap"><input type="text" class="sbox" id="dc-q" placeholder="Buscar aluno, CGM, documento…"></div>
+      </div>
+      <div style="font-family:var(--mono);font-size:.7rem;color:var(--txt3)" id="dc-cnt"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body no-pad">
+      <div class="tbl-wrap" style="border:none;border-radius:0">
+        <table>
+          <thead id="dc-thead"><tr>
+            <th data-sort="nome" class="sort-asc">Aluno</th>
+            <th data-sort="turma">Turma</th>
+            <th data-sort="qtd">Qtd. Docs</th>
+            <th data-sort="addr">Comp. Endereço</th>
+            <th>Documentos</th>
+          </tr></thead>
+          <tbody id="dc-tbody"></tbody>
+        </table>
+        <div class="empty" id="dc-empty" style="display:none;text-align:center;color:var(--txt3);padding:24px">Nenhum resultado.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ───────── ABA 2 · DOCUMENTOS DO PIVE ───────── #}
+<div class="doc-panel" id="doc-panel-pive">
+  <div class="doc-stats" id="dp-stats"></div>
+  <div class="card">
+    <div class="card-body">
+      <div class="fbar" id="dp-tabs" style="margin-bottom:10px">
+        <button class="pill active" data-dptab="todos">Todos</button>
+        <button class="pill" data-dptab="matriculados">Matriculados</button>
+        <button class="pill" data-dptab="transferidos">Transferidos</button>
+        <button class="pill" data-dptab="pendentes">Com pendentes</button>
+      </div>
+      <div class="fbar">
+        <div class="sbox-wrap" style="margin-left:0"><input type="text" class="sbox" id="dp-q" placeholder="Buscar aluno, CGM, tipo…"></div>
+      </div>
+      <div style="font-family:var(--mono);font-size:.7rem;color:var(--txt3)" id="dp-cnt"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body no-pad">
+      <div class="tbl-wrap" style="border:none;border-radius:0">
+        <table>
+          <thead id="dp-thead"><tr>
+            <th data-sort="nome" class="sort-asc">Aluno</th>
+            <th data-sort="cgm">CGM</th>
+            <th data-sort="turma">Turma</th>
+            <th data-sort="situacao">Situação</th>
+            <th data-sort="total">Total Docs</th>
+            <th data-sort="val">Validados</th>
+            <th data-sort="pend">Pendentes</th>
+            <th style="cursor:default">Tipos de Documento</th>
+          </tr></thead>
+          <tbody id="dp-tbody"></tbody>
+        </table>
+        <div class="empty" id="dp-empty" style="display:none;text-align:center;color:var(--txt3);padding:24px">Nenhum resultado.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ───────── ABA 3 · ANÁLISE (cruzamento) ───────── #}
+<div class="doc-panel" id="doc-panel-analise">
+  <div class="doc-stats cruz" id="da-stats"></div>
+  <div class="cruz-progress-wrap">
+    <div class="cruz-progress-ttl">Progresso por tipo de documento — docs do PC já anexados no SERE</div>
+    <div id="da-slot-bars"></div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <div class="fbar" id="da-filtros">
+        <button class="pill active" data-daf="all">Todos</button>
+        <button class="pill" data-daf="completo">Completo</button>
+        <button class="pill" data-daf="parcial">Parcial</button>
+        <button class="pill" data-daf="pendente">Pendente</button>
+        <button class="pill" data-daf="sem_basic">Sem básicos</button>
+        <div class="sbox-wrap"><input type="text" class="sbox" id="da-q" placeholder="Buscar aluno, CGM, turma…"></div>
+      </div>
+      <div style="font-family:var(--mono);font-size:.7rem;color:var(--txt3)" id="da-cnt"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body no-pad">
+      <div class="tbl-wrap" style="border:none;border-radius:0">
+        <table>
+          <thead id="da-thead"><tr>
+            <th data-sort="nome" class="sort-asc">Aluno</th>
+            <th data-sort="turma">Turma</th>
+            <th data-sort="status">Status</th>
+            <th data-sort="docs_pc">Docs no PC</th>
+            <th data-sort="docs_sere">No SERE</th>
+            <th data-sort="falta">Falta anexar</th>
+            <th style="cursor:default">Detalhes por tipo</th>
+            <th style="cursor:default"></th>
+          </tr></thead>
+          <tbody id="da-tbody"></tbody>
+        </table>
+        <div class="empty" id="da-empty" style="display:none;text-align:center;color:var(--txt3);padding:24px">Nenhum resultado.</div>
+      </div>
+    </div>
+  </div>
+</div>

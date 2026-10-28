@@ -1,0 +1,40 @@
+{# Mesma estrutura da seção "Fora do Raio" do index.html: stat-grid, mapa, barra de filtros e tabela.
+   Dados: GET /web/api/fora-do-raio/lista (JS: carregarForaDoRaio em app.js). #}
+<div class="stat-grid" id="cartoes-fora-do-raio"></div>
+<div class="map-wrap" id="mapa-fora-do-raio" style="display:none"></div>
+<div class="card">
+  <div class="card-body">
+    <div class="fbar">
+      <button class="pill active" data-ff="all">Todos</button>
+      <button class="pill" data-ff="has-doc">Com comp. endereço</button>
+      <button class="pill" data-ff="no-doc">Sem comprovante</button>
+      <div class="sbox-wrap">
+        <span data-icon="search"></span>
+        <input type="text" class="sbox" id="fora-q" placeholder="Buscar aluno, CGM ou CEP…">
+      </div>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-body no-pad">
+    <div class="tbl-wrap" style="border:none; border-radius:0">
+      <table>
+        <thead>
+          <tr>
+            <th data-sf="nome">Nome</th>
+            <th data-sf="turma">Turma</th>
+            <th data-sf="dist" class="sort-desc">Distância</th>
+            <th data-sf="cgm">CGM</th>
+            <th>CEP</th>
+            <th>Comp. Endereço</th>
+            <th>Docs no PC</th>
+          </tr>
+        </thead>
+        <tbody id="fora-tbody"></tbody>
+      </table>
+      <div class="empty" id="fora-empty" style="display:none">
+        <span data-icon="search"></span><span id="fora-empty-msg">Nenhum resultado.</span>
+      </div>
+    </div>
+  </div>
+</div>

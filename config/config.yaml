@@ -1,0 +1,17 @@
+# =============================================================================
+# config/config.yaml — configuração não sensível do projeto AUTO_SERE
+# Valores sensíveis (login, senha) ficam em credenciais/.env, não aqui.
+# =============================================================================
+
+projeto:
+  nome: "AUTO_SERE"
+  escola: "Escola Municipal Profª Judith Macedo Silveira"
+
+ano_letivo:
+  base: 2026
+
+logging:
+  nivel_arquivo: DEBUG
+  nivel_console: INFO
+  max_bytes: 5242880   # 5 MB
+  backup_count: 3

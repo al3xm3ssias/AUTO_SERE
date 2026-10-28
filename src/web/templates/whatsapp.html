@@ -1,0 +1,119 @@
+<section class="section" id="sec-whatsapp" data-title="WhatsApp">
+
+  <div class="page-header">
+    <div class="page-header-icon lime"><span data-icon="whatsapp"></span></div>
+    <div class="page-header-text">
+      <h1>WhatsApp</h1>
+      <p>Conexão com o WhatsApp Web e teste de envio</p>
+    </div>
+  </div>
+
+  <div class="card" id="wa-card-conexao">
+    <div class="card-header">
+      <div>
+        <div class="card-title">Conexão</div>
+        <div class="card-subtitle" id="wa-gateway-url"></div>
+      </div>
+      <div class="card-header-actions"><span class="badge" id="wa-badge">Carregando…</span></div>
+    </div>
+    <div class="card-body">
+      <p id="wa-mensagem" class="wa-msg"></p>
+
+      <div id="wa-bloco-simulado" class="wa-aviso" hidden>
+        <strong>Modo simulado:</strong> nenhuma mensagem sai do computador. Para usar o WhatsApp de verdade, escolha como:
+        <div class="wa-acoes" style="margin-top:10px">
+          <button class="btn-sm" id="wa-usar-whatsplay">Usar sem Docker (abre o navegador)</button>
+          <button class="btn-sm" id="wa-usar-gateway">Usar o gateway Docker</button>
+        </div>
+      </div>
+
+      <div id="wa-bloco-parado" class="wa-aviso" hidden>
+        Ao clicar em <em>Abrir o WhatsApp</em>, uma janela do navegador (Chromium) se abre com o WhatsApp Web.
+        <strong>Não feche essa janela</strong> enquanto o sistema precisar enviar mensagens; você pode minimizá-la.
+      </div>
+
+      <div id="wa-bloco-offline" class="wa-aviso" hidden>
+        O gateway não responde. Suba o contêiner (Docker precisa estar aberto) e aguarde alguns segundos:
+        <pre class="wa-cmd" id="wa-cmd"></pre>
+      </div>
+
+      <div id="wa-bloco-qr" class="wa-qr-area" hidden>
+        <div class="wa-qr"><img id="wa-qr-img" alt="QR Code do WhatsApp" width="260" height="260" style="image-rendering:pixelated"></div>
+        <ol class="wa-passos">
+          <li>No celular, abra o WhatsApp → <em>Aparelhos conectados</em>.</li>
+          <li>Toque em <em>Conectar um aparelho</em> e aponte para o QR Code.</li>
+          <li>O código se renova sozinho; use um número <strong>dedicado da escola</strong>, não pessoal.</li>
+        </ol>
+      </div>
+
+      <div class="wa-acoes">
+        <button class="btn-primary" id="wa-conectar" hidden>Gerar QR Code</button>
+        <button class="btn-sm" id="wa-verificar" hidden>Verificar conexão</button>
+      </div>
+      <div class="field" id="wa-campo-verificar" hidden style="max-width:320px;margin-top:12px">
+        <label for="wa-numero-verificar">Seu número (opcional, melhora a verificação)</label>
+        <input type="text" id="wa-numero-verificar" placeholder="(42) 99999-8888" autocomplete="off">
+      </div>
+
+      <details class="wa-ajuda" id="wa-ajuda-qr" hidden>
+        <summary>Não aparece o QR Code?</summary>
+        <p>Se o número foi desvinculado pelo celular, o login antigo fica guardado e pode não aparecer QR novo.
+        Execute <code>WHATSAPP_ZERAR_VINCULO.bat</code> (ou veja <code>docs/WHATSAPP.md</code>) e tente de novo.
+        No modo sem Docker, se a janela do navegador mostrar outra coisa (ex.: pedir para atualizar o Chrome),
+        a biblioteca pode precisar de atualização.</p>
+      </details>
+    </div>
+  </div>
+
+  <div class="card" id="wa-card-teste">
+    <div class="card-header"><div><div class="card-title">Mensagem de teste</div>
+      <div class="card-subtitle">Envia UMA mensagem para o número informado</div></div>
+      <div class="card-header-actions"><span class="badge" id="wa-badge-envio">—</span></div></div>
+    <div class="card-body">
+      <div class="field" style="max-width:320px">
+        <label for="wa-numero">Número (com DDD)</label>
+        <input type="text" id="wa-numero" placeholder="(42) 99999-8888" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="wa-texto">Texto (opcional)</label>
+        <textarea id="wa-texto" rows="2" maxlength="500" placeholder="Teste do sistema AUTO SERE — pode ignorar esta mensagem."></textarea>
+      </div>
+      <label class="comp-check" id="wa-linha-confirmo">
+        <input type="checkbox" id="wa-confirmo"><span>Confirmo que é um envio de verdade para este número.</span>
+      </label>
+      <div class="wa-acoes">
+        <button class="btn-primary" id="wa-enviar">Enviar teste</button>
+        <button class="btn-sm" id="wa-alternar-envio">Permitir envio real</button>
+      </div>
+      <p class="campo-ajuda">O WhatsApp pode banir números que enviam em massa ou para quem não pediu contato.
+      Este é um cliente não oficial. Envio real fica bloqueado até você permitir aqui.</p>
+    </div>
+  </div>
+
+  <div class="card" id="wa-card-avancado">
+    <div class="card-header"><div><div class="card-title">Avançado</div>
+      <div class="card-subtitle">Modo de funcionamento, mensagens recebidas (módulos futuros) e desconexão</div></div></div>
+    <div class="card-body">
+      <div id="wa-webhook-bloco">
+        <p class="wa-msg" id="wa-webhook-estado">—</p>
+        <div class="wa-acoes">
+          <button class="btn-sm" id="wa-webhook-registrar">Registrar webhook</button>
+          <button class="btn-sm" id="wa-webhook-remover">Remover webhook</button>
+        </div>
+        <p class="campo-ajuda">O webhook entrega as mensagens recebidas aos módulos que se registrarem em
+        <code>eventos.py</code> (só no gateway Docker).</p>
+      </div>
+      <div class="wa-acoes" style="margin-top:14px">
+        <button class="btn-sm" id="wa-desconectar">Desconectar</button>
+      </div>
+      <p class="campo-ajuda" id="wa-desconectar-ajuda"></p>
+      <p class="wa-msg" style="margin-top:14px">Modo de funcionamento: <strong id="wa-modo-atual">—</strong></p>
+      <div class="wa-acoes">
+        <button class="btn-sm" data-wa-modo="whatsplay">Sem Docker (navegador)</button>
+        <button class="btn-sm" data-wa-modo="blake">Gateway Docker</button>
+        <button class="btn-sm" data-wa-modo="simulado">Simulado</button>
+      </div>
+    </div>
+  </div>
+
+</section>

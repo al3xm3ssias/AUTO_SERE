@@ -1,0 +1,285 @@
+"""Dados das telas Encaminhamentos do SUS, Alunos fora do raio, Funcionários e contadores do painel."""
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from src.web.api import rotas  # noqa: E402
+from src.web.app import create_app  # noqa: E402
+
+
+@pytest.fixture()
+def dados(tmp_path, monkeypatch):
+    monkeypatch.setattr(rotas, "_dados_dir", lambda: tmp_path)
+    return tmp_path
+
+
+@pytest.fixture()
+def c(dados):
+    return create_app().test_client()
+
+
+def gravar(pasta, nome, conteudo):
+    (pasta / nome).write_text(json.dumps(conteudo, ensure_ascii=False), encoding="utf-8")
+
+
+TURMAS = {
+    "5º Ano A": [{"CGM": "111", "Nome": "João da Silva", "Situação": "Matriculado", "Sexo": "M"}],
+    "3º Ano B": [{"CGM": "222", "Nome": "Maria Conceição", "Situação": "Matriculado", "Sexo": "F"}],
+}
+
+# ───────────── fora do raio ─────────────
+
+def test_fora_do_raio_formato_atual_ordenado_e_com_turma(dados, c):
+    gravar(dados, "turmas.json", TURMAS)
+    gravar(dados, "alunos_fora_raio.json", {
+        "metadados": {"raio_km": 2.0, "total_alunos_processados": 200, "data_analise": "2026-10-01 10:00:00"},
+        "alunos": [
+            {"nome": "Maria Conceição", "cgm": "222", "cep": "84000000", "distancia_km": 2.5},
+            {"nome": "João da Silva", "cgm": "111", "cep": "84010000", "distancia_km": 7.123},
+        ],
+    })
+    r = c.get("/web/api/fora-do-raio/lista").get_json()
+    assert [l["nome"] for l in r["linhas"]] == ["João da Silva", "Maria Conceição"]      # mais distante primeiro
+    assert r["linhas"][0]["distancia"] == "7,12 km" and r["linhas"][0]["turma"] == "5º Ano A"
+    assert "Raio de 2,0 km" in r["resumo"] and "200 aluno(s)" in r["resumo"]
+    assert r["total"] == 2
+
+
+def test_fora_do_raio_aceita_lista_antiga_e_vazio(dados, c):
+    gravar(dados, "alunos_fora_raio.json", [{"nome": "X", "cgm": "9", "cep": "1", "distancia_km": 3}])
+    r = c.get("/web/api/fora-do-raio/lista").get_json()
+    assert r["total"] == 1 and r["linhas"][0]["turma"] == "—"
+    (dados / "alunos_fora_raio.json").unlink()
+    r = c.get("/web/api/fora-do-raio/lista").get_json()
+    assert r["total"] == 0 and "ainda não executada" in r["resumo"]
+
+
+# ───────────── encaminhamentos do SUS ─────────────
+
+ENCAM = [
+    {"nome": "João da Silva", "cgm": "111", "cpf": "11111111111", "encaminhamentos": [
+        {"data_solicitacao": "01/03/2026", "procedimento": "Oftalmologia", "data_nascimento": "x", "posicao_fila": "12"},
+        {"data_solicitacao": "05/04/2026", "procedimento": "Fonoaudiologia", "data_nascimento": "x", "posicao_fila": "3"}]},
+    {"nome": "Sem CPF", "cpf": "", "encaminhamentos": [], "erro": "CPF inválido"},
+    {"nome": "MARIA CONCEICAO", "cpf": "22222222222", "encaminhamentos": [          # sem cgm, nome sem acento
+        {"data_solicitacao": "10/02/2026", "procedimento": "Cardiologia", "data_nascimento": "x", "posicao_fila": "8"}]},
+]
+
+
+def test_encaminhamentos_uma_linha_por_encaminhamento_sem_cpf_invalido(dados, c):
+    gravar(dados, "turmas.json", TURMAS)
+    gravar(dados, "alunos_encaminhamento.json", ENCAM)
+    r = c.get("/web/api/encaminhamentos/lista").get_json()
+    assert r["total"] == 3
+    assert {l["nome"] for l in r["linhas"]} == {"João da Silva", "MARIA CONCEICAO"}   # "Sem CPF" não é encaminhamento
+    turmas = {l["nome"]: l["turma"] for l in r["linhas"]}
+    assert turmas["João da Silva"] == "5º Ano A"            # por CGM
+    assert turmas["MARIA CONCEICAO"] == "3º Ano B"          # por nome, sem diferenciar acento/caixa
+    assert "2 aluno(s) com encaminhamento" in r["resumo"] and "1 sem CPF válido" in r["resumo"]
+    corpo = json.dumps(r)
+    assert "11111111111" not in corpo and "22222222222" not in corpo                  # CPF completo não vai para a tela
+    assert {a["cpf"] for a in r["alunos"] if a["cpf"]} == {"***.111.111-**", "***.222.222-**"}   # só o mascarado
+
+
+def test_encaminhamentos_vazio(dados, c):
+    r = c.get("/web/api/encaminhamentos/lista").get_json()
+    assert r["total"] == 0 and "ainda não executada" in r["resumo"]
+
+
+# ───────────── painel ─────────────
+
+def _metricas(c):
+    r = c.get("/web/api/painel/resumo").get_json()
+    return {m["chave"]: m["valor"] for m in r["principais"] + r["secundarias"]}
+
+
+def test_painel_conta_alunos_fora_do_raio_e_nao_o_tamanho_do_objeto(dados, c):
+    gravar(dados, "alunos_fora_raio.json", {"metadados": {"raio_km": 2}, "alunos": [{"nome": "A"}, {"nome": "B"}, {"nome": "C"}]})
+    assert _metricas(c)["fora_do_raio"] == 3          # antes devolvia 2 (as duas chaves do objeto)
+
+
+def test_painel_encaminhamentos_nao_conta_cpf_invalido(dados, c):
+    gravar(dados, "alunos_encaminhamento.json", ENCAM)
+    assert _metricas(c)["encaminhamentos"] == 2
+
+
+# ───────────── funcionários ─────────────
+
+def test_funcionarios_usa_os_campos_que_o_coletor_realmente_grava(dados, c):
+    gravar(dados, "funcionarios.json", [
+        {"nome": "Zélia Souza", "funcao": "Professor", "email": "z@x.com", "curso_superior": "Pedagogia",
+         "turmas": [{"descricao": "- 5º A", "disciplinas": []}, {"descricao": "- 5º B", "disciplinas": []}], "cpf": "999"},
+        {"nome": "Ana Lima", "funcao": "Servente", "email": "", "curso_superior": "", "turmas": []},
+    ])
+    r = c.get("/web/api/funcionarios/lista").get_json()
+    assert [l["nome"] for l in r["linhas"]] == ["Ana Lima", "Zélia Souza"]
+    z = r["linhas"][1]
+    assert z["funcao"] == "Professor" and z["formacao"] == "Pedagogia" and z["turmas"] == "2"   # "Cargo" antes saía vazio
+    assert r["linhas"][0]["turmas"] == "—"
+    assert "999" not in json.dumps(r)                  # CPF não é exibido
+
+
+def test_funcionarios_aceita_chaves_antigas(dados, c):
+    gravar(dados, "funcionarios.json", [{"Nome": "Velho", "Cargo": "Diretor"}])
+    l = c.get("/web/api/funcionarios/lista").get_json()["linhas"][0]
+    assert l["nome"] == "Velho" and l["funcao"] == "Diretor"
+
+
+# ───────────── pré-matrícula: tentativa substituída não conta duas vezes ─────────────
+
+def test_fila_da_prematricula_ignora_a_tentativa_substituida(dados, c):
+    gravar(dados, "pre_matricula.json", {
+        "turmas_intencao": {
+            "5º Ano A": [{"nome": "Ana", "cpf": "111", "pos": "1", "substituido_por_nova_tentativa": True,
+                          "turma_da_tentativa_atual": "5º Ano B", "presente_na_ultima_coleta": False}],
+            "5º Ano B": [{"nome": "Ana", "cpf": "111", "pos": "2", "presente_na_ultima_coleta": True}],
+        },
+        "cadastros": {},
+    })
+    r = c.get("/web/api/prematricula/lista").get_json()
+    assert r["total"] == 1 and r["linhas"][0]["turma"] == "5º Ano B"
+
+
+def test_painel_nao_conta_duas_vezes_quem_mudou_de_turma(dados, c):
+    gravar(dados, "pre_matricula.json", {"turmas_intencao": {
+        "A": [{"nome": "Ana", "cpf": "1", "substituido_por_nova_tentativa": True}, {"nome": "Beto", "cpf": "2"}],
+        "B": [{"nome": "Ana", "cpf": "1"}]}, "cadastros": {}})
+    assert _metricas(c)["fila_prematricula"] == 2
+
+
+# ───────────── cards de resumo (Fora do raio / Encaminhamentos) ─────────────
+
+def _cartoes(r):
+    return {c["label"]: c for c in r["cartoes"]}
+
+
+def test_fora_do_raio_cartoes_mapa_e_comprovante_de_endereco(dados, c):
+    gravar(dados, "turmas.json", TURMAS)
+    gravar(dados, "alunos_fora_raio.json", {
+        "metadados": {"raio_km": 2.0, "total_alunos_processados": 200, "data_analise": "2026-10-01 10:00:00",
+                      "cep_escola": "84010-000", "coordenadas_escola": {"latitude": -25.05, "longitude": -50.15}},
+        "alunos": [
+            {"nome": "Maria Conceição", "cgm": "222", "cep": "84000000", "distancia_km": 2.5},
+            {"nome": "João da Silva", "cgm": "111", "cep": "84010000", "distancia_km": 7.123},
+        ],
+    })
+    gravar(dados, "documentos-alunos-pc.json", [
+        {"CGM": "111", "Nome": "João da Silva", "Documentos": ["RG_20260101_1.pdf", {"nome": "Conta Copel.pdf"}]},
+        {"CGM": "222", "Nome": "Maria Conceição", "Documentos": ["CPF.pdf"]},
+    ])
+    r = c.get("/web/api/fora-do-raio/lista").get_json()
+    cards = _cartoes(r)
+    assert cards["Processados"]["valor"] == 200 and cards["Fora do raio"]["valor"] == 2
+    assert cards["Com comp. endereço"]["valor"] == 1 and cards["Sem comp. endereço"]["valor"] == 1
+    assert cards["Máx. distância"]["valor"] == "7,12 km" and cards["CEP da escola"]["valor"] == "84010-000"
+    assert r["mapa"] == {"latitude": -25.05, "longitude": -50.15} and r["tem_docs_pc"] is True
+    joao, maria = r["linhas"]
+    assert joao["tem_comprovante"] is True and joao["comprovante"] == "Sim — 1 doc(s)" and joao["docs_endereco"] == ["Conta Copel.pdf"]
+    assert maria["tem_comprovante"] is False and maria["comprovante"] == "Não encontrado"
+
+
+def test_fora_do_raio_sem_documentos_do_pc_nao_afirma_falta_de_comprovante(dados, c):
+    gravar(dados, "alunos_fora_raio.json", {
+        "metadados": {"raio_km": 2.0, "total_alunos_processados": 10, "data_analise": "x"},
+        "alunos": [{"nome": "X", "cgm": "9", "cep": "1", "distancia_km": 3}]})
+    r = c.get("/web/api/fora-do-raio/lista").get_json()
+    assert r["tem_docs_pc"] is False and r["linhas"][0]["tem_comprovante"] is None and r["linhas"][0]["comprovante"] == "—"
+    assert "Com comp. endereço" not in _cartoes(r) and r["mapa"] is None
+
+
+def test_fora_do_raio_sem_analise_nao_tem_cartoes(dados, c):
+    r = c.get("/web/api/fora-do-raio/lista").get_json()
+    assert r["cartoes"] == [] and r["mapa"] is None
+
+
+def test_encaminhamentos_cartoes_e_ranking_de_procedimentos(dados, c):
+    gravar(dados, "turmas.json", TURMAS)
+    gravar(dados, "alunos_encaminhamento.json", ENCAM + [
+        {"nome": "Pedro", "cgm": "333", "cpf": "33333333333", "encaminhamentos": [
+            {"data_solicitacao": "x", "procedimento": "Oftalmologia", "data_nascimento": "x", "posicao_fila": "1"}]}])
+    r = c.get("/web/api/encaminhamentos/lista").get_json()
+    cards = _cartoes(r)
+    assert cards["Com Encaminhamentos"]["valor"] == 3 and cards["CPF Inválido/Erro"]["valor"] == 1
+    assert cards["Total Procedimentos"]["valor"] == r["total"]
+    assert cards["Alunos Pesquisados"]["valor"] == 4 and len(r["alunos"]) == 4 and any(a["erro"] for a in r["alunos"])
+    itens = r["grafico"]["itens"]
+    assert itens[0]["valor"] == max(i["valor"] for i in itens) and len({i["label"] for i in itens}) == len(itens)
+
+
+def test_encaminhamentos_sem_consulta_nao_tem_cartoes(dados, c):
+    r = c.get("/web/api/encaminhamentos/lista").get_json()
+    assert r["cartoes"] == [] and r["grafico"]["itens"] == []
+
+
+# ───────────── Funcionários / Pré-matrícula / Transferidos (cards + registros completos) ─────────────
+
+def test_funcionarios_unifica_basico_e_completo_pelo_cpf_com_cpf_mascarado(dados, c):
+    gravar(dados, "funcionarios.json", [
+        {"nome": "Zélia Souza", "cpf": "111.222.333-44", "funcao": "Docente", "email": "z@x.com", "curso_superior": "Pedagogia", "turmas": [{"descricao": "- 5º A"}]},
+        {"nome": "Ana Lima", "cpf": "55566677788", "funcao": "Gestor - Diretor(a)", "turmas": []}])
+    gravar(dados, "funcionarios_completo.json", [
+        {"cpf": "11122233344", "nome_completo": "ZÉLIA DE SOUZA", "telefone": "42999998888", "sexo": "F", "escolaridade": "Superior", "rg": "123"}])
+    r = c.get("/web/api/funcionarios/lista").get_json()
+    ana, zelia = r["funcionarios"]
+    assert zelia["cpf"] == "***.222.333-**" and zelia["telefone"] == "42999998888" and zelia["sexo"] == "F"
+    assert zelia["formacao"] == "Superior" and zelia["tem_cadastro_completo"] and zelia["detalhe"]["rg"] == "123"
+    assert "cpf" not in zelia["detalhe"] and "11122233344" not in json.dumps(r)               # CPF completo não sai do servidor
+    assert zelia["grupo"] == "Docente" and ana["grupo"] == "Direção" and not ana["tem_cadastro_completo"]
+    assert {c_["label"]: c_["valor"] for c_ in r["cartoes"]}["Total Funcionários"] == 2
+    assert [x["chave"] for x in r["colunas"]] == ["nome", "funcao", "email", "formacao", "turmas"] and r["total"] == 2
+
+
+def test_funcionarios_so_no_completo_tambem_aparece(dados, c):
+    gravar(dados, "funcionarios.json", [])
+    gravar(dados, "funcionarios_completo.json", [{"cpf": "11122233344", "nome_completo": "Só Completo", "sexo": "M"}])
+    r = c.get("/web/api/funcionarios/lista").get_json()
+    assert [f["nome"] for f in r["funcionarios"]] == ["Só Completo"]
+
+
+def test_prematricula_cadastros_deriva_situacao_e_ignora_tentativa_antiga(dados, c):
+    gravar(dados, "pre_matricula.json", {
+        "atualizado_em": "2026-10-01 09:00",
+        "turmas_intencao": {
+            "5º Ano A": [{"nome": "Ana", "cpf": "1", "pos": "1", "substituido_por_nova_tentativa": True},
+                         {"nome": "Beto", "cpf": "2", "pos": "2"}],
+            "5º Ano B": [{"nome": "Ana", "cpf": "1", "pos": "3"}, {"nome": "Caio", "cpf": "3", "pos": "4"}]},
+        "cadastros": {
+            "1": {"nome_aluno": "Ana", "nome_responsavel": "Mãe", "escolas_escolhidas": {"turma": "5º Ano B", "opcoes": [{"escola": "Esc X", "situacao": "MATRICULADO"}]}},
+            "2": {"nome_aluno": "Beto", "escolas_escolhidas": {"opcoes": [{"escola": "Esc X", "situacao": "CANCELADO", "motivo_cancelamento": "Mudou"}]}}}})
+    r = c.get("/web/api/prematricula/cadastros").get_json()
+    por_nome = {x["nome_aluno"]: x for x in r["cadastros"]}
+    assert set(por_nome) == {"Ana", "Beto", "Caio"}                                   # Caio: na fila, sem cadastro coletado
+    assert por_nome["Ana"]["situacao"] == "matriculado" and por_nome["Ana"]["turma_matriculada"] == "5º Ano B"
+    assert [i["turma"] for i in por_nome["Ana"]["intencoes"]] == ["5º Ano B"]            # a tentativa antiga não conta
+    assert por_nome["Beto"]["situacao"] == "cancelado" and por_nome["Beto"]["motivo_cancelamento"] == "Mudou"
+    assert por_nome["Caio"]["situacao"] == "pendente" and por_nome["Caio"].get("sem_cadastro")
+    assert r["contagem"] == {"matriculado": 1, "cancelado": 1, "pendente": 1} and r["atualizado_em"] == "2026-10-01 09:00"
+
+
+def test_prematricula_cadastros_vazio(dados, c):
+    r = c.get("/web/api/prematricula/cadastros").get_json()
+    assert r["cadastros"] == [] and r["cartoes"] == [] and r["total"] == 0
+
+
+def test_transferidos_status_pelos_6_passos_da_guia_e_historico(dados, c):
+    d = "2026-03-01T10:00:00"
+    gravar(dados, "transferidos.json", {
+        "111": {"nome": "João", "turma": "5º A", "guia": {"emitido_em": d, "assinado_secretario": d, "assinado_diretor": d},
+                "historico": {"emitido_em": d, "assinado_secretario": d, "assinado_diretor": d}, "parecer": {"digitalizado_em": d}},
+        "222": {"nome": "Maria", "turma": "3º B", "guia": {"emitido_em": d}, "historico": {}},
+        "333": {"nome": "Pedro", "turma": "1º C", "guia": {}, "historico": {}}})
+    r = c.get("/web/api/transferidos/lista").get_json()
+    st = {x["nome"]: x for x in r["transferidos"]}
+    assert st["João"]["status"] == "completo" and st["Maria"]["status"] == "parcial" and st["Pedro"]["status"] == "pendente"
+    assert st["Maria"]["feitos"] == 1 and st["João"]["parecer"]["digitalizado_em"] == d
+    assert r["contagem"] == {"completo": 1, "parcial": 1, "pendente": 1}
+    assert {c_["label"]: c_["valor"] for c_ in r["cartoes"]}["Total"] == 3
+
+
+def test_transferidos_vazio(dados, c):
+    r = c.get("/web/api/transferidos/lista").get_json()
+    assert r["transferidos"] == [] and r["cartoes"] == []

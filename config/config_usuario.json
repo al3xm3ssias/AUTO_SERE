@@ -1,0 +1,25 @@
+{
+  "pasta_digitalizacao": "C:\\AUTO_SERE\\dados\\2026\\DIGITALIZAÇÃO",
+  "pasta_modelos": null,
+  "cgm_upload": [],
+  "setup_concluido": false,
+  "unidade_escolar": {
+    "nome": "ESCOLA JUDITH MACEDO SILVEIRA",
+    "nome_abreviado": "JUDITH",
+    "cep": "84016630",
+    "logradouro": "Rua Antônio Saad",
+    "numero": "935",
+    "bairro": "Jardim Carvalho",
+    "cidade": "Ponta Grossa",
+    "uf": "PR",
+    "codigo": "",
+    "inep": "",
+    "telefone": "",
+    "email": "",
+    "responsavel": "",
+    "endereco": "Rua Antônio Saad, 935"
+  },
+  "flags_automacoes": {
+    "analisa_sere": []
+  }
+}

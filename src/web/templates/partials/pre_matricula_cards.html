@@ -1,0 +1,64 @@
+{# Mesma estrutura da seção "Pré-Matrícula" do index.html: stat-grid, abas por situação + busca, tabela com
+   colunas que variam por aba, linha expansível e paginação. Dados: GET /web/api/prematricula/cadastros (JS: carregarPreMatricula). #}
+{# Painel "Executar pré-matrícula": dispara a automação "prematricula_completa" (mesma do menu Automações) sem sair da tela.
+   JS: ligarPainelExecucaoPm / iniciarPreMatricula / _pmExecConsultar em app.js. #}
+<div class="card" id="pm-exec" style="display:none">
+  <div class="card-header">
+    <span data-icon="play" style="color:var(--txt3)"></span>
+    <span class="card-title">Executar pré-matrícula</span>
+    <span class="card-header-badge" id="pm-exec-status">parado</span>
+  </div>
+  <div class="card-body">
+    <p class="pm-exec-desc">Abre o site da pré-matrícula, lê a fila de cada turma, consulta o cadastro de cada CPF, confere os
+      pendentes e gera o arquivo de contatos. Só lê o site e atualiza o <code>pre_matricula.json</code> (o histórico nunca é apagado).
+      Pode levar vários minutos; a tela acompanha o andamento.</p>
+    <div class="pm-etapas" id="pm-etapas"></div>
+    <div class="pm-exec-opcoes">
+      <label class="comp-check"><input type="checkbox" id="pm-opt-pular">
+        <span>Pular a verificação de pendentes (Etapa 4)<div class="campo-ajuda">Mais rápido; não consulta de novo quem ainda está pendente.</div></span></label>
+      <label class="comp-check"><input type="checkbox" id="pm-opt-debug">
+        <span>Modo de análise<div class="campo-ajuda">Salva uma captura de tela de cada etapa em dados/&lt;ano&gt;/screenshots, para descobrir o que mudou no site se algo falhar.</div></span></label>
+    </div>
+    <div class="pm-exec-acoes">
+      <button class="btn-primary" id="pm-exec-iniciar"><span data-icon="play"></span> Iniciar pré-matrícula</button>
+      <button class="btn-sm" id="pm-exec-cancelar" style="display:none">Cancelar execução</button>
+      <span class="pm-exec-msg" id="pm-exec-msg"></span>
+    </div>
+    <pre class="pm-log" id="pm-exec-log" style="display:none"></pre>
+  </div>
+</div>
+<div class="stat-grid" id="cartoes-prematricula"></div>
+<div class="card">
+  <div class="card-header">
+    <span data-icon="clipboard" style="color:var(--txt3)"></span>
+    <span class="card-title">Cadastros de Pré-Matrícula</span>
+    <span class="card-header-badge" id="pm-cnt">0</span>
+  </div>
+  <div class="card-body">
+    <div class="fbar">
+      <button class="pill active" data-pmtab="geral">Geral</button>
+      <button class="pill" data-pmtab="matriculados">Matriculados</button>
+      <button class="pill" data-pmtab="cancelados">Cancelados</button>
+      <button class="pill" data-pmtab="pendentes">Pendentes</button>
+      <div class="sbox-wrap" style="margin-left:auto">
+        <span data-icon="search"></span>
+        <input type="text" class="sbox" id="pm-search" placeholder="Buscar aluno, responsável, CPF…">
+      </div>
+    </div>
+  </div>
+  <div class="card-body no-pad">
+    <div class="tbl-wrap" style="border:none; border-radius:0">
+      <table>
+        <thead id="pm-thead"></thead>
+        <tbody id="pm-tbody"></tbody>
+      </table>
+      <div class="empty" id="pm-empty" style="display:none">
+        <span data-icon="search"></span><span id="pm-empty-msg">Nenhum resultado.</span>
+      </div>
+    </div>
+  </div>
+  <div class="pag-bar">
+    <span class="pag-info" id="pm-pag-info"></span>
+    <div class="pag-btns" id="pm-pag-btns"></div>
+  </div>
+</div>

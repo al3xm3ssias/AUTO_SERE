@@ -1,0 +1,82 @@
+{# Mesma estrutura da seção "Funcionários" do index.html: stat-grid, card de filtros (funções + busca + filtros
+   avançados), tabela com linha expansível e paginação. Dados: GET /web/api/funcionarios/lista (JS: carregarFuncionarios). #}
+<div class="stat-grid" id="cartoes-funcionarios"></div>
+<div class="card">
+  <div class="card-header">
+    <span data-icon="filter" style="color:var(--txt3)"></span>
+    <span class="card-title">Filtros e Busca</span>
+    <span class="card-header-badge" id="func-cnt">0 funcionários</span>
+  </div>
+  <div class="card-body">
+    <div class="fbar">
+      <button class="pill active" data-fg="todos">Todos</button>
+      <button class="pill" data-fg="Docente">Docentes</button>
+      <button class="pill" data-fg="Direção">Direção</button>
+      <button class="pill" data-fg="Pedagogos">Pedagogos</button>
+      <button class="pill" data-fg="Auxiliares">Auxiliares</button>
+      <button class="pill" data-fg="Outros">Outros</button>
+      <div class="sbox-wrap">
+        <span data-icon="search"></span>
+        <input type="text" class="sbox" id="func-q" placeholder="Buscar nome, CPF, e-mail, cargo…">
+      </div>
+    </div>
+    <div class="adv-filter-grid" style="margin-top:12px">
+      <div class="adv-filter-group">
+        <span class="adv-filter-lbl">Sexo</span>
+        <select class="adv-select" id="func-sexo">
+          <option value="todos">Todos</option>
+          <option value="F">Feminino</option>
+          <option value="M">Masculino</option>
+        </select>
+      </div>
+      <div class="adv-filter-group">
+        <span class="adv-filter-lbl">Vínculo</span>
+        <select class="adv-select" id="func-vinculo">
+          <option value="todos">Todos</option>
+          <option value="servidor">Servidores</option>
+          <option value="terceirizado">Terceirizados</option>
+          <option value="estagiario">Estagiários</option>
+          <option value="revisar">A revisar</option>
+          <option value="multiplas">Duas matrículas (20h + 20h)</option>
+        </select>
+      </div>
+      <div class="adv-filter-group">
+        <span class="adv-filter-lbl">Registros por página</span>
+        <select class="adv-select" id="func-pagesize">
+          <option value="10">10 por página</option>
+          <option value="25" selected>25 por página</option>
+          <option value="50">50 por página</option>
+          <option value="100">100 por página</option>
+        </select>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-body no-pad">
+    <div class="tbl-wrap" style="border:none; border-radius:0">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:36px"></th>
+            <th data-fs="nome" class="sort-asc">Nome</th>
+            <th data-fs="funcao">Cargo / Função</th>
+            <th data-fs="email" class="hide-sm">E-mail</th>
+            <th data-fs="telefone" class="hide-sm">Telefone</th>
+            <th data-fs="sexo">Sexo</th>
+            <th data-fs="cpf">CPF</th>
+            <th data-fs="formacao" class="hide-sm">Formação</th>
+          </tr>
+        </thead>
+        <tbody id="func-tbody"></tbody>
+      </table>
+      <div class="empty" id="func-empty" style="display:none">
+        <span data-icon="search"></span><span id="func-empty-msg">Nenhum funcionário encontrado.</span>
+      </div>
+    </div>
+    <div class="pag-bar">
+      <span class="pag-info" id="func-pag-info"></span>
+      <div class="pag-btns" id="func-pag-btns"></div>
+    </div>
+  </div>
+</div>

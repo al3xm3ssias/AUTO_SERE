@@ -1,0 +1,143 @@
+<section class="section" id="sec-calendario" data-title="Calendário letivo">
+
+  <div class="page-header">
+    <div class="page-header-icon amber"><span data-icon="calendar"></span></div>
+    <div class="page-header-text">
+      <h1>Calendário letivo</h1>
+      <p>Períodos letivos, recessos e feriados — nacionais e municipais</p>
+    </div>
+  </div>
+
+  <div class="cal-layout">
+
+    <!-- ===== Coluna principal: calendário ===== -->
+    <div class="card cal-principal">
+      <div class="card-header cal-toolbar">
+        <div class="cal-nav">
+          <button class="btn-sm" id="cal-prev" aria-label="Anterior"><span data-icon="chevronLeft"></span></button>
+          <span class="card-title cal-titulo" id="cal-titulo"></span>
+          <button class="btn-sm" id="cal-next" aria-label="Próximo"><span data-icon="chevronRight"></span></button>
+          <button class="btn-sm" id="cal-hoje">Hoje</button>
+        </div>
+        <div class="cal-seg card-header-actions" role="group" aria-label="Visualização">
+          <button class="btn-sm" id="cal-v-mes" aria-pressed="true">Mês</button>
+          <button class="btn-sm" id="cal-v-ano" aria-pressed="false">Ano</button>
+        </div>
+      </div>
+
+      <div class="card-body">
+        <div class="cal-legenda">
+          <span><i class="cal-dot feriado"></i>Feriado</span>
+          <span><i class="cal-dot recesso"></i>Recesso / emenda</span>
+          <span><i class="cal-dot htpc"></i>HTPC</span>
+          <span><i class="cal-dot ferias"></i>Férias escolares</span>
+          <span><i class="cal-star-leg">★</i>Data comemorativa</span>
+          <span><i class="cal-dot letivo"></i>Dia letivo</span>
+        </div>
+
+        <div class="cal-aviso" id="cal-aviso">
+          <span id="cal-aviso-txt"></span>
+          <button class="btn-sm" id="cal-aviso-retry">Tentar de novo</button>
+        </div>
+        <div class="cal-selecao" id="cal-selecao">
+          <span id="cal-selecao-txt"></span>
+          <button class="btn-sm" id="cal-selecao-cancel">Cancelar</button>
+        </div>
+
+        <div id="cal-vista"></div>
+        <div class="cal-rodape-mes" id="cal-rodape-mes"></div>
+        <div class="cal-detalhe" id="cal-detalhe" hidden></div>
+      </div>
+    </div>
+
+    <!-- ===== Coluna lateral: cadastros ===== -->
+    <div class="cal-lateral">
+
+      <div class="card">
+        <div class="card-header">
+          <span data-icon="calendar" style="color:var(--lime)"></span>
+          <span class="card-title">Períodos letivos</span>
+        </div>
+        <div class="card-body">
+          <ul class="cal-lista" id="cal-lista-periodos"></ul>
+          <form class="cal-form" id="cal-f-periodo">
+            <div class="field">
+              <label for="cal-p-nome">Nome</label>
+              <input type="text" id="cal-p-nome" required maxlength="80" placeholder="Ex.: 1º bimestre">
+            </div>
+            <div class="field">
+              <label for="cal-p-tipo">Tipo</label>
+              <select id="cal-p-tipo">
+                <option value="letivo">Período letivo</option>
+                <option value="ferias">Férias escolares</option>
+              </select>
+            </div>
+            <div class="cal-par">
+              <div class="field">
+                <label for="cal-p-inicio">Início</label>
+                <input type="date" id="cal-p-inicio" required>
+              </div>
+              <div class="field">
+                <label for="cal-p-fim">Fim</label>
+                <input type="date" id="cal-p-fim" required>
+              </div>
+            </div>
+            <div class="cal-acoes">
+              <button type="button" class="btn-sm" id="cal-marcar-periodo">Marcar no calendário</button>
+              <button type="submit" class="btn-primary cal-btn-salvar">Salvar período</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span data-icon="clock" style="color:var(--violet)"></span>
+          <span class="card-title">Recessos, emendas e HTPC</span>
+        </div>
+        <div class="card-body">
+          <ul class="cal-lista" id="cal-lista-eventos"></ul>
+          <form class="cal-form" id="cal-f-evento">
+            <div class="field">
+              <label for="cal-e-nome">Nome</label>
+              <input type="text" id="cal-e-nome" required maxlength="80" placeholder="Ex.: Aniversário da cidade">
+            </div>
+            <div class="field">
+              <label for="cal-e-tipo">Tipo</label>
+              <select id="cal-e-tipo">
+                <option value="recesso">Recesso</option>
+                <option value="emenda">Emenda de feriado</option>
+                <option value="htpc">HTPC</option>
+                <option value="municipal">Feriado municipal (extra)</option>
+                <option value="outro">Outro (sem aula)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="cal-e-inicio">Data</label>
+              <input type="date" id="cal-e-inicio" required>
+            </div>
+            <p class="cal-dica">Clique em um dia no calendário para preencher a data.</p>
+            <div class="cal-acoes">
+              <button type="submit" class="btn-primary cal-btn-salvar">Salvar</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <details class="cal-nac">
+            <summary id="cal-nac-resumo">Feriados nacionais</summary>
+            <ul id="cal-lista-nac"></ul>
+          </details>
+          <p class="cal-dica">
+            Feriados nacionais: BrasilAPI. Feriados de Ponta Grossa e datas comemorativas já vêm embutidos.
+            <a href="/web/api/calendario/dados" target="_blank" rel="noopener">Ver JSON</a>
+          </p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</section>

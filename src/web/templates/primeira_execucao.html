@@ -1,0 +1,37 @@
+<section class="section" id="sec-primeira-execucao" data-title="1ª execução do sistema">
+
+  <div class="page-header">
+    <div class="page-header-icon amber"><span data-icon="rocket"></span></div>
+    <div class="page-header-text">
+      <h1>1ª execução do sistema</h1>
+      <p>Configuração inicial obrigatória</p>
+    </div>
+  </div>
+
+  <p style="color:var(--txt3); font-size:.82rem; margin-bottom:18px; max-width:620px;">
+    Siga os passos abaixo em ordem para deixar o sistema pronto para uso. Após a configuração inicial, você poderá utilizar qualquer funcionalidade livremente.
+  </p>
+
+  <div class="wizard-layout">
+
+    <div class="wizard-list" id="wizard-lista">
+      <!-- preenchido via JS a partir de /web/api/wizard/status -->
+    </div>
+
+    <aside class="wizard-log" aria-label="Registro de atividades">
+      <div class="wizard-log-head">
+        <div>
+          <div class="wizard-log-title">Registro de atividades</div>
+          <div class="wizard-log-sub" id="wizard-log-status">Aguardando…</div>
+        </div>
+        <div class="wizard-log-acoes">
+          <button class="btn-sm" id="wizard-log-copiar" type="button" title="Copia o registro para a área de transferência">Copiar</button>
+          <button class="btn-sm" id="wizard-log-limpar" type="button" title="Esconde o que já aconteceu (não apaga os arquivos de log)">Limpar</button>
+        </div>
+      </div>
+      <div class="wizard-log-corpo" id="wizard-log-corpo" role="log" aria-live="polite"></div>
+    </aside>
+
+  </div>
+
+</section>

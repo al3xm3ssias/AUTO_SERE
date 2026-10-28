@@ -1,0 +1,39 @@
+{# Mesma estrutura da seção "Transferidos" do index.html: stat-grid, busca e tabela de controle dos documentos
+   (guia, histórico, parecer, status). Dados: GET /web/api/transferidos/lista (JS: carregarTransferidos). #}
+<div class="stat-grid" id="cartoes-transferidos"></div>
+<div class="card">
+  <div class="card-body">
+    <div class="fbar">
+      <button class="pill active" data-tf="todos">Todos</button>
+      <button class="pill" data-tf="completo">Completos</button>
+      <button class="pill" data-tf="parcial">Parciais</button>
+      <button class="pill" data-tf="pendente">Pendentes</button>
+      <div class="sbox-wrap">
+        <span data-icon="search"></span>
+        <input type="text" class="sbox" id="transf-q" placeholder="Buscar por nome, CGM ou turma…">
+      </div>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-body no-pad">
+    <div class="tbl-wrap" style="border:none; border-radius:0">
+      <table>
+        <thead>
+          <tr>
+            <th data-ts="nome" class="sort-asc">Aluno</th>
+            <th data-ts="cgm">CGM</th>
+            <th>Guia de Transferência</th>
+            <th>Histórico Escolar</th>
+            <th>Parecer</th>
+            <th data-ts="status">Status</th>
+          </tr>
+        </thead>
+        <tbody id="transf-tbody"></tbody>
+      </table>
+      <div class="empty" id="transf-empty" style="display:none">
+        <span data-icon="search"></span><span id="transf-empty-msg">Nenhum resultado.</span>
+      </div>
+    </div>
+  </div>
+</div>

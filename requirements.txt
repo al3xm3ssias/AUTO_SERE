@@ -1,0 +1,46 @@
+# =============================================================================
+# requirements.txt — dependências do projeto AUTO_SERE
+# Gerado a partir dos imports identificados nos scripts originais.
+# Revise as versões conforme necessário para o ambiente de produção.
+# =============================================================================
+
+playwright>=1.40.0
+openpyxl>=3.1.0
+pandas>=2.0.0
+reportlab>=4.0.0
+qrcode>=7.4.0
+Pillow>=10.0.0
+# Compressão de PDF (src/comum/compressao.py). Versão fixada; se faltar, o próprio sistema instala sozinho na 1ª vez.
+pypdf==5.9.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+geopy>=2.4.0
+beautifulsoup4>=4.12.0
+python-docx>=1.1.0
+rapidfuzz>=3.0.0
+gspread>=6.0.0
+google-auth>=2.23.0
+google-auth-oauthlib>=1.1.0
+
+# (removidos em 2026-10: streamlit, pyautogui, pytesseract - nenhum arquivo do projeto importa)
+
+# Testes
+pytest>=7.4.0
+
+
+# Dependências existentes do projeto AUTO_SERE
+# (mantenha aqui as libs que você já tinha: requests, pandas, etc.)
+
+# --- Interface web (novo) ---
+Flask==3.0.3
+
+# WhatsApp sem Docker (provedor 'whatsplay'). Versão FIXADA de propósito: biblioteca nova, de 1 mantenedor,
+# que depende do HTML do WhatsApp Web; só atualize depois de ler o código e testar (docs/WHATSAPP.md).
+whatsplay==2.6.1
+
+# --- Pareceres dos transferidos (ler o QR dos pareceres digitalizados; ver src/automacao/pareceres_transferidos.py) ---
+# Só são importados quando a rotina "Pareceres dos transferidos" roda. pypdfium2 renderiza o PDF sem precisar do
+# poppler (no Windows, pdf2image exigiria instalar o poppler à parte); pdf2image/pyzbar/qreader são usados se existirem.
+opencv-python-headless>=4.8
+zxing-cpp>=2.2
+pypdfium2>=4.30

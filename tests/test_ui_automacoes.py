@@ -1,0 +1,178 @@
+"""Tela de Automações no Chromium: Turmas e Alunos (modo básico/completo)."""
+import threading
+from pathlib import Path
+
+import pytest
+
+from werkzeug.serving import make_server
+
+from src.web.api import rotas
+from src.web.app import create_app
+
+playwright_sync = pytest.importorskip("playwright.sync_api")
+
+
+@pytest.fixture()
+def pagina(tmp_path, monkeypatch):
+    monkeypatch.setattr(rotas, "_dados_dir", lambda: tmp_path)
+    (tmp_path / "turmas.json").write_text('{"5A": []}', encoding="utf-8")
+    with rotas._EXECUCOES_LOCK:
+        rotas._EXECUCOES.clear()
+        rotas._EVENTOS_WIZARD.clear()
+
+    import src.automacao.alunos as alunos_mod
+    import src.automacao.alunos_completo as completo_mod
+    import src.automacao.turmas as turmas_mod
+
+    async def fake_turmas():
+        print("LINHA-TURMAS coleta simulada")
+
+    async def fake_alunos():
+        print("LINHA-BASICO coleta simulada")
+
+    async def fake_completo(modo_rapido=False):
+        print(f"LINHA-COMPLETO rapido={modo_rapido}")
+
+    monkeypatch.setattr(turmas_mod, "coletar_turmas_e_alunos_via_login", fake_turmas)
+    monkeypatch.setattr(alunos_mod, "coletar_alunos_via_login", fake_alunos)
+    monkeypatch.setattr(completo_mod, "coletar_cadastro_completo_via_login", fake_completo)
+
+    srv = make_server("127.0.0.1", 0, create_app(), threaded=True)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    with playwright_sync.sync_playwright() as p:
+        try:
+            nav = p.chromium.launch()
+        except Exception as exc:
+            pytest.skip(f"Chromium indisponível: {exc}")
+        pg = nav.new_page()
+        pg.goto(f"http://127.0.0.1:{srv.server_port}/web")
+        yield pg
+        nav.close()
+    srv.shutdown()
+
+
+def _abrir(pg, chave):
+    pg.click("#toggle-automacoes")                                    # abre o grupo "Automações" do menu
+    pg.click(f'#sub-automacoes .nav-subitem[data-auto="{chave}"]')
+    pg.wait_for_selector("#automacoes-execucao", state="visible")
+
+
+def _executar_e_capturar(pg, chave):
+    with pg.expect_request(f"**/automacoes/{chave}/executar") as req:
+        pg.click("#btn-executar-tarefa")
+    return req.value.post_data_json
+
+
+def test_turmas_e_alunos_sao_os_primeiros_itens_do_menu(pagina):
+    pg = pagina
+    pg.click("#toggle-automacoes")
+    todas = pg.locator("#sub-automacoes .nav-subitem").evaluate_all("els => els.map(e => e.dataset.auto)")
+    assert todas[:2] == ["turmas", "alunos"]
+    # automações que antes só abriam pela lista de automações agora têm item no menu
+    assert {"aluno", "validar", "espec", "limpeza", "prematricula_completa"} <= set(todas)
+    assert len(todas) == len(set(todas))
+    rotulos = pg.locator("#sub-automacoes .nav-subitem .nav-item-label").evaluate_all("els => els.slice(0, 2).map(e => e.textContent.trim())")
+    assert rotulos == ["Turmas", "Alunos"]
+
+
+def test_aparecem_tambem_na_lista_de_automacoes(pagina):
+    pg = pagina
+    _abrir(pg, "turmas")
+    pg.click("#btn-voltar-automacoes")                                       # volta para a lista
+    pg.wait_for_selector('.automation-row[data-auto="turmas"]')
+    assert pg.locator('.automation-row[data-auto="alunos"]').count() == 1
+    assert "alunos_completo.py" in pg.inner_text('.automation-row[data-auto="alunos"]')
+
+
+def test_turmas_nao_pede_parametros_e_executa(pagina):
+    pg = pagina
+    _abrir(pg, "turmas")
+    pg.wait_for_function("document.getElementById('campos-automacao').textContent.includes('não precisa de parâmetros')")
+    assert _executar_e_capturar(pg, "turmas") == {"automacao": "turmas"}
+    pg.wait_for_function("document.getElementById('exec-log')?.textContent.includes('LINHA-TURMAS')")
+
+
+def test_alunos_modo_basico_e_o_padrao_e_explica_cada_modo(pagina):
+    pg = pagina
+    _abrir(pg, "alunos")
+    assert pg.input_value("#campo-modo") == "basico"
+    assert pg.locator("#campo-modo option").evaluate_all("els => els.map(e => e.textContent)") == [
+        "Básico (alunos.py)", "Completo (alunos_completo.py)"]                # sem opção vazia "Selecione..."
+    assert "tela de consulta" in pg.inner_text("#campo-modo-ajuda")
+    assert not pg.locator("#campo-rapido").is_visible()                       # "Modo rápido" é só do completo
+    assert _executar_e_capturar(pg, "alunos") == {"automacao": "alunos", "modo": "basico", "rapido": False}
+    pg.wait_for_function("document.getElementById('exec-log')?.textContent.includes('LINHA-BASICO')")
+
+
+def test_alunos_modo_completo_mostra_o_modo_rapido_e_envia_as_escolhas(pagina):
+    pg = pagina
+    _abrir(pg, "alunos")
+    pg.select_option("#campo-modo", "completo")
+    assert "tela de edição" in pg.inner_text("#campo-modo-ajuda") and "Turmas" in pg.inner_text("#campo-modo-ajuda")
+    assert pg.locator("#campo-rapido").is_visible()
+    assert pg.locator("#campo-rapido").is_checked() is False
+    pg.check("#campo-rapido")
+    assert _executar_e_capturar(pg, "alunos") == {"automacao": "alunos", "modo": "completo", "rapido": True}
+    pg.wait_for_function("document.getElementById('exec-log')?.textContent.includes('LINHA-COMPLETO rapido=True')")
+
+
+def test_voltar_ao_basico_esconde_o_modo_rapido_de_novo(pagina):
+    pg = pagina
+    _abrir(pg, "alunos")
+    pg.select_option("#campo-modo", "completo")
+    assert pg.locator("#campo-rapido").is_visible()
+    pg.select_option("#campo-modo", "basico")
+    assert not pg.locator("#campo-rapido").is_visible()
+    assert "tela de consulta" in pg.inner_text("#campo-modo-ajuda")
+
+
+def test_modo_completo_sem_turmas_json_mostra_a_orientacao(pagina, tmp_path):
+    pg = pagina
+    (tmp_path / "turmas.json").unlink()
+    _abrir(pg, "alunos")
+    pg.select_option("#campo-modo", "completo")
+    pg.click("#btn-executar-tarefa")
+    pg.wait_for_selector("#toast.show")
+    assert "Turmas" in pg.inner_text("#toast-msg")
+
+
+def test_backup_nao_pede_mais_uma_pasta_que_era_ignorada(pagina):
+    pg = pagina
+    _abrir(pg, "backup")
+    pg.wait_for_function("document.getElementById('campos-automacao').textContent.includes('não precisa de parâmetros')")
+    assert pg.locator("#btn-escolher-pasta").count() == 0
+
+
+def _visivel(pg, campo_id):
+    return pg.evaluate("(id) => { const el = document.getElementById(id).closest('.field'); return el.style.display !== 'none'; }", campo_id)
+
+
+def test_funcionarios_e_vinculos_estao_no_menu_e_vinculos_mostra_os_campos_de_cada_modo(pagina):
+    pg = pagina
+    pg.click("#toggle-automacoes")
+    for chave, rotulo in (("funcionarios", "Funcionários / Servidores"), ("vinculos", "Vínculos dos funcionários")):
+        assert pg.locator(f'#sub-automacoes .nav-subitem[data-auto="{chave}"] .nav-item-label').inner_text().strip() == rotulo
+    _abrir(pg, "vinculos")
+    pg.wait_for_selector("#campo-modo-vinc")
+    assert pg.eval_on_selector("#campo-modo-vinc", "e => e.value") == "completo"
+    estado = lambda: {c: _visivel(pg, c) for c in ("campo-so-nome", "campo-pular-holerite", "campo-mes-holerite", "campo-atualizar-sere", "campo-forcar-rh")}
+    assert estado() == {"campo-so-nome": False, "campo-pular-holerite": True, "campo-mes-holerite": True, "campo-atualizar-sere": True, "campo-forcar-rh": True}
+    pg.select_option("#campo-modo-vinc", "sere")
+    assert estado() == {"campo-so-nome": False, "campo-pular-holerite": False, "campo-mes-holerite": False, "campo-atualizar-sere": False, "campo-forcar-rh": False}
+    pg.select_option("#campo-modo-vinc", "vincular")
+    assert estado() == {"campo-so-nome": False, "campo-pular-holerite": False, "campo-mes-holerite": False, "campo-atualizar-sere": True, "campo-forcar-rh": True}
+    pg.select_option("#campo-modo-vinc", "homonimos")
+    assert estado() == {"campo-so-nome": True, "campo-pular-holerite": False, "campo-mes-holerite": True, "campo-atualizar-sere": True, "campo-forcar-rh": True}
+
+
+def test_vinculos_envia_o_modo_e_o_nome_escolhidos(pagina, monkeypatch):
+    from src.comum import escola
+    monkeypatch.setattr(escola, "nome", lambda: "Escola Municipal Teste")          # sem o nome da escola a prévia recusa (holerite)
+    pg = pagina
+    _abrir(pg, "vinculos")
+    pg.wait_for_selector("#campo-modo-vinc")
+    pg.select_option("#campo-modo-vinc", "homonimos")
+    pg.fill("#campo-so-nome", "Carla Dias")
+    pg.fill("#campo-mes-holerite", "09-2026")
+    corpo = _executar_e_capturar(pg, "vinculos")
+    assert corpo["modo"] == "homonimos" and corpo["so_nome"] == "Carla Dias" and corpo["mes"] == "09-2026"

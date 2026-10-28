@@ -1,0 +1,118 @@
+<section class="section" id="sec-turmas" data-title="Turmas">
+  <div class="page-header">
+    <div class="page-header-icon violet"><span data-icon="users"></span></div>
+    <div class="page-header-text">
+      <h1>Turmas</h1>
+      <p>Turmas, salas, etapas e períodos</p>
+    </div>
+  </div>
+  {% set entity = "turmas" %}
+  {% include "partials/turmas_cards.html" %}
+</section>
+
+<section class="section" id="sec-alunos" data-title="Alunos">
+  <div class="page-header">
+    <div class="page-header-icon cyan"><span data-icon="student"></span></div>
+    <div class="page-header-text">
+      <h1>Alunos</h1>
+      <p>Consulta, inclusão, alteração e relatórios</p>
+    </div>
+  </div>
+  {% set entity = "alunos" %}
+  {% include "partials/alunos_cards.html" %}
+</section>
+
+<section class="section" id="sec-prematricula" data-title="Pré matrícula">
+  <div class="page-header">
+    <div class="page-header-icon amber"><span data-icon="clipboard"></span></div>
+    <div class="page-header-text">
+      <h1>Pré matrícula</h1>
+      <p>Fila da pré-matrícula e cadastros</p>
+    </div>
+    <div class="page-header-actions">
+      <button class="btn-sm js-executar" id="pm-btn-executar" title="Roda a pré-matrícula aqui mesmo"><span data-icon="play"></span> Executar</button>
+      <button class="btn-sm js-exportar"><span data-icon="download"></span> Exportar</button>
+    </div>
+  </div>
+  {% set entity = "prematricula" %}
+  {% include "partials/pre_matricula_cards.html" %}
+</section>
+
+<section class="section" id="sec-transferidos" data-title="Transferidos">
+  <div class="page-header">
+    <div class="page-header-icon rose"><span data-icon="transfer"></span></div>
+    <div class="page-header-text">
+      <h1>Transferidos</h1>
+      <p>Controle dos documentos de transferência (guia, histórico e parecer)</p>
+    </div>
+    <div class="page-header-actions">
+      <button class="btn-sm js-atualizar" data-auto="transferidos" title="Abre a automação que coleta estes dados"><span data-icon="refresh"></span> Atualizar dados</button>
+      <button class="btn-sm js-exportar"><span data-icon="download"></span> Exportar</button>
+    </div>
+  </div>
+  {% set entity = "transferidos" %}
+  {% include "partials/transferidos_cards.html" %}
+</section>
+
+<section class="section" id="sec-funcionarios" data-title="Funcionários">
+  <div class="page-header">
+    <div class="page-header-icon blue"><span data-icon="badge"></span></div>
+    <div class="page-header-text">
+      <h1>Funcionários</h1>
+      <p>Cadastro e consulta de funcionários, servidores e matrículas</p>
+    </div>
+    <div class="page-header-actions">
+      <button class="btn-sm js-exportar"><span data-icon="download"></span> Exportar</button>
+    </div>
+  </div>
+  {% set entity = "funcionarios" %}
+  {% include "partials/funcionarios_cards.html" %}
+</section>
+
+<section class="section" id="sec-encaminhamentos" data-title="Encaminhamentos do SUS">
+  <div class="page-header">
+    <div class="page-header-icon lime"><span data-icon="heart"></span></div>
+    <div class="page-header-text">
+      <h1>Encaminhamentos do SUS</h1>
+      <p>Alunos com procedimentos na fila de espera do SISREG (consulta pelo CPF)</p>
+    </div>
+    <div class="page-header-actions">
+      <button class="btn-sm js-atualizar" data-auto="sus" title="Abre a automação que coleta estes dados"><span data-icon="refresh"></span> Atualizar dados</button>
+      <button class="btn-sm js-exportar"><span data-icon="download"></span> Exportar</button>
+    </div>
+  </div>
+  {% set entity = "encaminhamentos" %}
+  {% set filtro_turma = true %}
+  {% set acao_auto = "sus" %}
+  {% include "partials/encaminhamentos_cards.html" %}
+</section>
+
+<section class="section" id="sec-fora-do-raio" data-title="Alunos fora do raio">
+  <div class="page-header">
+    <div class="page-header-icon rose"><span data-icon="mapPinOff"></span></div>
+    <div class="page-header-text">
+      <h1>Alunos fora do raio</h1>
+      <p>Alunos cujo CEP fica além do raio de atendimento da escola</p>
+    </div>
+    <div class="page-header-actions">
+      <button class="btn-sm js-atualizar" data-auto="cep" title="Abre a automação que coleta estes dados"><span data-icon="refresh"></span> Atualizar dados</button>
+      <button class="btn-sm js-exportar"><span data-icon="download"></span> Exportar</button>
+    </div>
+  </div>
+  {% set entity = "fora-do-raio" %}
+  {% set filtro_turma = true %}
+  {% set acao_auto = "cep" %}
+  {% include "partials/fora_do_raio_cards.html" %}
+</section>
+
+<section class="section" id="sec-documentos" data-title="Análise de documentos">
+  <div class="page-header">
+    <div class="page-header-icon cyan"><span data-icon="files"></span></div>
+    <div class="page-header-text">
+      <h1>Análise de documentos</h1>
+      <p>Documentos digitalizados, documentos do PIVE e cruzamento entre os dois</p>
+    </div>
+  </div>
+  {% set entity = "documentos" %}
+  {% include "partials/documentos_cards.html" %}
+</section>

@@ -1,0 +1,59 @@
+<section class="section active" id="sec-painel" data-title="Painel principal">
+
+  <div class="page-header">
+    <div class="page-header-icon cyan"><span data-icon="dashboard"></span></div>
+    <div class="page-header-text">
+      <h1>Painel principal</h1>
+      <p>Visão geral da escola em tempo real</p>
+    </div>
+  </div>
+
+  <div class="update-bar">
+    <span data-icon="refreshSmall"></span>
+    <span>Última atualização: <strong id="ultima-atualizacao">carregando…</strong></span>
+    <button class="btn-sm" style="margin-left:auto" id="btn-atualizar-painel">
+      <span data-icon="refreshSmall"></span> Atualizar
+    </button>
+  </div>
+
+  <div class="metrics-grid" id="metrics-principais">
+    <!-- preenchido via JS (stat-card) a partir de /web/api/painel/resumo -->
+  </div>
+
+  <div class="sec-hdr">
+    <span class="sec-ttl">Indicadores complementares</span>
+  </div>
+  <div class="metrics-grid-secondary" id="metrics-secundarias">
+    <!-- preenchido via JS -->
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <span data-icon="clipboard" style="color:var(--amber)"></span>
+      <span class="card-title">Fila da pré-matrícula</span>
+      <div class="card-header-actions">
+        <button class="btn-sm" data-goto="prematricula">Ver tudo <span data-icon="arrowRight"></span></button>
+      </div>
+    </div>
+    <div class="card-body no-pad">
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Nº</th>
+              <th>Nome do aluno</th>
+              <th>Turma</th>
+              <th>Posição na fila</th>
+              <th>Número do pai</th>
+              <th>Ação</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-painel-prematricula">
+            <!-- preenchido via JS a partir de /web/api/prematricula/fila -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</section>

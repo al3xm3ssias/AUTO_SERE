@@ -1,0 +1,39 @@
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Filtros</span>
+    <span class="card-header-badge" id="alunos-cnt">Carregando…</span>
+  </div>
+  <div class="card-body">
+    <div class="fbar">
+      <button class="pill active" data-af="todos">Todos</button>
+      <button class="pill" data-af="matriculado">Matriculados</button>
+      <button class="pill" data-af="transferido">Transferidos</button>
+      <div class="sbox-wrap">
+        <span data-icon="search"></span>
+        <input type="text" class="sbox" id="alunos-q" placeholder="Buscar nome, CGM, turma...">
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body no-pad">
+    <div class="tbl-wrap" style="border:none; border-radius:0">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:36px"></th>
+            <th data-sort="nome" class="sort-asc">Nome</th>
+            <th data-sort="cgm">CGM</th>
+            <th data-sort="turma">Turma</th>
+            <th data-sort="situacao">Situação</th>
+          </tr>
+        </thead>
+        <tbody id="alunos-tbody"></tbody>
+      </table>
+      <div class="empty" id="alunos-empty" style="display:none">
+        <span data-icon="search"></span>Nenhum resultado.
+      </div>
+    </div>
+  </div>
+</div>

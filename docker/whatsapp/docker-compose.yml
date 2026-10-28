@@ -1,0 +1,31 @@
+# Gateway WhatsApp Web (blakegt/whatsapp-web-api-rest) para o AUTO SERE.
+#
+#   Subir : docker compose -f docker/whatsapp/docker-compose.yml up -d
+#   Parar : docker compose -f docker/whatsapp/docker-compose.yml down        (mantém o login)
+#   Logs  : docker compose -f docker/whatsapp/docker-compose.yml logs -f
+#   Zerar o vínculo (apaga o login; pede QR novo): docker compose -f docker/whatsapp/docker-compose.yml down -v
+#
+# SEGURANÇA: o gateway NÃO tem senha. A porta é publicada só em 127.0.0.1 (este computador).
+# Nunca troque por "8085:8085" nem exponha na internet/rede: qualquer um enviaria mensagens
+# pelo WhatsApp da escola.
+name: autosere-whatsapp
+
+services:
+  whatsapp-gateway:
+    image: blakegt/whatsapp-web-api-rest:latest      # depois de validar, fixe por digest (sha256) para não mudar sozinho
+    container_name: autosere-whatsapp
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8085:8085"
+    environment:
+      APP_PORT: "8085"
+    volumes:
+      # Volume NOMEADO (e não pasta do projeto): o contêiner roda como usuário 1001 e uma pasta
+      # montada do Windows/Samba daria erro de permissão. Aqui fica o login do WhatsApp.
+      - sessao_whatsapp:/app/auth_info
+    extra_hosts:
+      # Permite ao contêiner chamar o AUTO SERE no webhook (Linux; no Docker Desktop já existe).
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  sessao_whatsapp:
