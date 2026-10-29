@@ -1599,11 +1599,11 @@ const ICONES_AUTOMACAO = {
   cep: "mapPin",
   sus: "heart",
   transferidos: "transfer",
+  parecer_fund: "certificate",
+  parecer_rco: "certificate",
   transferidos_fila: "transfer",
   transferidos_gerar: "transfer",
   pareceres_transferidos: "certificate",
-  parecer_fund: "certificate",
-  parecer_rco: "certificate",
   comprimir: "zip",
   coleta_emails: "mail",
   agendador: "clock",
@@ -2450,6 +2450,15 @@ const DETALHE_CONFIG = {
   escola: `
     <h4 style="margin-bottom:14px; font-size:.9rem;">Dados da escola</h4>
     <div id="cfg-escola-form"></div>`,
+  data_corte_transferidos: `
+    <h4 style="margin-bottom:14px; font-size:.9rem;">Data de corte dos transferidos</h4>
+    <p style="color:var(--txt3); font-size:.82rem; margin-bottom:12px;">O processo automático de transferidos vale para quem foi transferido <b>a partir</b> desta data (inclusive). Antes dela, a guia e o histórico são considerados já tratados à mão e não são refeitos. Quem foi transferido e voltou à escola também não é refeito.</p>
+    <div class="field"><label>Data de corte (dd/mm/aaaa)</label><input type="text" id="cfg-corte-data" placeholder="22/06/2026"></div>
+    <div id="cfg-corte-status" style="font-family:var(--mono); font-size:.72rem; color:var(--txt3); margin-bottom:14px;">Carregando…</div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <button class="btn-primary" id="cfg-corte-salvar">Salvar data</button>
+      <button class="btn-sm" id="cfg-corte-padrao" style="padding:9px 16px;font-size:.78rem">Usar a data padrão</button>
+    </div>`,
   pasta_digitalizacao: `
     <h4 style="margin-bottom:14px; font-size:.9rem;">Pasta de digitalização</h4>
     <p style="color:var(--txt3); font-size:.82rem; margin-bottom:12px;">Pasta raiz onde ficam os documentos digitalizados dos alunos (as pastas das turmas). Por padrão é <code>dados/&lt;ano&gt;/DIGITALIZAÇÃO</code>.</p>
@@ -2551,11 +2560,56 @@ function initConfiguracoes() {
       if (row.dataset.config === "pasta_digitalizacao") {
         conectarFormPastaDigitalizacao();
       }
+      if (row.dataset.config === "data_corte_transferidos") {
+        conectarFormDataCorte();
+      }
       if (row.dataset.config === "escola") {
         montarFormEscola(document.getElementById("cfg-escola-form"), {});
       }
     });
   });
+}
+
+async function conectarFormDataCorte() {
+  const input = document.getElementById("cfg-corte-data");
+  const status = document.getElementById("cfg-corte-status");
+  const btnSalvar = document.getElementById("cfg-corte-salvar");
+  const btnPadrao = document.getElementById("cfg-corte-padrao");
+  if (!input || !status || !btnSalvar || !btnPadrao) return;
+
+  const mostrar = (d) => {
+    input.value = d.data_corte || "";
+    status.innerHTML = d.personalizada
+      ? '<span style="color:var(--lime)">✓ Data personalizada em uso</span>'
+      : '<span style="color:var(--amber)">Usando a data padrão (' + d.padrao + ') — defina a sua</span>';
+  };
+  const enviar = async (corpo, botao, textoEspera) => {
+    const original = botao.textContent;
+    btnSalvar.disabled = btnPadrao.disabled = true;
+    botao.textContent = textoEspera;
+    try {
+      const resp = await apiPost("/configuracoes/data-corte", corpo);
+      mostrar(resp);
+      toast(resp.mensagem || "Data salva");
+    } catch (e) {
+      toast(e.message);
+    } finally {
+      btnSalvar.disabled = btnPadrao.disabled = false;
+      botao.textContent = original;
+    }
+  };
+
+  try {
+    mostrar(await apiGet("/configuracoes/data-corte"));
+  } catch (e) {
+    status.textContent = "Não foi possível ler a configuração atual.";
+  }
+  btnSalvar.addEventListener("click", () => {
+    const data_corte = input.value.trim();
+    if (!data_corte) { toast("Informe a data de corte (dd/mm/aaaa)"); return; }
+    enviar({ data_corte }, btnSalvar, "Salvando...");
+  });
+  btnPadrao.addEventListener("click", () => enviar({ usar_padrao: true }, btnPadrao, "Aplicando..."));
 }
 
 async function conectarFormPastaDigitalizacao() {

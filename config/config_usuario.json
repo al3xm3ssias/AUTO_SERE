@@ -3,6 +3,7 @@
   "pasta_modelos": null,
   "cgm_upload": [],
   "setup_concluido": false,
+  "ano_letivo": null,
   "unidade_escolar": {
     "nome": "ESCOLA JUDITH MACEDO SILVEIRA",
     "nome_abreviado": "JUDITH",
@@ -21,5 +22,6 @@
   },
   "flags_automacoes": {
     "analisa_sere": []
-  }
+  },
+  "data_corte_transferidos": "18/10/2026"
 }

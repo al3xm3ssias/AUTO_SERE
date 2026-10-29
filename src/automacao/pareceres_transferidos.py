@@ -41,8 +41,9 @@ from src.comum import pastas_transferencias as _pastas
 EXTENSOES = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".gif", ".pdf"}
 DPIS_PDF = (200, 300, 150, 400)
 
-# QR → chave real do turmas.json. A busca por substring (abaixo) cobre o resto; acrescente aqui variações do QR.
-# As chaves são comparadas em MAIÚSCULO.
+# QR → chave real do turmas.json (nomes "Integral" da escola do usuário). Serve de atalho: a busca por palavras
+# (resolver_turma) já resolve a maioria sem isto, e variações novas podem ser acrescentadas, sem mexer no código,
+# em config/config_usuario.json: "mapeamento_turmas_qr": {"INF 4 A": "INFANTIL 4 Integral A"}. Chaves em MAIÚSCULO.
 MAPEAMENTO_TURMAS: dict[str, str] = {
     "INFANTIL 4 A": "INFANTIL 4 Integral A", "INFANTIL4 A": "INFANTIL 4 Integral A",
     "INF 4 A": "INFANTIL 4 Integral A", "INF4 A": "INFANTIL 4 Integral A",
@@ -270,16 +271,43 @@ def _limpar(texto: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^A-Za-z0-9\s]", "", t)).upper().strip()
 
 
+def _mapeamento() -> dict[str, str]:
+    """Mapeamento embutido + o que o usuário acrescentou em config/config_usuario.json ("mapeamento_turmas_qr")."""
+    try:
+        from src.comum.configuracao import carregar_configuracao
+        extra = carregar_configuracao().get("mapeamento_turmas_qr") or {}
+    except Exception:                                    # noqa: BLE001 — configuração ilegível não impede a leitura
+        extra = {}
+    return {**MAPEAMENTO_TURMAS, **{str(k).upper().strip(): str(v) for k, v in extra.items()}}
+
+
+def _casa_por_palavras(qr: str, chave: str) -> bool:
+    """Toda palavra do QR aparece na chave (inteira; ou como início, se tiver 3+ letras: "INF" → "INFANTIL")."""
+    palavras_chave = _limpar(chave).split()
+    palavras_qr = _limpar(qr).split()
+    return bool(palavras_qr) and all(
+        any(k == q or (len(q) >= 3 and k.startswith(q)) for k in palavras_chave) for q in palavras_qr)
+
+
 def resolver_turma(turmas_data: dict, turma_qr: str) -> Optional[str]:
-    """Turma do QR → chave real do turmas.json: mapeamento explícito, depois substring, depois substring inversa."""
+    """
+    Turma do QR → chave real do turmas.json. Ordem: mapeamento explícito (embutido + config), igualdade,
+    palavras do QR contidas na chave (só se der UMA turma: com mais de uma, não adivinha), substring.
+    Nada aqui assume nomes de turma de uma escola específica.
+    """
     chaves = [k for k, v in turmas_data.items() if isinstance(v, list)]
-    explicita = MAPEAMENTO_TURMAS.get(turma_qr.upper().strip())
+    explicita = _mapeamento().get(turma_qr.upper().strip())
     if explicita in chaves:
         return explicita
     limpa = _limpar(turma_qr)
     for chave in chaves:
         if chave == turma_qr or limpa == _limpar(chave):
             return chave
+    por_palavras = [c for c in chaves if _casa_por_palavras(turma_qr, c)]
+    if len(por_palavras) == 1:
+        return por_palavras[0]
+    if len(por_palavras) > 1:
+        return None                                      # ambíguo (ex.: "3 ANO" com turmas A e B)
     for chave in chaves:
         if limpa and limpa in _limpar(chave):
             return chave

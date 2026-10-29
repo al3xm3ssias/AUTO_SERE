@@ -138,6 +138,30 @@ async def obter_slots_api(page, cgm: str) -> tuple[dict[str, str], dict[str, str
     return hash_upload_por_idtipo, assinatura_por_idtipo
 
 
+async def obter_nomes_slots_api(page, cgm: str) -> dict[str, str]:
+    """
+    Nome do arquivo de cada slot JÁ PREENCHIDO da pasta virtual: {idtipo: nomearquivo}.
+    Serve para saber QUE arquivo está no slot (o nosso ou o de outra escola) antes de decidir se pula.
+    """
+    url = f"{URL_API_LISTAR}{cgm}"
+    resultado = await page.evaluate(f"""
+        async () => {{
+            const resp = await fetch('{url}', {{credentials: 'include'}});
+            if (!resp.ok) return null;
+            return await resp.json();
+        }}
+    """)
+    nomes: dict[str, str] = {}
+    if not isinstance(resultado, list):
+        return nomes
+    for entrada in resultado:
+        idtipo = str(entrada.get("idtipodocumento", "")).strip()
+        nome_arq = str(entrada.get("nomearquivo", "")).strip()
+        if idtipo and nome_arq:
+            nomes[idtipo] = nome_arq
+    return nomes
+
+
 async def excluir_slot_e_obter_hash(page, cgm: str, slot: str, idtipo: str, assinatura: str) -> str | None:
     """Exclui o arquivo existente de um slot e retorna o hash fixo de upload."""
     print(f"     🗑️  '{slot}' já tem arquivo — excluindo para liberar o slot…")

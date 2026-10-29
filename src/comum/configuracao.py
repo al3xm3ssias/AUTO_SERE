@@ -332,14 +332,17 @@ def data_corte_transferidos_configurada() -> bool:
     return bool(carregar_configuracao().get("data_corte_transferidos"))
 
 
-def data_corte_transferidos() -> "date":
-    """DATA_CORTE em vigor: a configurada, ou 22/06 do ano letivo (o padrão antigo do projeto)."""
+def data_corte_padrao() -> "date":
+    """22/06 do ano letivo (o corte que o projeto usava antes de ser configurável)."""
     from datetime import date
-    bruta = carregar_configuracao().get("data_corte_transferidos")
-    if bruta:
-        return validar_data_corte(bruta)
     from src.comum import paths as _paths
     return date(int(_paths.ano_atual()), DATA_CORTE_PADRAO_MES, DATA_CORTE_PADRAO_DIA)
+
+
+def data_corte_transferidos() -> "date":
+    """DATA_CORTE em vigor: a configurada, ou a padrão (22/06 do ano letivo)."""
+    bruta = carregar_configuracao().get("data_corte_transferidos")
+    return validar_data_corte(bruta) if bruta else data_corte_padrao()
 
 
 def definir_data_corte_transferidos(texto) -> "date":

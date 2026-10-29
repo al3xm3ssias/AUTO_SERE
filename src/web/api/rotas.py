@@ -1651,6 +1651,38 @@ def _estado_pasta_digitalizacao() -> dict:
     }
 
 
+def _estado_data_corte() -> dict:
+    return {"data_corte": _config.data_corte_transferidos().strftime("%d/%m/%Y"),
+            "personalizada": _config.data_corte_transferidos_configurada(),
+            "padrao": _config.data_corte_padrao().strftime("%d/%m/%Y")}
+
+
+@api_bp.route("/configuracoes/data-corte", methods=["GET"])
+def configuracao_data_corte_obter():
+    """Data de corte do processo de transferidos (a partir dela, inclusive, o processo é automático)."""
+    return jsonify(_estado_data_corte())
+
+
+@api_bp.route("/configuracoes/data-corte", methods=["POST"])
+def configuracao_data_corte_salvar():
+    """payload: {"data_corte": "dd/mm/aaaa"} grava; {"usar_padrao": true} volta ao padrão (22/06 do ano letivo)."""
+    payload = request.get_json(silent=True) or {}
+    try:
+        if payload.get("usar_padrao"):
+            _config.definir_data_corte_transferidos("")
+            mensagem = "Voltou à data padrão."
+        else:
+            if not str(payload.get("data_corte") or "").strip():
+                return jsonify({"erro": "Informe a data de corte (dd/mm/aaaa)."}), 400
+            _config.definir_data_corte_transferidos(payload["data_corte"])
+            mensagem = "Data de corte salva."
+    except ValueError as exc:
+        return jsonify({"erro": str(exc)}), 400
+    resposta = _estado_data_corte()
+    resposta.update({"status": "ok", "mensagem": mensagem})
+    return jsonify(resposta)
+
+
 @api_bp.route("/configuracoes/pasta-digitalizacao", methods=["GET"])
 def configuracao_pasta_digitalizacao_obter():
     """

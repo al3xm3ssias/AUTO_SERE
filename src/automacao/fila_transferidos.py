@@ -12,7 +12,7 @@ Fila de transferidos: quem foi transferido (turmas.json) e já entra no processo
 
 • fila_transferidos.json é REGERADO a cada coleta de turmas (não edite à mão): lista TODOS os transferidos e
   marca, pela DATA_CORTE (Configurações), quem entra no processo ("processar") e quem fica de fora
-  ("antes_do_corte": já tratado à mão). Quem foi transferido e retornou aparece com "retornou": true.
+  ("antes_do_corte": já tratado à mão; "retornou": voltou à escola, o processo é feito uma vez só).
 • transferidos.json nunca é sobrescrito: só ganha registro (vazio) para quem entra no processo e ainda não tem.
 
 IDENTIDADE (decisão do usuário, 27/10/2026)
@@ -23,8 +23,8 @@ IDENTIDADE (decisão do usuário, 27/10/2026)
            31 - FULANO - 01/01/2015 - (22/08/2026) Matriculado   → um só aluno, hoje ativo.
     • A situação ATUAL do aluno é a do registro de data mais recente (desempate: maior N): cada pessoa é
       contada UMA vez (ativo OU transferido), sem divergência de totais.
-    • Quem foi transferido e retornou continua na fila (a guia/histórico emitidos na saída são fatos),
-      com o campo "retorno" preenchido — mas conta como ATIVO.
+    • Quem foi transferido e retornou continua na fila, com o campo "retorno" preenchido, mas conta como
+      ATIVO e NÃO é processado (decisão do usuário: o processo é feito uma vez, não se refaz).
 ════════════════════════════════════════════════════════════════════════════
 """
 
@@ -211,6 +211,7 @@ def construir_transferidos(turmas: dict) -> tuple[dict, dict, list[str]]:
 
 SITUACAO_PROCESSAR = "processar"          # transferido a partir da DATA_CORTE → entra no processo
 SITUACAO_ANTES     = "antes_do_corte"     # transferido antes da DATA_CORTE → já tratado à mão
+SITUACAO_RETORNOU  = "retornou"           # foi transferido mas voltou à escola → o processo é feito uma vez só: não se refaz
 SITUACAO_SEM_DATA  = "sem_data"           # data de movimentação ilegível → fica de fora até alguém conferir
 
 
@@ -222,11 +223,18 @@ def _data_corte(data_corte: Optional[date]) -> date:
 
 
 def classificar(registro: dict, data_corte: date) -> str:
-    """'processar' se a transferência é de DATA_CORTE em diante (inclusive); senão o motivo de ficar de fora."""
+    """
+    'processar' se a transferência é de DATA_CORTE em diante (inclusive) e o aluno não voltou à escola;
+    senão o motivo de ficar de fora (antes do corte = tratado à mão; retornou = não se refaz).
+    """
     d = parse_data(registro.get("data_transferencia") or "")
     if d is None:
         return SITUACAO_SEM_DATA
-    return SITUACAO_PROCESSAR if d >= data_corte else SITUACAO_ANTES
+    if d < data_corte:
+        return SITUACAO_ANTES
+    if registro.get("retorno") is not None:
+        return SITUACAO_RETORNOU
+    return SITUACAO_PROCESSAR
 
 
 def montar_fila(turmas: dict, data_corte: Optional[date] = None) -> tuple[dict, list[str]]:
@@ -250,6 +258,7 @@ def montar_fila(turmas: dict, data_corte: Optional[date] = None) -> tuple[dict, 
     resumo.update({"transferidos_na_fila": len(alunos),
                    "a_processar": sum(1 for a in alunos.values() if a["processar"]),
                    "antes_do_corte": sum(1 for a in alunos.values() if a["situacao_fila"] == SITUACAO_ANTES),
+                   "retornaram_sem_processar": sum(1 for a in alunos.values() if a["situacao_fila"] == SITUACAO_RETORNOU),
                    "retornaram": sum(1 for a in alunos.values() if a["retornou"])})
     fila = {"gerado_em": _agora(), "data_corte": corte.strftime("%d/%m/%Y"), "resumo": resumo, "alunos": alunos}
     return fila, avisos
@@ -261,9 +270,11 @@ def imprimir_fila(fila: dict, avisos: list[str], simulacao: bool = False) -> Non
     print(f"  📋 Fila de transferidos ({rotulo}) — data de corte {fila['data_corte']}")
     print(f"     {r['alunos']} aluno(s) = {r['ativos']} ativo(s) + {r['transferidos_atuais']} transferido(s) | "
           f"{r['retornaram']} retornou(aram) após transferência (contado(s) como ativo)")
-    print(f"     {r['a_processar']} a processar | {r['antes_do_corte']} antes da data de corte (já tratados à mão)")
+    print(f"     {r['a_processar']} a processar | {r['antes_do_corte']} antes da data de corte (já tratados à mão) | "
+          f"{r['retornaram_sem_processar']} retornou(aram) à escola (não se refaz)")
     for cgm, a in fila["alunos"].items():
-        marca = {"processar": "▶ processar", "antes_do_corte": "⏭ antes do corte", "sem_data": "⚠ sem data"}[a["situacao_fila"]]
+        marca = {"processar": "▶ processar", "antes_do_corte": "⏭ antes do corte", "retornou": "⏭ retornou",
+                 "sem_data": "⚠ sem data"}[a["situacao_fila"]]
         extra = f"  (retornou em {a['retorno']['data']})" if a["retornou"] else ""
         print(f"       {marca:<16} {a['nome']} — CGM {cgm} — {a['turma']} — transferido em {a['data_transferencia']}{extra}")
     for aviso in avisos:
@@ -338,16 +349,9 @@ def garantir_fila(dados_dir: Optional[Path] = None, data_corte: Optional[date] =
     return registrar_fila_transferidos(_ler_json(origem), pasta, data_corte)["fila"]
 
 
-def alunos_a_processar(fila: dict, pular_retornados: bool = False) -> list[dict]:
-    """Entradas da fila com processar=True (opcionalmente sem quem já retornou), cada uma com seu 'cgm'."""
-    saida = []
-    for cgm, a in fila.get("alunos", {}).items():
-        if not a.get("processar"):
-            continue
-        if pular_retornados and a.get("retornou"):
-            continue
-        saida.append({"cgm": cgm, **a})
-    return saida
+def alunos_a_processar(fila: dict) -> list[dict]:
+    """Entradas da fila com processar=True (quem retornou à escola nunca entra), cada uma com seu 'cgm'."""
+    return [{"cgm": cgm, **a} for cgm, a in fila.get("alunos", {}).items() if a.get("processar")]
 
 
 def garantir_transferidos_json(dados_dir: Optional[Path] = None, data_corte: Optional[date] = None) -> bool:

@@ -311,10 +311,13 @@ def salvar_json(dados: dict) -> None:
     tmp.replace(JSON_TRANSFERIDOS)
 
 
+_CAMPOS_OPCIONAIS = {"baixado_em"}      # aceitos mesmo em registros antigos que ainda não os têm
+
+
 def _marcar(cgm: str, documento: str, campo: str, valor: Optional[str] = None) -> None:
     dados = carregar_json()
     secao = dados.get(cgm, {}).get(documento)
-    if secao is not None and campo in secao:
+    if secao is not None and (campo in secao or campo in _CAMPOS_OPCIONAIS):
         secao[campo] = valor if valor is not None else _agora_str()
         salvar_json(dados)
 
@@ -501,23 +504,20 @@ def registrar_pre_corte() -> int:
 # CARREGAMENTO DE ALUNOS
 # ══════════════════════════════════════════════════════════════════════════
 
-def carregar_alunos(pular_retornados: bool = False, gravar_fila: bool = True) -> list[Aluno]:
+def carregar_alunos(gravar_fila: bool = True) -> list[Aluno]:
     """
     Alunos a processar = os da fila_transferidos.json marcados "processar" (transferidos a partir da
     DATA_CORTE) que ainda não têm guia + histórico completos em transferidos.json. A fila é gerada a partir
-    do turmas.json se ainda não existe (ver src.automacao.fila_transferidos). `pular_retornados`: deixa de
-    fora quem foi transferido mas já voltou à escola.
+    do turmas.json se ainda não existe (ver src.automacao.fila_transferidos). Quem foi transferido mas já
+    voltou à escola não entra (o processo é feito uma vez só).
     """
     from src.automacao.fila_transferidos import alunos_a_processar, garantir_fila
 
     fila = garantir_fila(_DADOS, gravar=gravar_fila)          # FileNotFoundError se faltar o turmas.json
     alunos:  list[Aluno] = []
-    completos = retornados = 0
+    completos = 0
 
     for a in alunos_a_processar(fila):
-        if pular_retornados and a["retornou"]:
-            retornados += 1
-            continue
         if a["cgm"] and aluno_completo(a["cgm"]):
             completos += 1
             continue
@@ -526,8 +526,9 @@ def carregar_alunos(pular_retornados: bool = False, gravar_fila: bool = True) ->
     print(f"📋 {len(alunos)} aluno(s) a processar (transferidos a partir de {fila['data_corte']}).")
     if completos:
         print(f"⏭️  {completos} aluno(s) já completo(s) (guia+histórico) — ignorado(s).")
+    retornados = fila.get("resumo", {}).get("retornaram_sem_processar", 0)
     if retornados:
-        print(f"⏭️  {retornados} aluno(s) transferido(s) que já retornou(aram) — ignorado(s).")
+        print(f"⏭️  {retornados} aluno(s) transferido(s) que já voltou(aram) à escola — não entram (processo feito uma vez só).")
     return alunos
 
 
@@ -535,11 +536,43 @@ def carregar_alunos(pular_retornados: bool = False, gravar_fila: bool = True) ->
 # MOTOR DE DECISÃO
 # ══════════════════════════════════════════════════════════════════════════
 
+TOLERANCIA_EMISSAO = timedelta(hours=2)   # diferença máxima entre o emitido_em registrado e o "gerado em" do SERE
+
+
+def docs_da_escola(docs_sere: list[DocSERE], emitido_em: Optional[datetime],
+                   corte: Optional[datetime] = None) -> list[DocSERE]:
+    """
+    Dos documentos que o SERE lista para o aluno, só os que ESTA escola emitiu nesta transferência.
+
+    A listagem do SERE mostra também documentos de transferência de outras escolas. Um documento é
+    considerado nosso quando (1) foi gerado depois da DATA_CORTE e (2) a data/hora "gerado em" bate com
+    o `emitido_em` que o próprio processo registrou em transferidos.json ao emitir (mesmo dia, ou até
+    2 h de diferença, por causa da virada do dia). Sem `emitido_em` registrado, nenhum documento é
+    nosso: faz-se o processo completo (emitir, assinar, baixar). Mais próximo do registro primeiro.
+    """
+    if emitido_em is None:
+        return []
+    corte = corte or _corte()
+    nossos = [d for d in docs_sere
+              if d.data and d.data > corte
+              and (d.data.date() == emitido_em.date() or abs(d.data - emitido_em) <= TOLERANCIA_EMISSAO)]
+    return sorted(nossos, key=lambda d: abs(d.data - emitido_em))
+
+
+def _nota_outros(docs_sere: list[DocSERE], nossos: list[DocSERE]) -> str:
+    outros = len(docs_sere) - len(nossos)
+    return f" ({outros} documento(s) de outra origem ou sem registro de emissão ignorado(s))" if outros > 0 else ""
+
+
+MSG_SEM_DOC_DA_ESCOLA = "Nenhum documento emitido por esta escola nesta transferência (emita antes)."
+
+
 def decidir_acao_download(
     aluno:        Aluno,
     tipo:         TipoDoc,
     docs_sere:    list[DocSERE],
     caminho_base: Path,
+    info:         Optional[InfoDocJSON] = None,
 ) -> DecisaoDoc:
     """
     Analisa os dados disponíveis e retorna uma DecisaoDoc com a ação a executar.
@@ -558,8 +591,11 @@ def decidir_acao_download(
     # Só considera documentos do ciclo de transferência atual (emitidos após
     # DATA_CORTE). Um histórico válido, porém de um ciclo/ano anterior, não
     # deve ser reaproveitado — precisa gerar um novo para o ano corrente.
-    corte = _corte()
-    docs_ciclo_atual = [d for d in docs_sere if d.data and d.data > corte]
+    # Além do ciclo atual, só vale o documento que ESTA escola emitiu (ver docs_da_escola): a listagem
+    # traz também documentos de outras escolas, que não devem ser baixados como se fossem nossos.
+    if info is None:
+        info = info_doc_json(aluno.cgm, tipo)
+    docs_ciclo_atual = docs_da_escola(docs_sere, info.emitido_em)
 
     doc_valido = next((d for d in docs_ciclo_atual if d.valido), None)
 
@@ -575,7 +611,8 @@ def decidir_acao_download(
                 falta.append("Diretor")
             motivo = f"Ausência de assinatura obrigatória: {', '.join(falta)}."
         else:
-            motivo = "Nenhum documento encontrado no portal."
+            motivo = (MSG_SEM_DOC_DA_ESCOLA if docs_sere else "Nenhum documento encontrado no portal.") \
+                     + _nota_outros(docs_sere, docs_ciclo_atual)
         return DecisaoDoc(tipo=tipo, aluno=aluno, acao=AcaoDecidida.IGNORAR, motivo=motivo)
 
     # ── Arquivo local existente? ─────────────────────────────────────────
@@ -617,33 +654,39 @@ def decidir_acao_emissao(
     aluno:     Aluno,
     tipo:      TipoDoc,
     docs_sere: list[DocSERE],
+    info:      Optional[InfoDocJSON] = None,
 ) -> tuple[AcaoDecidida, Optional[DocSERE], str]:
     """
-    Decide o que fazer na etapa de emissão/assinatura:
-      - Há doc válido recente → JA_EXISTE
-      - Há doc não assinado   → assinar
-      - Sem doc               → gerar novo
+    Decide o que fazer na etapa de emissão, olhando só os documentos que ESTA escola emitiu nesta
+    transferência (ver docs_da_escola). Documento de outra escola não conta: se não há nenhum nosso, gera.
+      - nosso e válido (2 assinaturas)         → JA_EXISTE (não sobrescreve)
+      - nosso, sem assinatura do Secretário    → BAIXAR (só assinar; NÃO gera outro)
+      - nosso, falta só o Diretor              → JA_EXISTE (aguardando; NÃO gera outro a cada execução)
+      - nenhum nosso                           → GERAR_NOVO
     Retorna (ação, doc_relevante, motivo).
     """
     agora = datetime.now()
+    if info is None:
+        info = info_doc_json(aluno.cgm, tipo)
+    nossos = docs_da_escola(docs_sere, info.emitido_em)
+    nota = _nota_outros(docs_sere, nossos)
 
-    # Só considera documentos do ciclo de transferência atual (emitidos após
-    # DATA_CORTE). Um histórico válido, porém de um ciclo/ano anterior, não
-    # deve ser reaproveitado — precisa gerar um novo para o ano corrente.
-    corte = _corte()
-    docs_ciclo_atual = [d for d in docs_sere if d.data and d.data > corte]
-
-    doc_valido = next((d for d in docs_ciclo_atual if d.valido), None)
+    doc_valido = next((d for d in nossos if d.valido), None)
     if doc_valido:
         if doc_valido.data and (agora - doc_valido.data).total_seconds() <= JANELA_HORAS * 3600:
-            return AcaoDecidida.JA_EXISTE, doc_valido, f"Documento válido e recente (cod: {doc_valido.cod})."
-        return AcaoDecidida.JA_EXISTE, doc_valido, f"Documento válido (cod: {doc_valido.cod}) — utilizando."
+            return AcaoDecidida.JA_EXISTE, doc_valido, f"Documento válido e recente (cod: {doc_valido.cod}).{nota}"
+        return AcaoDecidida.JA_EXISTE, doc_valido, f"Documento válido (cod: {doc_valido.cod}) — utilizando.{nota}"
 
-    doc_sem_sec = next((d for d in docs_ciclo_atual if not d.assinado_secretario), None)
+    doc_sem_sec = next((d for d in nossos if not d.assinado_secretario), None)
     if doc_sem_sec:
-        return AcaoDecidida.BAIXAR, doc_sem_sec, f"Doc não assinado encontrado (cod: {doc_sem_sec.cod}) — assinar."
+        return AcaoDecidida.BAIXAR, doc_sem_sec, f"Doc não assinado encontrado (cod: {doc_sem_sec.cod}) — assinar.{nota}"
 
-    return AcaoDecidida.GERAR_NOVO, None, "Nenhum documento encontrado — gerar."
+    doc_aguardando = next((d for d in nossos if d.assinado_secretario and not d.assinado_diretor), None)
+    if doc_aguardando:
+        return (AcaoDecidida.JA_EXISTE, doc_aguardando,
+                f"Documento desta escola (cod: {doc_aguardando.cod}) aguardando a assinatura do Diretor — não gera outro.{nota}")
+
+    return AcaoDecidida.GERAR_NOVO, None, f"Nenhum documento desta escola encontrado — gerar.{nota}"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -920,13 +963,15 @@ async def gerar_historico(page, alunos: list[Aluno]) -> None:
             if doc_ref:
                 sincronizar_assinaturas(aluno.cgm, TipoDoc.HISTORICO, doc_ref)
 
-            if acao == AcaoDecidida.JA_EXISTE:
+            if acao != AcaoDecidida.GERAR_NOVO:          # já há documento desta escola: só falta assinar/baixar
                 log(RotuloLog.IGNORADO, aluno.nome, "Histórico Escolar", motivo)
             else:
+                # Registra ANTES de clicar: se o programa cair depois do clique, o documento gerado continua
+                # sendo reconhecido como nosso (ver docs_da_escola) em vez de gerar outro na próxima execução.
+                marcar(aluno.cgm, TipoDoc.HISTORICO, "emitido_em")
                 await page.click('input[name="btnImprimirFrente"]')
                 await page.wait_for_load_state("networkidle")
                 await delay()
-                marcar(aluno.cgm, TipoDoc.HISTORICO, "emitido_em")
                 log(RotuloLog.GERADO, aluno.nome, "Histórico Escolar", "Documento gerado com sucesso.")
 
             await navegar_historico_emitir(page)
@@ -958,9 +1003,14 @@ async def assinar_historico(page, alunos: list[Aluno]) -> None:
             await page.wait_for_load_state("networkidle")
             await delay()
 
-            docs = await inspecionar_documentos(page)
-            if docs:
-                sincronizar_assinaturas(aluno.cgm, TipoDoc.HISTORICO, docs[0])
+            # só documentos que ESTA escola emitiu (a listagem traz também os de outras escolas)
+            emissao = info_doc_json(aluno.cgm, TipoDoc.HISTORICO).emitido_em
+            docs = docs_da_escola(await inspecionar_documentos(page), emissao)
+            if not docs:
+                log(RotuloLog.IGNORADO, aluno.nome, "Histórico Escolar", MSG_SEM_DOC_DA_ESCOLA)
+                await navegar_historico_emitir(page)
+                continue
+            sincronizar_assinaturas(aluno.cgm, TipoDoc.HISTORICO, docs[0])
 
             doc_a_assinar = next((d for d in docs if not d.assinado_secretario), None)
 
@@ -977,7 +1027,7 @@ async def assinar_historico(page, alunos: list[Aluno]) -> None:
                         "Não foi possível assinar como Secretário.")
 
             # re-inspeciona para capturar estado do Diretor
-            docs = await inspecionar_documentos(page)
+            docs = docs_da_escola(await inspecionar_documentos(page), emissao)
             if docs:
                 sincronizar_assinaturas(aluno.cgm, TipoDoc.HISTORICO, docs[0])
                 if docs[0].assinado_diretor:
@@ -1081,13 +1131,13 @@ async def gerar_guia(page, alunos: list[Aluno]) -> None:
             if doc_ref:
                 sincronizar_assinaturas(aluno.cgm, TipoDoc.GUIA, doc_ref)
 
-            if acao == AcaoDecidida.JA_EXISTE:
+            if acao != AcaoDecidida.GERAR_NOVO:          # já há documento desta escola: só falta assinar/baixar
                 log(RotuloLog.IGNORADO, aluno.nome, "Guia de Transferência", motivo)
             else:
+                marcar(aluno.cgm, TipoDoc.GUIA, "emitido_em")          # antes do clique (ver o histórico acima)
                 await page.click('input[value="Gerar Documento"]')
                 await page.wait_for_load_state("networkidle")
                 await delay()
-                marcar(aluno.cgm, TipoDoc.GUIA, "emitido_em")
                 log(RotuloLog.GERADO, aluno.nome, "Guia de Transferência", "Documento gerado com sucesso.")
 
             await navegar_guia(page)
@@ -1114,9 +1164,14 @@ async def assinar_guia(page, alunos: list[Aluno]) -> None:
             await _pesquisar_cgm_guia(page, aluno.cgm)
             await _navegar_ate_documentos_guia(page, aluno)
 
-            docs = await inspecionar_documentos(page)
-            if docs:
-                sincronizar_assinaturas(aluno.cgm, TipoDoc.GUIA, docs[0])
+            # só documentos que ESTA escola emitiu (a listagem traz também os de outras escolas)
+            emissao = info_doc_json(aluno.cgm, TipoDoc.GUIA).emitido_em
+            docs = docs_da_escola(await inspecionar_documentos(page), emissao)
+            if not docs:
+                log(RotuloLog.IGNORADO, aluno.nome, "Guia de Transferência", MSG_SEM_DOC_DA_ESCOLA)
+                await navegar_guia(page)
+                continue
+            sincronizar_assinaturas(aluno.cgm, TipoDoc.GUIA, docs[0])
 
             doc_a_assinar = next((d for d in docs if not d.assinado_secretario), None)
 
@@ -1133,7 +1188,7 @@ async def assinar_guia(page, alunos: list[Aluno]) -> None:
                         "Não foi possível assinar como Secretário.")
 
             # re-inspeciona para capturar estado do Diretor
-            docs = await inspecionar_documentos(page)
+            docs = docs_da_escola(await inspecionar_documentos(page), emissao)
             if docs:
                 sincronizar_assinaturas(aluno.cgm, TipoDoc.GUIA, docs[0])
                 if docs[0].assinado_diretor:
@@ -1173,10 +1228,12 @@ async def imprimir_guias(page, alunos: list[Aluno]) -> None:
             await _navegar_ate_documentos_guia(page, aluno)
 
             docs = await inspecionar_documentos(page)
-            if docs:
-                sincronizar_assinaturas(aluno.cgm, TipoDoc.GUIA, docs[0])
+            info = info_doc_json(aluno.cgm, TipoDoc.GUIA)
+            nossos = docs_da_escola(docs, info.emitido_em)
+            if nossos:
+                sincronizar_assinaturas(aluno.cgm, TipoDoc.GUIA, nossos[0])
 
-            decisao = decidir_acao_download(aluno, TipoDoc.GUIA, docs, dir_guia)
+            decisao = decidir_acao_download(aluno, TipoDoc.GUIA, docs, dir_guia, info)
             await _executar_download(page, aluno, TipoDoc.GUIA, decisao, URL_GUIA_PDF)
 
             await navegar_guia(page)
@@ -1214,10 +1271,12 @@ async def _processar_download_lote(
             await delay()
 
             docs = await inspecionar_documentos(page)
-            if docs:
-                sincronizar_assinaturas(aluno.cgm, tipo, docs[0])
+            info = info_doc_json(aluno.cgm, tipo)
+            nossos = docs_da_escola(docs, info.emitido_em)
+            if nossos:
+                sincronizar_assinaturas(aluno.cgm, tipo, nossos[0])
 
-            decisao = decidir_acao_download(aluno, tipo, docs, dir_base)
+            decisao = decidir_acao_download(aluno, tipo, docs, dir_base, info)
             await _executar_download(page, aluno, tipo, decisao, url_template)
 
             await fn_navegar(page)
@@ -1269,7 +1328,11 @@ async def _executar_download(
     }.get(decisao.acao, RotuloLog.DOWNLOAD)
 
     log(rotulo, aluno.nome, nome_tipo, f"{decisao.motivo} → {caminho}")
-    marcar(aluno.cgm, tipo, "anexado_em")
+    # "baixado_em" e NÃO "anexado_em": anexado_em só pode ser gravado quando o arquivo é ENVIADO à pasta
+    # virtual do SERE (sere_2026.modo_transferidos). Antes, o download já marcava anexado_em e o envio,
+    # achando que já estava anexado, pulava — quando o slot do SERE tinha documento de outra escola, o
+    # nosso nunca era enviado.
+    marcar(aluno.cgm, tipo, "baixado_em")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1378,7 +1441,6 @@ def _imprimir_plano(alunos: list[Aluno], etapas: list[tuple[str, object]]) -> No
 async def processar_transferencias(
     etapas: Optional[list[str]] = None,
     simulacao: bool = False,
-    pular_retornados: bool = False,
     modo_teste: bool = False,
 ) -> None:
     """
@@ -1388,7 +1450,6 @@ async def processar_transferencias(
 
     `etapas`: nomes de etapa (ver ETAPAS / GRUPOS_ETAPAS), executados na ordem canônica; None = todas.
     `simulacao`: só mostra quem e o que seria processado — não abre o SERE e não grava nada (nem a fila).
-    `pular_retornados`: ignora quem foi transferido mas já voltou à escola.
     `modo_teste`: processa só o primeiro aluno da fila (de verdade; não é simulação).
     """
     print(f"\n🔄 Processo de transferidos — data de corte {_corte().strftime('%d/%m/%Y')}"
@@ -1399,7 +1460,7 @@ async def processar_transferencias(
         print("\n🗂️  Verificando alunos pré-corte...")
         registrar_pre_corte()
 
-    alunos = carregar_alunos(pular_retornados=pular_retornados, gravar_fila=not simulacao)
+    alunos = carregar_alunos(gravar_fila=not simulacao)
     if not alunos:
         print("⚠️  Nenhum aluno encontrado com os critérios definidos. Encerrando.")
         return

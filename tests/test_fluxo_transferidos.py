@@ -89,10 +89,10 @@ def test_pastas_antigas(tmp_path):
 def test_fila_classifica_pelo_corte(ambiente):
     fila, _ = ft.montar_fila(_turmas(), date(2026, 6, 22))
     sit = {cgm: a["situacao_fila"] for cgm, a in fila["alunos"].items()}
-    assert sit == {"22": "antes_do_corte", "33": "processar", "44": "processar"}
+    assert sit == {"22": "antes_do_corte", "33": "processar", "44": "retornou"}
     r = fila["resumo"]
     assert (r["alunos"], r["ativos"], r["transferidos_atuais"], r["retornaram"]) == (4, 2, 2, 1)
-    assert r["a_processar"] == 2 and r["antes_do_corte"] == 1
+    assert (r["a_processar"], r["antes_do_corte"], r["retornaram_sem_processar"]) == (1, 1, 1)
 
 
 def test_corte_e_inclusivo(ambiente):
@@ -102,20 +102,28 @@ def test_corte_e_inclusivo(ambiente):
     assert fila["alunos"]["33"]["processar"] is False
 
 
-def test_retornado_aparece_marcado(ambiente):
+def test_quem_retornou_fica_na_fila_mas_nao_e_processado(ambiente):
+    """Decisão do usuário: o processo é feito uma vez; quem voltou à escola não se refaz."""
     fila, _ = ft.montar_fila(_turmas(), date(2026, 6, 22))
     f = fila["alunos"]["44"]
     assert f["retornou"] and f["retorno"] == {"chamada": 31, "turma": "1º Ano Integral A", "data": "22/10/2026"}
-    assert [a["cgm"] for a in ft.alunos_a_processar(fila)] == ["33", "44"]
-    assert [a["cgm"] for a in ft.alunos_a_processar(fila, pular_retornados=True)] == ["33"]
+    assert f["situacao_fila"] == "retornou" and f["processar"] is False
+    assert [a["cgm"] for a in ft.alunos_a_processar(fila)] == ["33"]
+
+
+def test_retornou_mas_transferido_antes_do_corte_continua_antes_do_corte(ambiente):
+    turmas = {"A": [_al(1, "1", "ALUNO UM", sit="Transferido", data="10/03/2026"),
+                    _al(2, "1", "ALUNO UM", sit="Matriculado", data="10/05/2026")]}
+    fila, _ = ft.montar_fila(turmas, date(2026, 6, 22))
+    assert fila["alunos"]["1"]["situacao_fila"] == "antes_do_corte"
 
 
 def test_registrar_fila_grava_fila_e_cria_transferidos(ambiente):
     r = ft.registrar_fila_transferidos(_turmas(), ambiente, date(2026, 6, 22))
-    assert r["novos_em_transferidos"] == 2
+    assert r["novos_em_transferidos"] == 1
     assert set(_ler(ambiente / "fila_transferidos.json")["alunos"]) == {"22", "33", "44"}
     controle = _ler(ambiente / "transferidos.json")
-    assert set(controle) == {"33", "44"}                            # o pré-corte (22) não entra: é à mão
+    assert set(controle) == {"33"}                                  # pré-corte (22) e quem retornou (44) não entram
     assert controle["33"]["guia"]["emitido_em"] is None and controle["33"]["data_transferencia"] == "20/07/2026"
 
 
@@ -129,19 +137,19 @@ def test_registrar_fila_nao_mexe_em_registro_existente(ambiente):
 def test_simulacao_nao_grava_nada(ambiente, capsys):
     r = ft.registrar_fila_transferidos(_turmas(), ambiente, date(2026, 6, 22), simulacao=True)
     assert list(ambiente.iterdir()) == []
-    assert r["fila"]["resumo"]["a_processar"] == 2
+    assert r["fila"]["resumo"]["a_processar"] == 1
     saida = capsys.readouterr().out
-    assert "SIMULAÇÃO" in saida and "SAMUEL NASCIMENTO" in saida and "antes do corte" in saida
+    assert "SIMULAÇÃO" in saida and "SAMUEL NASCIMENTO" in saida and "antes do corte" in saida and "⏭ retornou" in saida
 
 
 def test_fila_refeita_quando_a_data_de_corte_muda(ambiente):
     _gravar(ambiente / "turmas.json", _turmas())
     configuracao.definir_data_corte_transferidos("22/06/2026")
-    assert ft.garantir_fila(ambiente)["resumo"]["a_processar"] == 2
-    configuracao.definir_data_corte_transferidos("01/08/2026")      # Samuel (20/07) sai; Fulano (31/08) fica
+    assert ft.garantir_fila(ambiente)["resumo"]["a_processar"] == 1
+    configuracao.definir_data_corte_transferidos("21/07/2026")      # Samuel (20/07) passa a ser anterior ao corte
     fila = ft.garantir_fila(ambiente)
-    assert [a["cgm"] for a in ft.alunos_a_processar(fila)] == ["44"]
-    assert _ler(ambiente / "fila_transferidos.json")["data_corte"] == "01/08/2026"
+    assert ft.alunos_a_processar(fila) == []
+    assert _ler(ambiente / "fila_transferidos.json")["data_corte"] == "21/07/2026"
 
 
 def test_garantir_transferidos_json_cria_so_se_faltar(ambiente):
@@ -149,7 +157,7 @@ def test_garantir_transferidos_json_cria_so_se_faltar(ambiente):
         ft.garantir_transferidos_json(ambiente)
     _gravar(ambiente / "turmas.json", _turmas())
     assert ft.garantir_transferidos_json(ambiente, date(2026, 6, 22)) is True
-    assert set(_ler(ambiente / "transferidos.json")) == {"33", "44"}
+    assert set(_ler(ambiente / "transferidos.json")) == {"33"}
     assert ft.garantir_transferidos_json(ambiente) is False
 
 
@@ -180,12 +188,13 @@ def processo(ambiente, monkeypatch):
 
 def test_carregar_alunos_le_a_fila(processo, ambiente):
     alunos = processo.carregar_alunos()
-    assert [(a.cgm, a.nome) for a in alunos] == [("33", "SAMUEL NASCIMENTO"), ("44", "FULANO SILVA")]
+    assert [(a.cgm, a.nome) for a in alunos] == [("33", "SAMUEL NASCIMENTO")]      # 44 retornou; 22 é pré-corte
     assert (ambiente / "fila_transferidos.json").exists()
 
 
-def test_carregar_alunos_pular_retornados(processo):
-    assert [a.cgm for a in processo.carregar_alunos(pular_retornados=True)] == ["33"]
+def test_carregar_alunos_avisa_de_quem_retornou(processo, capsys):
+    processo.carregar_alunos()
+    assert "voltou(aram) à escola" in capsys.readouterr().out
 
 
 def test_carregar_alunos_ignora_quem_ja_esta_completo(processo, ambiente):
@@ -193,7 +202,7 @@ def test_carregar_alunos_ignora_quem_ja_esta_completo(processo, ambiente):
            "assinado_diretor": "2026-08-01T10:00:00", "anexado_em": None}
     _gravar(ambiente / "transferidos.json", {"33": {"nome": "S", "turma": "T", "guia": doc, "historico": doc,
                                                     "parecer": {"digitalizado_em": None, "anexado_em": None}}})
-    assert [a.cgm for a in processo.carregar_alunos()] == ["44"]
+    assert processo.carregar_alunos() == []
 
 
 def test_corte_do_processo_segue_a_configuracao(processo):
@@ -292,7 +301,7 @@ def test_o_erro_original_nao_acontece_mais(ambiente, monkeypatch):
     monkeypatch.setattr(s, "PATH_TRANSFERIDOS", ambiente / "transferidos.json")
     _gravar(ambiente / "turmas.json", _turmas())
     configuracao.definir_data_corte_transferidos("22/06/2026")
-    assert set(s._carregar_transferidos()) == {"33", "44"}
+    assert set(s._carregar_transferidos()) == {"33"}
     assert (ambiente / "fila_transferidos.json").exists()
 
 

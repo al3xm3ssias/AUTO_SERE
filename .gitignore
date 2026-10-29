@@ -1,133 +1,53 @@
-
-# ============================================================
-# AUTO_SERE - .gitignore
-# Proteção de dados escolares, credenciais e arquivos locais
-# ============================================================
-
-# ==== Python ====
+# ==== Ambiente Python ====
 __pycache__/
-*.py[cod]
-*$py.class
-*.pyd
-*.egg
-*.egg-info/
-.eggs/
-build/
-dist/
-wheels/
-pip-wheel-metadata/
-
-# ==== Ambientes virtuais ====
+*.pyc
+*.pyo
 .venv/
 venv/
 env/
-ENV/
-.python-version
+*.egg-info/
 
-# ==== Python e navegadores instalados localmente ====
-/runtime/
+# ==== Python e navegadores locais (instalados pelo INSTALAR_WINDOWS) ====
+runtime/
 
-# ==== Credenciais, segredos e variáveis de ambiente ====
-/credenciais/*
-!/credenciais/README.md
+# ==== Credenciais e segredos (NUNCA versionar) ====
+credenciais/credenciais.py
+credenciais/*.env
+# Perfil do navegador do WhatsApp (contém a SESSÃO logada: equivale a senha)
+credenciais/whatsapp_sessao/
 .env
-.env.*
-!.env.example
 *.key
-*.pem
-*.p12
-*.pfx
-*.secret
-secrets/
-credentials.json
-token.json
-client_secret*.json
+qrcode_key.key
 
-# ==== Dados escolares e documentos pessoais ====
-# Não versionar dados reais de alunos ou servidores.
-/dados/
-
-# Pastas de dados eventualmente existentes fora de /dados
-**/DIGITALIZAÇÃO/
-**/DIGITALIZACAO/
-**/ORIGINAIS_ANTES_DA_COMPRESSAO/
-**/PARECERES/
-**/screenshots/
-
-# Arquivos de dados e exportações
+# ==== Dados de alunos/servidores (dados sensíveis / LGPD) ====
+dados/**/*.json
+# Pasta de digitalização (documentos dos alunos), em dados/ ou dados/<ano>/
+dados/**/DIGITALIZAÇÃO/
+dados/backup/*
+!dados/backup/.gitkeep
 *.csv
-*.xls
 *.xlsx
-*.xlsm
-*.ods
-*.doc
-*.docx
-*.odt
-*.pdf
-*.jpg
-*.jpeg
-*.png
-*.tif
-*.tiff
-*.bmp
-*.webp
-*.heic
+!config/*.xlsx
 
-# Bancos de dados locais
-*.db
-*.sqlite
-*.sqlite3
-*.mdb
+# ==== Logs e locks (gerados em runtime) ====
+logs/*.log
+logs/*.txt
+!logs/.gitkeep
+locks/*.lock
+locks/*.pid
+!locks/.gitkeep
 
-# ==== Backups e arquivos temporários ====
-*.bak
-*.backup
-*.old
-*.orig
-*.tmp
-*.temp
-*.swp
-*.swo
-*~
-
-# ==== Logs e arquivos de execução ====
-*.log
-*.pid
-*.lock
-
-/logs/*
-!/logs/.gitkeep
-
-/locks/*
-!/locks/.gitkeep
-
-# ==== Arquivos de backup locais ====
-/backup/
-/backups/
-/BACKUP/
-/BACKUPS/
-
-# Arquivos compactados gerados localmente
-*.zip
-*.7z
-*.rar
-*.tar
-*.gz
-
-# ==== VS Code ====
+# ==== VS Code (mantemos apenas os arquivos de configuração do projeto) ====
 .vscode/*
 !.vscode/settings.json
 !.vscode/launch.json
 !.vscode/tasks.json
 !.vscode/extensions.json
 
-# ==== Outros editores e sistemas operacionais ====
-.idea/
+# ==== Diversos ====
 .DS_Store
 Thumbs.db
-Desktop.ini
-ehthumbs.db
+*.bak
 
-# ==== Arquivos de configuração local ====
-*.local
-config.local.*
+# Cópias dos originais guardadas antes da compressão (podem ser GB)
+dados/**/ORIGINAIS_ANTES_DA_COMPRESSAO/

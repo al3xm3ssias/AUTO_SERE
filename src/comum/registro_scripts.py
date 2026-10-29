@@ -256,7 +256,7 @@ def _plano_transferidos_gerar(o, p, tj, ctx) -> Plano:
     grupo = p.get("o_que_gerar") or "todas"
     return Plano("coroutine", pr.processar_transferencias, {
         "etapas": pr.GRUPOS_ETAPAS[grupo], "simulacao": bool(p.get("simulacao")),
-        "pular_retornados": bool(p.get("pular_retornados")), "modo_teste": o.modo_teste})
+        "modo_teste": o.modo_teste})
 
 
 def _validar_pareceres_transferidos(p: dict) -> None:
@@ -690,9 +690,6 @@ registrar(Script("transferidos_gerar", (_TE,), _plano_transferidos_gerar, confir
                      {"tipo": "select", "id": "campo-o-que-gerar", "nome": "o_que_gerar", "label": "O que gerar", "semVazio": True,
                       "padrao": "todas", "opcoes": _OPCOES_GERAR},
                      _extra_data_corte(),
-                     {"tipo": "caixa", "id": "campo-pular-retornados", "nome": "pular_retornados",
-                      "label": "Pular quem foi transferido mas já voltou à escola",
-                      "descricao": "Por padrão a guia e o histórico são emitidos mesmo para quem retornou depois."},
                      _extra_simulacao(True, "Mostra quem seria processado, as etapas e as pastas de destino. Não abre o SERE e não grava nada. "
                                             "Desmarque para executar de verdade.")]))
 

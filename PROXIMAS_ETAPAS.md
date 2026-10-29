@@ -3,7 +3,7 @@
 Checklist vivo do desenvolvimento. Legenda: `[ ]` pendente · `[-]` em andamento · `[x]` concluído **e testado** · `[!]` bloqueado.
 Onde o teste só pôde usar dados ou páginas simuladas (sem acesso ao SERE, SISREG, pré-matrícula e WhatsApp reais), isso está escrito na tarefa.
 
-Última atualização: 2026-10-14.
+Última atualização: 2026-10-29.
 
 ## Análise do estado inicial (resumo)
 
@@ -136,6 +136,20 @@ Guia: `docs/NOVO_SCRIPT.md`. Núcleo: `src/comum/opcoes_execucao.py` (opções) 
   - [ ] Calendário letivo, modelos de parecer, credenciais e configuração NÃO são por ano (ficam em `dados/calendario`, `dados/MODELO`, `credenciais/` e `config/`): os mesmos em qualquer ano. A pasta de digitalização padrão é por ano (`dados/<ano>/DIGITALIZAÇÃO`), mas uma pasta escolhida à mão vale para todos os anos.
 - [!] A tela de Ano letivo, o selo, a faixa e a tela de carregamento têm testes no Chromium (3 testes de navegador) e foram conferidos em captura de tela; nunca rodaram com o SERE real nem com os seus dados de verdade.
 - [ ] Teste de tela intermitente (já presente no Auto_sere.zip que você enviou): `tests/test_ui_automacoes.py::test_funcionarios_e_vinculos_estao_no_menu_...` às vezes falha porque o rótulo "Sistema" do menu fica por cima do item "Vínculos" no clique; passa na maioria das vezes.
+
+### Fluxo dos transferidos (pedido de 2026-10-27) — visão geral em `docs/FLUXO_TRANSFERIDOS.md`
+- [x] **1. Fila de transferidos**: `turmas.py` → `turmas.json` → `fila_transferidos.json` (temporária, regerada a cada coleta) → `transferidos.json` (controle). `src/automacao/fila_transferidos.py`. Identidade do aluno: nome + data de nascimento; a chamada distingue o cadastro; quem foi transferido e voltou conta uma vez, como ativo.
+- [x] **2. `DATA_CORTE` configurável** (Configurações → "Data de corte dos transferidos" e campo em cada tela do fluxo). Vale **a partir** da data, inclusive (antes o dia do corte contava como pré-corte). Padrão: 22/06 do ano letivo.
+- [x] **3. Pastas únicas** `dados/<ano>/TRANSFERENCIAS/{PROCESSAMENTO DE PARECERES, PARECERES, HISTORICO, GUIA DE TRANSFERENCIA}` (`src/comum/pastas_transferencias.py`), usadas por quem gera e por quem envia; o envio ainda procura nas pastas antigas da digitalização.
+- [x] **4. Quatro itens no menu lateral**, cada um com **Simulação** (já marcada nos que mexem no SERE ou nos arquivos): Fila de transferidos · Gerar guia e histórico · Enviar transferidos ao SERE · Pareceres dos transferidos.
+- [x] **5. Pareceres numa rotina só** (`pareceres_transferidos.py`): lê o QR → arquiva em `PARECERES/<turma>/NN-NOME.pdf` → comprime se passar do limite (original guardado) → marca no controle → envia ao SERE. Turma do QR resolvida por palavras, sem assumir nomes "Integral"; variações extras em `config_usuario.json` (`mapeamento_turmas_qr`).
+- [x] **6. Documento da escola × de outra escola** (`docs_da_escola`): só conta como nosso o documento cujo "gerado em" bate com o `emitido_em` que o processo registrou; o de outra escola nunca é reaproveitado, baixado nem assinado. Corrigidos por isso: (a) com a assinatura da diretora pendente, cada execução emitia outro documento; (b) a assinatura podia recair em documento de outra escola; (c) o **download gravava `anexado_em`** e o envio, achando que já estava anexado, pulava quando o slot do SERE tinha documento de outra escola — agora o download grava `baixado_em`; (d) o envio compara o arquivo que está no slot (`decidir_envio_slot`) e só pula o que é comprovadamente nosso.
+- [x] **7. Quem foi transferido e voltou à escola não é refeito** (o processo é feito uma vez só).
+- [x] **Mescla com a troca imediata do ano letivo** (2026-10-29): o fluxo foi construído sobre uma versão em que a troca de ano só valia ao reiniciar. Na mescla vale a troca imediata (`ano_letivo.py`, rota `/configuracoes/ano-letivo`, `app.js`); do fluxo entraram só as telas, rotas, registro de scripts e módulos de transferidos. Os módulos novos (`fila_transferidos`, `pareceres_transferidos`, `pastas_transferencias`) calculam `dados/<ano>` dentro de funções, então não precisam entrar em `MODULOS_COM_ANO_FIXO` (o teste-guarda confere).
+- [!] Emitir, assinar, baixar e enviar de verdade só foram testados com o estado que o SERE deixaria (decisões, pastas, simulações e o encadeamento ponta a ponta em `tests/test_ponta_a_ponta_transferidos.py`); falta uma execução real com um aluno (use "Modo de teste"). A leitura de QR foi testada só com PDFs gerados, não com scans reais.
+- [ ] Aluno transferido duas vezes no ano: a segunda saída que precise de documentos novos não é tratada (o registro guarda a mais recente e lista a anterior em `transferencias_anteriores`).
+- [ ] A tabela "Transferidos" do painel lê só o `transferidos.json` (quem está em processo): o cartão "Total" não é o total de transferidos da escola, e não mostra quem é pré-corte nem quem retornou.
+- [ ] Mapeamento de turmas do QR: sem tela, só pelo arquivo de configuração.
 
 ### Melhorias fáceis feitas
 - [x] **8.** `garantir_diretorios_runtime()` agora cria `credenciais/` (o `test_ambiente` falhava numa instalação limpa).

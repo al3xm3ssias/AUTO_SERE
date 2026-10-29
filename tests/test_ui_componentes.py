@@ -305,7 +305,7 @@ def test_transferidos_so_tem_teste(tela):
     assert pg.locator("#comp-turma").count() == 0 and pg.locator("#comp-cgm").count() == 0
     pg.click("#btn-executar-tarefa")
     pg.wait_for_selector(".modal-card")
-    assert "TRANSFERENCIAS" in pg.inner_text(".modal-card")   # aviso novo: envia o que está nas pastas de TRANSFERENCIAS
+    assert "Envia ao SERE" in pg.inner_text(".modal-card")      # aviso novo do fluxo de transferidos (antes citava transferidos.json)
 
 
 def test_trocar_de_automacao_nao_mistura_componentes(tela):

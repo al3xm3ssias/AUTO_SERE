@@ -24,8 +24,25 @@ A simulação já vem marcada nas telas que mexem no SERE ou nos arquivos.
 ## DATA_CORTE
 
 O processo automático vale para quem foi transferido **a partir** da data de corte (inclusive). Antes dela os documentos
-são considerados já tratados à mão. A data aparece em todas as telas acima (campo "Data de corte"); o que for digitado e
-executado fica gravado em `config/config_usuario.json` (`data_corte_transferidos`). Sem valor, vale 22/06 do ano letivo.
+são considerados já tratados à mão. Define-se em **Configurações → Data de corte dos transferidos** ou no campo "Data de
+corte" de qualquer tela acima (o que for digitado e executado fica gravado em `config/config_usuario.json`,
+`data_corte_transferidos`). Sem valor, vale 22/06 do ano letivo.
+
+## Documento da nossa escola × de outra escola
+
+A listagem do SERE mostra também documentos de transferência de outras escolas. Só é **nosso** o documento cujo
+"gerado em" bate (mesmo dia, até 2 h) com o `emitido_em` que o processo registrou em `transferidos.json` ao emitir.
+
+- Nosso e válido (2 assinaturas): não sobrescreve. Nosso e só falta a diretora: aguarda, **não emite outro**.
+- De outra escola, ou sem registro de emissão nosso: faz o processo todo (emitir, assinar, baixar). Nunca é baixado nem assinado.
+- No envio ao SERE, o slot só é pulado se o que está lá é o nosso (já enviado, mesmo nome de arquivo, arquivo local
+  inalterado). Documento de outra escola no slot é substituído.
+- `baixado_em` = PDF baixado para a pasta; `anexado_em` = enviado à pasta virtual do SERE.
+
+## Quem voltou
+
+Quem foi transferido e voltou à escola continua na fila, com o campo `retorno`, mas **não é processado**: o processo é
+feito uma vez só.
 
 ## Quem é o aluno
 

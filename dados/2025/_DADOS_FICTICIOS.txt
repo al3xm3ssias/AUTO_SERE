@@ -1,0 +1,3 @@
+DADOS FICTÍCIOS do ano letivo 2025, gerados em 24/10/2026 por src/comum/dados_ficticios.py para testes.
+Nomes, CPFs (dígitos verificadores errados), telefones e e-mails (@example.com) são inventados.
+Pode apagar esta pasta sem perder nada de verdade.

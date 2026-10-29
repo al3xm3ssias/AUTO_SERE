@@ -114,7 +114,7 @@ def test_gerar_usa_as_8_etapas_por_padrao(ctx):
     c, planos = ctx
     _post(c, "transferidos_gerar")
     kw = _kwargs(planos)
-    assert kw == {"etapas": pr.GRUPOS_ETAPAS["todas"], "simulacao": False, "pular_retornados": False, "modo_teste": False}
+    assert kw == {"etapas": pr.GRUPOS_ETAPAS["todas"], "simulacao": False, "modo_teste": False}
     assert planos[0][1].tipo == "coroutine" and planos[0][1].funcao is pr.processar_transferencias
 
 
@@ -122,8 +122,13 @@ def test_gerar_usa_as_8_etapas_por_padrao(ctx):
 def test_gerar_so_historico_ou_so_guia(ctx, grupo):
     from src.automacao import processo_transferidos as pr
     c, planos = ctx
-    _post(c, "transferidos_gerar", o_que_gerar=grupo, simulacao=True, pular_retornados=True, modo_teste=True)
-    assert _kwargs(planos) == {"etapas": pr.GRUPOS_ETAPAS[grupo], "simulacao": True, "pular_retornados": True, "modo_teste": True}
+    _post(c, "transferidos_gerar", o_que_gerar=grupo, simulacao=True, modo_teste=True)
+    assert _kwargs(planos) == {"etapas": pr.GRUPOS_ETAPAS[grupo], "simulacao": True, "modo_teste": True}
+
+
+def test_nao_existe_opcao_de_pular_retornados_na_tela(ctx):
+    c, _ = ctx
+    assert "pular_retornados" not in _extras(c, "transferidos_gerar")
 
 
 def test_gerar_rejeita_opcao_invalida(ctx):
@@ -194,3 +199,39 @@ def test_turmas_py_registra_a_fila_depois_de_gravar_o_turmas_json():
     gancho = fonte.index("registrar_fila_sem_falhar(resultado")
     fim = fonte.index("Coleta geral finalizada")
     assert gravar < gancho < fim
+
+
+# ── Configurações: linha "Data de corte dos transferidos" ────────────────
+
+def test_configuracoes_tem_a_linha_e_o_formulario():
+    html = (RAIZ / "src/web/templates/configuracoes.html").read_text(encoding="utf-8")
+    js = (RAIZ / "src/web/static/js/app.js").read_text(encoding="utf-8")
+    assert 'data-config="data_corte_transferidos"' in html
+    assert re.search(r"^\s*data_corte_transferidos: `", js, re.M)
+    assert 'row.dataset.config === "data_corte_transferidos"' in js and "async function conectarFormDataCorte" in js
+    for id_ in ("cfg-corte-data", "cfg-corte-status", "cfg-corte-salvar", "cfg-corte-padrao"):
+        assert js.count(id_) >= 2, id_                                  # no HTML do modal e no código que o liga
+
+
+def test_configuracao_data_corte_obter_padrao(ctx):
+    c, _ = ctx
+    r = c.get("/web/api/configuracoes/data-corte").get_json()
+    assert r == {"data_corte": "22/06/2026", "personalizada": False, "padrao": "22/06/2026"}
+
+
+def test_configuracao_data_corte_salvar_e_voltar_ao_padrao(ctx):
+    c, _ = ctx
+    r = c.post("/web/api/configuracoes/data-corte", json={"data_corte": "01/09/2026"})
+    assert r.status_code == 200 and r.get_json()["data_corte"] == "01/09/2026" and r.get_json()["personalizada"] is True
+    assert configuracao.data_corte_transferidos().strftime("%d/%m/%Y") == "01/09/2026"
+    assert _extras(c, "transferidos_gerar")["data_corte"]["padrao"] == "01/09/2026"      # as telas do fluxo refletem
+    r = c.post("/web/api/configuracoes/data-corte", json={"usar_padrao": True})
+    assert r.get_json()["data_corte"] == "22/06/2026" and r.get_json()["personalizada"] is False
+
+
+@pytest.mark.parametrize("corpo", [{"data_corte": "31/02/2026"}, {"data_corte": "amanhã"}, {"data_corte": ""}, {}])
+def test_configuracao_data_corte_recusa_invalida(ctx, corpo):
+    c, _ = ctx
+    r = c.post("/web/api/configuracoes/data-corte", json=corpo)
+    assert r.status_code == 400 and "dd/mm/aaaa" in r.get_json()["erro"]
+    assert not configuracao.data_corte_transferidos_configurada()

@@ -276,3 +276,37 @@ def test_ampliacao_tem_limite_de_tamanho():
     assert pp._variantes_escaladas(grande) == []
     pequena = np.zeros((1000, 800, 3), dtype=np.uint8)               # 1000×1,5/2/3 = 1500/2000/3000 → as três cabem
     assert len(pp._variantes_escaladas(pequena)) == 18
+
+
+# ── turma do QR sem assumir nomes de uma escola ──────────────────────────
+
+CHAVES = {"3º Ano Matutino A": [], "3º Ano Matutino B": [], "INFANTIL 4 Vespertino A": [], "mapeamento": {}}
+
+
+def test_turma_por_palavras_sem_a_palavra_integral():
+    assert pp.resolver_turma(CHAVES, "3º ANO B") == "3º Ano Matutino B"
+    assert pp.resolver_turma(CHAVES, "3 ano a") == "3º Ano Matutino A"
+
+
+def test_turma_por_palavras_aceita_abreviatura_de_3_letras():
+    assert pp.resolver_turma(CHAVES, "INF 4 A") == "INFANTIL 4 Vespertino A"
+
+
+def test_turma_ambigua_nao_adivinha():
+    assert pp.resolver_turma(CHAVES, "3º ANO") is None                 # A ou B?
+
+
+def test_turma_letra_solta_nao_casa_com_prefixo_de_outra_palavra():
+    assert pp.resolver_turma({"3º Ano Matutino A": []}, "3º ANO B") is None
+
+
+def test_mapeamento_extra_vem_da_configuracao(ambiente):
+    chaves = {"Turma Especial 7": []}
+    assert pp.resolver_turma(chaves, "SALA DO MEIO") is None
+    (ambiente.parent / "config" / "config_usuario.json").write_text(
+        json.dumps({"mapeamento_turmas_qr": {"sala do meio": "Turma Especial 7"}}), encoding="utf-8")
+    assert pp.resolver_turma(chaves, "SALA DO MEIO") == "Turma Especial 7"
+
+
+def test_mapeamento_embutido_continua_valendo():
+    assert pp.resolver_turma({"1º Ano Integral A": []}, "1º ANO A") == "1º Ano Integral A"

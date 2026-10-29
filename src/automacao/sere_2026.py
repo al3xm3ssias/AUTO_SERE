@@ -150,6 +150,7 @@ from src.comum.sere_limpeza import remover_slot, limpar_aluno
 from src.comum.sere_upload import (
     deve_pular_slot,
     obter_slots_api,
+    obter_nomes_slots_api,
     excluir_slot_e_obter_hash,
     injetar_e_enviar,
 )
@@ -1468,6 +1469,38 @@ def _carregar_transferidos() -> dict:
         return json.load(f)
 
 
+def decidir_envio_slot(ja_no_sere: bool, nome_no_sere: Optional[str], registro_doc: dict,
+                       arquivo: Path) -> tuple[str, str]:
+    """
+    Decide o que fazer com UM slot da pasta virtual do SERE. Retorna ("enviar"|"substituir"|"pular", motivo).
+
+    O slot pode já conter um documento de transferência de OUTRA escola. Só se pula quando o que está lá é
+    comprovadamente o nosso: já enviamos antes (anexado_em, gravado só após um envio), o nome do arquivo no
+    SERE é o que o SERE nos devolveu naquele envio (nome_no_sere) ou, na falta dele, o nome do arquivo local,
+    e o arquivo local não foi alterado depois do envio. Qualquer outra coisa no slot é substituída.
+    """
+    if not ja_no_sere:
+        return "enviar", "Slot vazio no SERE — enviando."
+    anexado = None
+    try:
+        anexado = datetime.fromisoformat(str(registro_doc.get("anexado_em") or ""))
+    except ValueError:
+        pass
+    if anexado is None:
+        return "substituir", (f"Slot ocupado por '{nome_no_sere or 'arquivo desconhecido'}', que esta escola não enviou "
+                              f"(outra origem) — substituindo pelo documento desta escola.")
+    esperado = norm(Path(str(registro_doc.get("nome_no_sere") or arquivo.name)).stem)
+    if norm(Path(str(nome_no_sere or "")).stem) != esperado:
+        return "substituir", (f"Slot ocupado por outro arquivo ('{nome_no_sere}'), diferente do que esta escola enviou "
+                              f"— substituindo.")
+    try:
+        if datetime.fromtimestamp(arquivo.stat().st_mtime) > anexado:
+            return "substituir", "O arquivo local foi alterado depois do envio — substituindo no SERE."
+    except OSError:
+        pass
+    return "pular", "Documento desta escola já está no SERE — não sobrescreve."
+
+
 def _salvar_transferidos(dados: dict) -> None:
     """Persiste o dicionário de transferidos de volta no JSON."""
     try:
@@ -1690,12 +1723,12 @@ async def modo_transferidos(modo_teste: bool = False, tipos: tuple[str, ...] | N
 
                 # ── Skip duplo: SERE já tem o slot E JSON já registra anexado_em ──
                 ja_no_sere = idtipo in assinatura_existente
-                ja_no_json = bool(
-                    dados.get(cgm, {})
-                        .get(campo_json, {})
-                        .get("anexado_em")
-                )
-                if ja_no_sere and ja_no_json:
+                nome_no_sere = (await obter_nomes_slots_api(page, cgm)).get(idtipo) if ja_no_sere else None
+                decisao_envio, motivo_envio = decidir_envio_slot(
+                    ja_no_sere, nome_no_sere, dados.get(cgm, {}).get(campo_json, {}), arquivo)
+                if ja_no_sere:
+                    print(f"     ℹ️  {motivo_envio}")
+                if decisao_envio == "pular":
                     print(f"     ⏭️  Já anexado no SERE e registrado no JSON — pulando")
                     resultados.append({
                         "CGM": cgm, "Nome": nome, "Turma": turma,
@@ -1756,6 +1789,12 @@ async def modo_transferidos(modo_teste: bool = False, tipos: tuple[str, ...] | N
                     # ── Grava anexado_em no transferidos.json após sucesso ────
                     if sucesso:
                         try:
+                            try:                  # como o SERE chama o arquivo agora: base para reconhecer o nosso depois
+                                nome_final = (await obter_nomes_slots_api(page, cgm)).get(idtipo)
+                                if nome_final:
+                                    dados[cgm][campo_json]["nome_no_sere"] = nome_final
+                            except Exception as exc_nome:
+                                log.warning(f"Não foi possível ler o nome do arquivo no SERE: {exc_nome}")
                             dados[cgm][campo_json]["anexado_em"] = agora
                             _salvar_transferidos(dados)
                             print(f"     💾 transferidos.json atualizado — {campo_json}.anexado_em = {agora}")
