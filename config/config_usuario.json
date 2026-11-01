@@ -23,5 +23,6 @@
   "flags_automacoes": {
     "analisa_sere": []
   },
-  "data_corte_transferidos": "18/10/2026"
+  "data_corte_transferidos": "18/10/2026",
+  "observacao_historico": null
 }
