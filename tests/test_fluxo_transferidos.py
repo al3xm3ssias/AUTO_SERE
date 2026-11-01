@@ -311,3 +311,44 @@ def test_sem_transferidos_nem_turmas_sai_com_mensagem(ambiente, monkeypatch, cap
     with pytest.raises(SystemExit):
         s._carregar_transferidos()
     assert "Turmas" in capsys.readouterr().out
+
+
+# ══ ações da tela × etapas, e o texto da observação ═══════════════════════════════
+
+def test_etapas_por_acoes(processo):
+    n = processo._NOMES_ETAPAS
+    assert processo.etapas_por_acoes(["alterar"]) == [n[1]]
+    assert processo.etapas_por_acoes(list(processo.ACOES)) == n
+    assert processo.etapas_por_acoes(["assinar", "emitir"], "guia") == [n[5], n[6]]
+    assert processo.etapas_por_acoes(["gravar", "alterar"], "guia") == []
+    assert processo.etapas_por_acoes([]) == []
+
+
+@pytest.mark.parametrize("acoes,docs", [(["xyz"], "ambos"), (["emitir"], "tudo")])
+def test_etapas_por_acoes_invalidas(processo, acoes, docs):
+    with pytest.raises(ValueError):
+        processo.etapas_por_acoes(acoes, docs)
+
+
+def test_o_texto_chega_a_etapa_de_alterar(processo):
+    import functools
+    escolhidas = processo._escolher_etapas([processo.ETAPA_ALTERAR, processo._NOMES_ETAPAS[2]], "Meu texto")
+    alterar, emitir = escolhidas[0][1], escolhidas[1][1]
+    assert isinstance(alterar, functools.partial) and alterar.keywords == {"observacao": "Meu texto"}
+    assert alterar.func is processo.alterar_historico and emitir is processo.gerar_historico
+
+
+def test_sem_texto_a_etapa_de_alterar_fica_como_era(processo):
+    assert processo._escolher_etapas([processo.ETAPA_ALTERAR])[0][1] is processo.alterar_historico
+
+
+def test_a_simulacao_mostra_o_texto_da_observacao(processo, capsys):
+    asyncio.run(processo.processar_transferencias(etapas=[processo.ETAPA_ALTERAR], simulacao=True,
+                                                  observacao="Aluno transferido."))
+    assert "Texto da observação (Alterar): 'Aluno transferido.'" in capsys.readouterr().out
+
+
+def test_a_simulacao_so_de_assinar_nao_fala_de_observacao(processo, capsys):
+    asyncio.run(processo.processar_transferencias(etapas=processo.etapas_por_acoes(["assinar"]), simulacao=True))
+    saida = capsys.readouterr().out
+    assert "Assinar Históricos" in saida and "Assinar Guias" in saida and "observação" not in saida

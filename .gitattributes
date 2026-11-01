@@ -1,0 +1,9 @@
+# Fim de linha: código-fonte em LF; scripts do Windows em CRLF (um .bat/.ps1 só com LF pode falhar no cmd/PowerShell).
+* text=auto eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.sh text eol=lf
+*.png binary
+*.ico binary
+*.docx binary
+*.zip binary

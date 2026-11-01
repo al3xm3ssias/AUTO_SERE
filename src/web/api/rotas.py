@@ -125,12 +125,14 @@ def painel_resumo():
     pct_meninos = f"{(meninos / total_alunos * 100):.1f}%".replace(".", ",") if total_alunos else "—"
     pct_meninas = f"{(meninas / total_alunos * 100):.1f}%".replace(".", ",") if total_alunos else "—"
 
-    # Mesma regra da tela da Pré-matrícula: a tentativa antiga de quem mudou de turma não conta duas vezes.
+    # Mesma regra da fila da Pré-matrícula (_aluno_na_fila_prematricula): só quem ainda AGUARDA ser chamado;
+    # matriculados, cancelados e a tentativa antiga de quem mudou de turma não contam.
+    indice_cadastros = _indice_cadastros_prematricula(pre_matricula.get("cadastros")) if isinstance(pre_matricula, dict) else {}
     fila_prematricula = sum(
         1
         for alunos in pre_matricula.get("turmas_intencao", {}).values()
         for aluno in alunos
-        if not aluno.get("substituido_por_nova_tentativa")
+        if _aluno_na_fila_prematricula(aluno, indice_cadastros)
     ) if isinstance(pre_matricula, dict) else 0
 
     docs_pendentes = 0
@@ -510,10 +512,54 @@ def documentos_analise():
     })
 
 
+def _indice_cadastros_prematricula(cadastros) -> dict:
+    """{cpf, tr_id ou chave do cadastro → cadastro}, para achar o cadastro de uma entrada da fila."""
+    indice: dict = {}
+    for cid, c in (cadastros.items() if isinstance(cadastros, dict) else []):
+        if isinstance(c, dict):
+            for chave in {str(cid), str(c.get("cpf") or ""), str(c.get("tr_id") or "")} - {""}:
+                indice.setdefault(chave, c)
+    return indice
+
+
+def _aluno_na_fila_prematricula(aluno, indice_cadastros: dict) -> bool:
+    """
+    True só para quem AINDA AGUARDA ser chamado.
+
+    pre_matricula.json é o histórico de todos que já passaram pela fila. O site só lista quem está
+    "aguardando"; quem é chamado (matriculado ou cancelado) some da lista do site mas continua no arquivo,
+    com presente_na_ultima_coleta=False e uma situação (a presumida, "Cancelado", até a etapa 4 confirmar a
+    real). Esses não são mais fila: a situação deles aparece na tela Cadastros.
+
+      - tentativa antiga de quem voltou noutra turma .......... fora (vale a nova)
+      - saiu da lista do site na última coleta ................. fora (foi chamado)
+      - já tem situação registrada (matriculado/cancelado) ..... fora
+      - arquivo antigo, sem a marca da última coleta ........... confere o cadastro: resolvido = fora
+    A lista viva do site decide; o cadastro só entra quando a marca não existe, porque ele pode ser a
+    tentativa antiga (BUGS_CONHECIDOS, BUG-PRE-001) de quem voltou a aguardar.
+    """
+    if not isinstance(aluno, dict) or aluno.get("substituido_por_nova_tentativa"):
+        return False
+    if aluno.get("presente_na_ultima_coleta") is False:
+        return False
+    if str(aluno.get("situacao") or "").strip():
+        return False
+    if "presente_na_ultima_coleta" not in aluno:
+        cadastro = next((indice_cadastros[k] for k in (str(aluno.get("cpf") or "").strip(), str(aluno.get("tr_id") or "").strip())
+                         if k and k in indice_cadastros), None)
+        if cadastro is not None:
+            escolhas = cadastro.get("escolas_escolhidas") if isinstance(cadastro.get("escolas_escolhidas"), dict) else {}
+            opcoes = [o for o in (escolhas.get("opcoes") or []) if isinstance(o, dict)]
+            if _situacao_prematricula(opcoes) != "pendente":
+                return False
+    return True
+
+
 def _fila_prematricula() -> list[dict]:
     """
     Lê pre_matricula.json (gerado por src.automacao.prematricula_coleta /
-    prematricula_cadastro) e devolve uma lista plana de alunos na fila.
+    prematricula_cadastro) e devolve uma lista plana de alunos NA FILA, isto é, que ainda aguardam ser
+    chamados (ver _aluno_na_fila_prematricula: matriculados e cancelados ficam de fora).
 
     Formato real do arquivo (ver src.automacao.prematricula_coleta):
         {
@@ -532,12 +578,13 @@ def _fila_prematricula() -> list[dict]:
 
     turmas_intencao = dados.get("turmas_intencao", {})
     cadastros = dados.get("cadastros", {})
+    indice_cadastros = _indice_cadastros_prematricula(cadastros)
 
     itens = []
     for turma, alunos in turmas_intencao.items():
         for aluno in alunos:
-            if aluno.get("substituido_por_nova_tentativa"):
-                continue          # tentativa antiga (aluno voltou noutra turma): não conta duas vezes
+            if not _aluno_na_fila_prematricula(aluno, indice_cadastros):
+                continue          # já chamado (matriculado/cancelado) ou tentativa antiga: não é mais fila
             cpf = (aluno.get("cpf") or "").strip()
             cadastro = cadastros.get(cpf, {}) if cpf else {}
             itens.append({

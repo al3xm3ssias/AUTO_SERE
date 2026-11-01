@@ -4,13 +4,31 @@ Registro de problemas **identificados e ainda não corrigidos** nos scripts port
 Cada item diz o que acontece, onde está no código, qual é a regra de negócio
 combinada, como confirmar e como corrigir.
 
-Última atualização: 2026-10-07.
+Última atualização: 2026-10-30.
 
 | ID | Script | Resumo | Estado |
 |---|---|---|---|
 | BUG-PRE-001 | `pre_matricula.py` | A consulta por CPF talvez leia só o **primeiro** cadastro, que pode ser o antigo (cancelado) em vez da nova tentativa | **Suspeita, não confirmada** (site fora do ar) |
 | BUG-PRE-002 | `pre_matricula.py` | Aluno que volta em **outra turma** fica duplicado, com o registro antigo como cancelado | **Corrigido em 2026-10-07** (testado com dados simulados; ver a seção abaixo) |
+| BUG-PRE-003 | `web/api/rotas.py` | A fila da pré-matrícula do painel (widget, contador e lista) mostrava também quem **já foi chamado** (matriculado ou cancelado), como se ainda aguardasse | **Corrigido em 2026-10-30** (testado com dados simulados; ver a seção abaixo) |
 | BUG-REM-001 | `rematricula.py` | O clique final de "Confirmar" é tratado como sucesso sem conferir a página | **Risco identificado, não testado** |
+
+---
+
+## BUG-PRE-003 — Fila da pré-matrícula mostrava matriculados e cancelados
+
+> **Corrigido em 2026-10-30.** `pre_matricula.json` é o histórico de todos que já passaram pela fila: o site só lista
+> quem está "aguardando", então quem é chamado (matriculado ou cancelado) some da lista do site mas **continua no
+> arquivo**, com `presente_na_ultima_coleta: false` e uma situação (a presumida, "Cancelado", até a Etapa 4 confirmar a
+> real). A fila do painel (`_fila_prematricula`), o contador "Fila da pré-matrícula" e a lista `/prematricula/lista`
+> listavam **todos** de `turmas_intencao`, só ignorando a tentativa substituída.
+>
+> Agora `_aluno_na_fila_prematricula` (`src/web/api/rotas.py`) decide em um só lugar. Fica na fila quem **ainda aguarda**:
+> não foi substituído, não saiu da lista na última coleta e não tem situação registrada. Em arquivo antigo, sem
+> `presente_na_ultima_coleta`, confere o cadastro (matriculado/cancelado = fora). **O cadastro não tem a última palavra
+> quando a marca existe**, por causa do BUG-PRE-001: ele pode ser a tentativa antiga (cancelada) de quem voltou a aguardar.
+> Quem foi chamado continua na tela **Cadastros**, com a situação. Testes: `tests/test_telas_dados.py` (seção
+> "matriculado e cancelado saem da fila").
 
 ---
 

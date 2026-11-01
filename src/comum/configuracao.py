@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import json
 import unicodedata
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +61,7 @@ _PADRAO: dict[str, Any] = {
     "unidade_escolar": None,
     "flags_automacoes": {},
     "data_corte_transferidos": None,      # "dd/mm/aaaa"; None = 22/06 do ano letivo (ver data_corte_transferidos)
+    "observacao_historico": None,         # último texto usado na etapa "Alterar" do histórico de transferidos
 }
 
 
@@ -356,6 +358,17 @@ def definir_data_corte_transferidos(texto) -> "date":
     configuracao["data_corte_transferidos"] = data.strftime("%d/%m/%Y")
     _salvar_configuracao(configuracao)
     return data
+
+
+def observacao_historico() -> str:
+    """Último texto de observação usado na etapa "Alterar" do histórico (já vem preenchido na tela)."""
+    return str(carregar_configuracao().get("observacao_historico") or "")
+
+
+def definir_observacao_historico(texto) -> None:
+    configuracao = carregar_configuracao()
+    configuracao["observacao_historico"] = str(texto or "").strip() or None
+    _salvar_configuracao(configuracao)
 
 
 # ─────────────────────────────────────────────────────────────────────────

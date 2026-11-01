@@ -23,6 +23,9 @@ qrcode_key.key
 dados/**/*.json
 # Pasta de digitalização (documentos dos alunos), em dados/ ou dados/<ano>/
 dados/**/DIGITALIZAÇÃO/
+# Pareceres gerados (um .docx por aluno, com nome completo) e capturas de tela de erro (mostram a tela do SERE/Pré-matrícula logada)
+dados/**/PARECERES/
+dados/**/screenshots/
 dados/backup/*
 !dados/backup/.gitkeep
 *.csv

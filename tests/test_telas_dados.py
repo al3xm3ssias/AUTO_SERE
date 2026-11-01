@@ -151,6 +151,130 @@ def test_painel_nao_conta_duas_vezes_quem_mudou_de_turma(dados, c):
     assert _metricas(c)["fila_prematricula"] == 2
 
 
+# ───────────── pré-matrícula: matriculado e cancelado saem da fila ─────────────
+# pre_matricula.json guarda TODOS que já passaram pela fila; quem é chamado some da lista do site, mas fica no arquivo
+# (presente_na_ultima_coleta=False + situação). Eles não são mais fila: a situação deles aparece em Cadastros.
+
+PRESUNTIVO = {"situacao": "Cancelado", "motivo_cancelamento": "CANCELADO VIA SISTEMA/RESPONSAVEL"}
+
+
+def _fila(c, **params):
+    return c.get("/web/api/prematricula/fila", query_string=params).get_json()["itens"]
+
+
+def _gravar_turma(dados, alunos, cadastros=None):
+    gravar(dados, "pre_matricula.json", {"turmas_intencao": {"1º Ano": alunos}, "cadastros": cadastros or {}})
+
+
+def test_matriculado_nao_fica_na_fila(dados, c):
+    _gravar_turma(dados, [
+        {"nome": "Ana Matriculada", "cpf": "1", "pos": "1", "situacao": "MATRICULADO.", "presente_na_ultima_coleta": False},
+        {"nome": "Beto Aguardando", "cpf": "2", "pos": "2", "presente_na_ultima_coleta": True},
+    ])
+    assert [i["nome"] for i in _fila(c)] == ["Beto Aguardando"]
+
+
+def test_cancelado_real_nao_fica_na_fila(dados, c):
+    _gravar_turma(dados, [
+        {"nome": "Cris Cancelada", "cpf": "1", "pos": "1", "situacao": "CANCELADO. MOTIVO: X", "presente_na_ultima_coleta": False},
+        {"nome": "Beto Aguardando", "cpf": "2", "pos": "2", "presente_na_ultima_coleta": True},
+    ])
+    assert [i["nome"] for i in _fila(c)] == ["Beto Aguardando"]
+
+
+def test_cancelado_presumido_que_sumiu_da_lista_nao_fica_na_fila(dados, c):
+    _gravar_turma(dados, [
+        {"nome": "Davi Sumiu", "cpf": "1", "pos": "1", "presente_na_ultima_coleta": False, **PRESUNTIVO},
+        {"nome": "Beto Aguardando", "cpf": "2", "pos": "2", "presente_na_ultima_coleta": True},
+    ])
+    assert [i["nome"] for i in _fila(c)] == ["Beto Aguardando"]
+
+
+def test_quem_sumiu_da_lista_sai_mesmo_sem_situacao_gravada(dados, c):
+    _gravar_turma(dados, [{"nome": "Eva", "cpf": "1", "pos": "1", "presente_na_ultima_coleta": False}])
+    assert _fila(c) == []
+
+
+def test_situacao_preenchida_tira_da_fila_mesmo_com_marca_de_presente(dados, c):
+    """Foi como os dados fictícios de demonstração (e o painel do usuário) mostravam matriculado como se aguardasse."""
+    _gravar_turma(dados, [
+        {"nome": "Fabi", "cpf": "1", "pos": "1", "situacao": "Matriculado", "presente_na_ultima_coleta": True},
+        {"nome": "Gil", "cpf": "2", "pos": "2", "situacao": "Cancelado. Motivo: desistiu", "presente_na_ultima_coleta": True},
+        {"nome": "Hugo", "cpf": "3", "pos": "3", "situacao": "", "presente_na_ultima_coleta": True},
+    ])
+    assert [i["nome"] for i in _fila(c)] == ["Hugo"]
+
+
+def test_widget_do_painel_mostra_os_que_aguardam_a_partir_da_posicao_real(dados, c):
+    """Com 3 já chamados à frente, o painel mostra quem de fato é o próximo da fila (e respeita o limite)."""
+    _gravar_turma(dados, [
+        *[{"nome": f"Chamado {p}", "cpf": str(p), "pos": str(p), "situacao": "MATRICULADO",
+           "presente_na_ultima_coleta": False} for p in (1, 2, 3)],
+        *[{"nome": f"Aguarda {p}", "cpf": str(p), "pos": str(p), "presente_na_ultima_coleta": True} for p in (4, 5, 6, 7)],
+    ])
+    itens = _fila(c, limit=2)
+    assert [(i["nome"], i["posicao"]) for i in itens] == [("Aguarda 4", "4"), ("Aguarda 5", "5")]
+
+
+def test_contador_do_painel_lista_e_widget_concordam(dados, c):
+    _gravar_turma(dados, [
+        {"nome": "A", "cpf": "1", "pos": "1", "situacao": "MATRICULADO", "presente_na_ultima_coleta": False},
+        {"nome": "B", "cpf": "2", "pos": "2", "presente_na_ultima_coleta": False, **PRESUNTIVO},
+        {"nome": "C", "cpf": "3", "pos": "3", "presente_na_ultima_coleta": True},
+        {"nome": "D", "cpf": "4", "pos": "4", "presente_na_ultima_coleta": True},
+    ])
+    assert _metricas(c)["fila_prematricula"] == 2
+    assert c.get("/web/api/prematricula/lista").get_json()["total"] == 2
+    assert len(_fila(c, limit=50)) == 2
+
+
+def _cadastro(cpf, situacoes, tr_id=""):
+    return {"cpf": cpf, "tr_id": tr_id, "nome_aluno": f"Aluno {cpf}", "escolas_escolhidas": {
+        "turma": "1º Ano", "opcoes": [{"escola": "Judith Macedo Silveira", "situacao": s} for s in situacoes]}}
+
+
+def test_arquivo_antigo_sem_marca_confere_o_cadastro(dados, c):
+    """Entradas sem presente_na_ultima_coleta (arquivo anterior à marca): vale a situação do cadastro."""
+    _gravar_turma(dados, [
+        {"nome": "Matric", "cpf": "1", "pos": "1"},
+        {"nome": "Cancel", "cpf": "2", "pos": "2"},
+        {"nome": "Aguarda", "cpf": "3", "pos": "3"},
+        {"nome": "SemCadastro", "cpf": "4", "pos": "4"},
+        {"nome": "PeloTrId", "cpf": "", "tr_id": "T9", "pos": "5"},
+    ], cadastros={
+        "1": _cadastro("1", ["MATRICULADO"]),
+        "2": _cadastro("2", ["CANCELADO. MOTIVO: X", "CANCELADO"]),
+        "3": _cadastro("3", [""]),
+        "9": _cadastro("9", ["MATRICULADO"], tr_id="T9"),
+    })
+    assert sorted(i["nome"] for i in _fila(c, limit=50)) == ["Aguarda", "SemCadastro"]    # PeloTrId: cadastro achado pelo tr_id
+
+
+def test_cadastro_antigo_cancelado_nao_esconde_quem_voltou_a_aguardar(dados, c):
+    """BUG-PRE-001: o cadastro pode ser a tentativa antiga (cancelada). Se o site ainda lista o aluno, ele aguarda."""
+    _gravar_turma(dados, [{"nome": "Voltou", "cpf": "1", "pos": "1", "presente_na_ultima_coleta": True}],
+                  cadastros={"1": _cadastro("1", ["CANCELADO. MOTIVO: X"])})
+    assert [i["nome"] for i in _fila(c)] == ["Voltou"]
+
+
+def test_a_tela_cadastros_continua_mostrando_matriculados_e_cancelados(dados, c):
+    _gravar_turma(dados, [
+        {"nome": "Ana", "cpf": "1", "pos": "1", "situacao": "MATRICULADO", "presente_na_ultima_coleta": False},
+        {"nome": "Beto", "cpf": "2", "pos": "2", "presente_na_ultima_coleta": True},
+    ], cadastros={"1": _cadastro("1", ["MATRICULADO"]), "2": _cadastro("2", [""])})
+    r = c.get("/web/api/prematricula/cadastros").get_json()
+    assert r["contagem"] == {"matriculado": 1, "cancelado": 0, "pendente": 1}
+    assert _fila(c) and [i["nome"] for i in _fila(c)] == ["Beto"]
+
+
+def test_mudou_de_turma_continua_contando_uma_vez(dados, c):
+    gravar(dados, "pre_matricula.json", {"turmas_intencao": {
+        "5º Ano A": [{"nome": "Ana", "cpf": "1", "pos": "1", "substituido_por_nova_tentativa": True,
+                      "presente_na_ultima_coleta": False}],
+        "5º Ano B": [{"nome": "Ana", "cpf": "1", "pos": "2", "presente_na_ultima_coleta": True}]}, "cadastros": {}})
+    assert [(i["nome"], i["turma"]) for i in _fila(c)] == [("Ana", "5º Ano B")]
+
+
 # ───────────── cards de resumo (Fora do raio / Encaminhamentos) ─────────────
 
 def _cartoes(r):

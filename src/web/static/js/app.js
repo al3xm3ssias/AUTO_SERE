@@ -1726,7 +1726,7 @@ function campoHTML(campo) {
     return `
       <div class="field"${cond}>
         <label>${campo.label}</label>
-        <textarea id="${campo.id}"${nome} rows="${campo.linhas || 9}" placeholder="${campo.placeholder || ""}"></textarea>
+        <textarea id="${campo.id}"${nome} rows="${campo.linhas || 9}" placeholder="${campo.placeholder || ""}">${String(campo.padrao || "").replace(/&/g, "&amp;").replace(/</g, "&lt;")}</textarea>
       </div>`;
   }
   if (campo.tipo === "texto") {
@@ -1800,7 +1800,7 @@ function renderizarCamposAntigos(chave, container) {
     btnPasta.addEventListener("click", () => abrirSeletorDePasta(btnPasta));
   }
 
-  container.querySelectorAll("select").forEach((s) => s.addEventListener("change", atualizarCamposDinamicos));
+  container.querySelectorAll("select, input[type=checkbox]").forEach((s) => s.addEventListener("change", atualizarCamposDinamicos));
   atualizarCamposDinamicos();
 }
 
@@ -1874,7 +1874,7 @@ function montarComponentesCompartilhados(container, chave, info) {
   container.innerHTML = partes.join("");
   const btnPasta = document.getElementById("btn-escolher-pasta");
   if (btnPasta) btnPasta.addEventListener("click", () => abrirSeletorDePasta(btnPasta));
-  container.querySelectorAll("select").forEach((sel) => sel.addEventListener("change", atualizarCamposDinamicos));
+  container.querySelectorAll("select, input[type=checkbox]").forEach((sel) => sel.addEventListener("change", atualizarCamposDinamicos));
   atualizarCamposDinamicos();
   container.querySelectorAll("[id^='comp-'], .field select, .field input[type=checkbox]").forEach((el) => {
     el.addEventListener(el.tagName === "TEXTAREA" ? "input" : "change", () => agendarPrevia());
@@ -1978,7 +1978,9 @@ function atualizarCamposDinamicos() {
   });
   document.querySelectorAll("#campos-automacao [data-visivel-se]").forEach((el) => {
     const [id, valor] = el.dataset.visivelSe.split("=");
-    el.style.display = valor.split("|").includes(document.getElementById(id)?.value) ? "" : "none";   // "a|b" = vale para a ou b
+    const alvo = document.getElementById(id);
+    const atual = alvo?.type === "checkbox" ? String(alvo.checked) : alvo?.value;     // caixa de marcar: "true"/"false"
+    el.style.display = valor.split("|").includes(atual) ? "" : "none";   // "a|b" = vale para a ou b
   });
 }
 

@@ -89,6 +89,7 @@ original — nenhuma regra foi alterada, exceto o item 1 acima.
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import random
 import re
@@ -892,8 +893,11 @@ async def gravar_matriculas(page, alunos: list[Aluno]) -> None:
 # ETAPA 2 — Alterar/Excluir (adicionar observação)
 # ══════════════════════════════════════════════════════════════════════════
 
-async def alterar_historico(page, alunos: list[Aluno]) -> None:
+async def alterar_historico(page, alunos: list[Aluno], observacao: Optional[str] = None) -> None:
+    """`observacao`: texto a gravar em cada histórico (da tela); None usa a constante OBSERVACAO."""
+    texto_obs = OBSERVACAO if observacao is None else observacao
     _cabecalho("ETAPA 2 — ALTERAR/EXCLUIR HISTÓRICO")
+    print(f"  📝 Texto da observação: {texto_obs!r}" if texto_obs.strip() else "  ⚠️  Texto da observação vazio.")
 
     async def handle_dialog(dialog):
         await dialog.accept()
@@ -918,7 +922,7 @@ async def alterar_historico(page, alunos: list[Aluno]) -> None:
 
             txt = page.locator('textarea[name="observacao"]')
             await txt.wait_for(state="visible", timeout=10000)
-            await txt.fill(OBSERVACAO)
+            await txt.fill(texto_obs)
             await delay()
 
             await page.click('input[name="salvar"]')
@@ -1401,17 +1405,51 @@ GRUPOS_ETAPAS: dict[str, list[str]] = {
     "guia":      _NOMES_ETAPAS[5:],          # gerar → assinar → baixar a guia de transferência
 }
 
+# As 5 ações da tela, cada uma com a(s) etapa(s) que executa. Gravar e Alterar são só do histórico;
+# Emitir, Assinar e Imprimir valem para o histórico e para a guia.
+ETAPA_ACAO = {
+    "gravar":   {"historico": [_NOMES_ETAPAS[0]]},
+    "alterar":  {"historico": [_NOMES_ETAPAS[1]]},
+    "emitir":   {"historico": [_NOMES_ETAPAS[2]], "guia": [_NOMES_ETAPAS[5]]},
+    "assinar":  {"historico": [_NOMES_ETAPAS[3]], "guia": [_NOMES_ETAPAS[6]]},
+    "imprimir": {"historico": [_NOMES_ETAPAS[4]], "guia": [_NOMES_ETAPAS[7]]},
+}
+ACOES = tuple(ETAPA_ACAO)                    # ordem em que aparecem na tela
+ETAPA_ALTERAR = _NOMES_ETAPAS[1]
 
-def _escolher_etapas(etapas: Optional[list[str]]) -> list[tuple[str, object]]:
+
+def etapas_por_acoes(acoes: list[str], documentos: str = "ambos") -> list[str]:
+    """
+    Nomes de etapa (na ordem canônica) para as ações marcadas. `documentos`: "ambos", "historico" ou "guia"
+    (restringe Emitir/Assinar/Imprimir; Gravar e Alterar não existem para a guia). ValueError se algo for inválido.
+    """
+    if documentos not in ("ambos", "historico", "guia"):
+        raise ValueError(f"Documentos inválido: {documentos!r}. Use ambos, historico ou guia.")
+    invalidas = [a for a in acoes if a not in ETAPA_ACAO]
+    if invalidas:
+        raise ValueError(f"Ação(ões) desconhecida(s): {invalidas}. Válidas: {', '.join(ACOES)}.")
+    tipos = ("historico", "guia") if documentos == "ambos" else (documentos,)
+    escolhidas = {nome for a in acoes for t in tipos for nome in ETAPA_ACAO[a].get(t, [])}
+    return [nome for nome in _NOMES_ETAPAS if nome in escolhidas]
+
+
+def _escolher_etapas(etapas: Optional[list[str]], observacao: Optional[str] = None) -> list[tuple[str, object]]:
     if etapas is None:
-        return list(ETAPAS)
+        etapas = _NOMES_ETAPAS
     desconhecidas = [e for e in etapas if e not in set(_NOMES_ETAPAS)]
     if desconhecidas:
         print(f"⚠️  Etapa(s) desconhecida(s), ignorada(s): {desconhecidas}")
-    return [(nome, fn) for nome, fn in ETAPAS if nome in etapas]
+    escolhidas = []
+    for nome, fn in ETAPAS:
+        if nome not in etapas:
+            continue
+        if nome == ETAPA_ALTERAR and observacao is not None:
+            fn = functools.partial(fn, observacao=observacao)        # o texto vem da tela
+        escolhidas.append((nome, fn))
+    return escolhidas
 
 
-def _imprimir_plano(alunos: list[Aluno], etapas: list[tuple[str, object]]) -> None:
+def _imprimir_plano(alunos: list[Aluno], etapas: list[tuple[str, object]], observacao: Optional[str] = None) -> None:
     """Simulação: mostra o que seria feito, sem abrir o SERE e sem gravar nada."""
     print(f"\n{'='*65}\n  🧪 SIMULAÇÃO — nada será gerado, baixado nem gravado\n{'='*65}")
     print(f"  Data de corte : {_corte().strftime('%d/%m/%Y')}")
@@ -1420,6 +1458,9 @@ def _imprimir_plano(alunos: list[Aluno], etapas: list[tuple[str, object]]) -> No
     print(f"  Etapas ({len(etapas)}):")
     for i, (nome, _) in enumerate(etapas, 1):
         print(f"     {i}. {nome}")
+    if any(nome == ETAPA_ALTERAR for nome, _ in etapas):
+        print(f"  Texto da observação (Alterar): {observacao!r}" if observacao else
+              "  Texto da observação (Alterar): (vazio)")
     print(f"\n  Alunos ({len(alunos)}):")
     for a in alunos:
         partes = []
@@ -1442,6 +1483,7 @@ async def processar_transferencias(
     etapas: Optional[list[str]] = None,
     simulacao: bool = False,
     modo_teste: bool = False,
+    observacao: Optional[str] = None,
 ) -> None:
     """
     Ponto de entrada completo: lê a fila de transferidos (fila_transferidos.json, gerada pelo turmas.py),
@@ -1451,6 +1493,7 @@ async def processar_transferencias(
     `etapas`: nomes de etapa (ver ETAPAS / GRUPOS_ETAPAS), executados na ordem canônica; None = todas.
     `simulacao`: só mostra quem e o que seria processado — não abre o SERE e não grava nada (nem a fila).
     `modo_teste`: processa só o primeiro aluno da fila (de verdade; não é simulação).
+    `observacao`: texto gravado em cada histórico na etapa "Alterar" (None = constante OBSERVACAO).
     """
     print(f"\n🔄 Processo de transferidos — data de corte {_corte().strftime('%d/%m/%Y')}"
           f"{' — SIMULAÇÃO' if simulacao else ''}")
@@ -1468,13 +1511,13 @@ async def processar_transferencias(
         alunos = alunos[:1]
         print("⚠️  MODO TESTE — só o primeiro aluno")
 
-    etapas_a_rodar = _escolher_etapas(etapas)
+    etapas_a_rodar = _escolher_etapas(etapas, observacao)
     if not etapas_a_rodar:
         print("⚠️  Nenhuma etapa válida selecionada. Encerrando.")
         return
 
     if simulacao:
-        _imprimir_plano(alunos, etapas_a_rodar)
+        _imprimir_plano(alunos, etapas_a_rodar, observacao)
         return
 
     print(f"\n👥 Alunos carregados ({len(alunos)}):")
