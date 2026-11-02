@@ -59,7 +59,7 @@ Uso real, definido em 2026-11-02: (1) escrever **para a escola de origem**, na h
 - [ ] **3b**: backup automático ao fim das coletas (turmas, alunos, funcionários)
 
 ### Funcionários
-- [ ] Modo completo só grava no fim: cancelar ou cair no meio perde a coleta toda (salvar aos poucos, como `alunos_completo`)
+- [ ] Modo completo: retomar de onde parou (hoje salva aos poucos e avisa se parar no meio, mas rodar de novo refaz todos)
 - [!] Decidir se os termos de ciência pulam quem tem `na_escola = false`
 
 ### Transferidos
@@ -103,6 +103,7 @@ Uso real, definido em 2026-11-02: (1) escrever **para a escola de origem**, na h
 
 - [x] **10g**: o wizard (1ª execução) fica só com o modo **básico** de Alunos, porque o completo demora mais; o completo segue em Automações → Alunos
 - [x] **10h**: a tela Alunos une `alunos.json` e `alunos_completo.json` (2026-11-02)
+- [x] **Funcionários completo salva aos poucos** (2026-11-02): grava a cada 5 cadastros, não encolhe o arquivo no meio da coleta e, se parar (cancelada, erro ou queda), avisa no log e na tela de Funcionários
 
 ---
 

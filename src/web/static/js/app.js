@@ -1299,6 +1299,19 @@ function renderFuncRows() {
   ligarExpansao(tbody, (i) => _detalheFuncionario(todos[i]));
 }
 
+// Aviso quando a última coleta COMPLETA de funcionários foi interrompida (cancelada, erro ou o programa caiu).
+function _renderAvisoColetaFuncionarios(info) {
+  const el = document.getElementById("func-aviso-coleta");
+  if (!el) return;
+  if (!info) { el.style.display = "none"; el.innerHTML = ""; return; }
+  const quando = info.atualizado_em ? ` <span style="color:var(--txt3)">(${escaparHtml(info.atualizado_em)})</span>` : "";
+  const pend = (info.pendentes || []).length
+    ? `<div class="aviso-coleta-pend">Sem atualização: ${escaparHtml(info.pendentes.slice(0, 15).join(", "))}${info.pendentes.length > 15 ? ` e mais ${info.pendentes.length - 15}` : ""}.</div>`
+    : "";
+  el.innerHTML = `<b>⚠ Coleta incompleta.</b> ${escaparHtml(info.aviso)}${quando}${pend}`;
+  el.style.display = "";
+}
+
 async function carregarFuncionarios() {
   const sec = document.getElementById("sec-funcionarios");
   ligarAcoesTela("funcionarios");
@@ -1313,6 +1326,7 @@ async function carregarFuncionarios() {
     return;
   }
   desenharExtrasTabela("funcionarios", _funcDados);
+  _renderAvisoColetaFuncionarios(_funcDados.coleta_completo);
   const c = _funcDados.contagem || {};
   const rotulos = { todos: "Todos", Docente: "Docentes", "Direção": "Direção", Pedagogos: "Pedagogos", Auxiliares: "Auxiliares", Outros: "Outros" };
   sec.querySelectorAll("[data-fg]").forEach((b) => {

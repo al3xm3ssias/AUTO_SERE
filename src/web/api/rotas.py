@@ -797,6 +797,26 @@ def _texto_matriculas(vinc: dict) -> str:
     return " | ".join(uma(v) for v in vs)
 
 
+def _aviso_coleta_completa_funcionarios() -> Optional[dict]:
+    """
+    Estado da última coleta COMPLETA de funcionários (funcionarios_completo_progresso.json, gravado por
+    src.automacao.servidores): devolve {aviso, coletados, total, pendentes, atualizado_em, motivo} se ela foi
+    interrompida (cancelada, erro ou o programa caiu no meio), ou None se terminou ou nunca rodou.
+    """
+    estado = _carregar_json("funcionarios_completo_progresso.json", {})
+    if not isinstance(estado, dict) or not estado or estado.get("completa") is not False:
+        return None
+    pendentes = [str(p) for p in (estado.get("pendentes") or [])][:50]
+    return {
+        "aviso": str(estado.get("aviso") or "A última coleta completa de funcionários não terminou."),
+        "coletados": estado.get("coletados"),
+        "total": estado.get("total"),
+        "pendentes": pendentes,
+        "atualizado_em": str(estado.get("atualizado_em") or ""),
+        "motivo": str(estado.get("motivo") or ""),
+    }
+
+
 @api_bp.route("/funcionarios/lista")
 def funcionarios_lista():
     """
@@ -914,7 +934,8 @@ def funcionarios_lista():
     ]
     return _resposta_lista_generica(colunas, [{k: r[k] for k in ("nome", "funcao", "email", "formacao", "turmas")}
                                               for r in registros],
-                                    extras={"funcionarios": registros, "cartoes": cartoes, "contagem": contagem})
+                                    extras={"funcionarios": registros, "cartoes": cartoes, "contagem": contagem,
+                                            "coleta_completo": _aviso_coleta_completa_funcionarios()})
 
 
 _DOCS_TRANSFERENCIA = (("guia", ("emitido_em", "assinado_secretario", "assinado_diretor")),

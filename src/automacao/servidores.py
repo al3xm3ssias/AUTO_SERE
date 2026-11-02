@@ -80,6 +80,10 @@ _DADOS = _paths.dados_ano_atual()
 
 OUTPUT_BASICO   = _DADOS / "funcionarios.json"
 OUTPUT_COMPLETO = _DADOS / "funcionarios_completo.json"
+# Estado da última coleta COMPLETA: se terminou ou foi interrompida (e quem ficou sem atualizar). A tela de
+# Funcionários lê este arquivo para avisar. Não guarda CPF, só nomes.
+OUTPUT_PROGRESSO = _DADOS / "funcionarios_completo_progresso.json"
+SALVAR_A_CADA = 5   # modo completo: grava o arquivo a cada N cadastros coletados (como alunos_completo.py)
 
 _ROTA_CONSULTA = ("Funcionário/ Docente", "Consulta Funcionários/Docentes")
 _ROTA_CADASTRO = ("Funcionário/ Docente", "Cadastro")
@@ -400,32 +404,126 @@ async def consultar_cpf(page, cpf: str) -> Optional[dict]:
         return None
 
 
+def _so_digitos(valor) -> str:
+    return "".join(c for c in str(valor or "") if c.isdigit())
+
+
+def _gravar_json(caminho: Path, dados, indent: int = 2) -> None:
+    """Grava sem deixar o arquivo pela metade se o programa cair no meio da escrita (escreve ao lado e troca)."""
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    tmp = caminho.with_name(caminho.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(dados, f, ensure_ascii=False, indent=indent)
+    tmp.replace(caminho)
+
+
+def _carregar_completo_anterior() -> list[dict]:
+    """Registros que já estavam em funcionarios_completo.json (de uma coleta anterior). [] se não existir ou estiver ruim."""
+    if not OUTPUT_COMPLETO.exists():
+        return []
+    try:
+        with open(OUTPUT_COMPLETO, encoding="utf-8") as f:
+            dados = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+    return [r for r in dados if isinstance(r, dict)] if isinstance(dados, list) else []
+
+
+def gravar_progresso(completa: bool, total: int, coletados: int, pendentes: list[str],
+                     iniciado_em: str, motivo: str = "") -> dict:
+    """Grava funcionarios_completo_progresso.json e devolve o conteúdo (com o texto do aviso, se incompleta)."""
+    estado = {
+        "completa": completa,
+        "total": total,
+        "coletados": coletados,
+        "pendentes": pendentes,
+        "iniciado_em": iniciado_em,
+        "atualizado_em": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "motivo": motivo,
+    }
+    if not completa:
+        quando = ("não terminou (ainda em andamento, ou o programa parou no meio)" if motivo in ("", "em andamento")
+                  else f"foi interrompida ({motivo})")
+        estado["aviso"] = (
+            f"A coleta completa de funcionários {quando}: "
+            f"{coletados} de {total} cadastros foram coletados e salvos. Os outros {len(pendentes)} NÃO foram "
+            f"atualizados e ficaram com os dados da coleta anterior (ou sem cadastro completo, se não havia). "
+            f"Rode a coleta completa de novo para terminar."
+        )
+    try:
+        _gravar_json(OUTPUT_PROGRESSO, estado)
+    except OSError as e:
+        print(f"⚠️  Não foi possível gravar {OUTPUT_PROGRESSO.name}: {e}")
+    return estado
+
+
+def _motivo_da_parada(erro: BaseException) -> str:
+    """Texto curto do porquê a coleta parou: cancelamento pelo usuário ou erro."""
+    if isinstance(erro, (asyncio.CancelledError, KeyboardInterrupt)) or type(erro).__name__ == "CancelamentoSolicitado":
+        return "cancelada"
+    return f"erro: {str(erro).strip() or type(erro).__name__}"
+
+
 async def coletar_completo(page, lista_basico: list[dict]) -> list[dict]:
     """
     Percorre a lista de funcionários básicos, busca cada um pelo CPF no
     formulário de Cadastro e retorna os dados completos.
+
+    Salva aos poucos (a cada SALVAR_A_CADA cadastros), como alunos_completo.py: se a coleta for cancelada ou cair
+    no meio, o que já foi coletado fica gravado. Enquanto roda, o arquivo nunca encolhe: quem ainda não foi
+    consultado mantém o registro da coleta anterior. Se parar antes do fim, avisa no log e deixa o aviso em
+    funcionarios_completo_progresso.json (a tela de Funcionários mostra). Só quando termina o arquivo passa a
+    ter exatamente os cadastros coletados agora (como sempre foi).
     """
     await navegar_censo_escolar(page, _ROTA_CADASTRO)
     print("✅ Navegou até Cadastro de Funcionários")
 
+    anteriores = _carregar_completo_anterior()
+    iniciado_em = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     dados_completos: list[dict] = []
     total = len(lista_basico)
+    com_cpf = [f for f in lista_basico if _so_digitos(f.get("cpf"))]
+    coletados_cpf: set[str] = set()
 
-    for i, func in enumerate(lista_basico, 1):
-        cpf = func.get("cpf", "").strip()
-        if not cpf:
-            print(f"   [{i}/{total}] ⚠️  sem CPF, pulando")
-            continue
+    def _pendentes() -> list[str]:
+        return [str(f.get("nome") or f.get("cpf") or "").strip() or "(sem nome)"
+                for f in com_cpf if _so_digitos(f.get("cpf")) not in coletados_cpf]
 
-        print(f"[{i}/{total}] CPF {cpf} ...", end="  ")
-        dados = await consultar_cpf(page, cpf)
-        if dados:
-            dados_completos.append(dados)
-        else:
-            print(f"   [{i}/{total}] Não coletado")
+    def _salvar_parcial() -> None:
+        # novos + registros antigos de quem ainda não foi coletado agora: o arquivo não encolhe no meio da coleta
+        restantes = [r for r in anteriores if _so_digitos(r.get("cpf")) not in coletados_cpf]
+        _gravar_json(OUTPUT_COMPLETO, dados_completos + restantes)
+        gravar_progresso(False, len(com_cpf), len(dados_completos), _pendentes(), iniciado_em, "em andamento")
 
-        await page.wait_for_timeout(800)
+    try:
+        for i, func in enumerate(lista_basico, 1):
+            cpf = func.get("cpf", "").strip()
+            if not cpf:
+                print(f"   [{i}/{total}] ⚠️  sem CPF, pulando")
+                continue
 
+            print(f"[{i}/{total}] CPF {cpf} ...", end="  ")
+            dados = await consultar_cpf(page, cpf)
+            if dados:
+                dados_completos.append(dados)
+                coletados_cpf.add(_so_digitos(cpf))
+                if len(dados_completos) % SALVAR_A_CADA == 0:
+                    _salvar_parcial()
+                    print(f"   💾 {len(dados_completos)} cadastros salvos até aqui")
+            else:
+                print(f"   [{i}/{total}] Não coletado")
+
+            await page.wait_for_timeout(800)
+    except BaseException as erro:          # cancelamento (CancelledError/CancelamentoSolicitado) e erro: salva e avisa
+        motivo = _motivo_da_parada(erro)
+        try:
+            restantes = [r for r in anteriores if _so_digitos(r.get("cpf")) not in coletados_cpf]
+            _gravar_json(OUTPUT_COMPLETO, dados_completos + restantes)
+        except OSError as e:
+            print(f"⚠️  Não foi possível salvar o que foi coletado: {e}")
+        estado = gravar_progresso(False, len(com_cpf), len(dados_completos), _pendentes(), iniciado_em, motivo)
+        print(f"\n⚠️  {estado['aviso']}")
+        raise
     return dados_completos
 
 
@@ -470,13 +568,19 @@ async def coletar_servidores(page, modo: str) -> list[dict]:
             print(f"✅ {OUTPUT_BASICO} salvo com {len(lista_basico)} funcionários.")
 
         print(f"\n📡 Consultando {len(lista_basico)} funcionários no cadastro individual...")
+        inicio_coleta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         dados_completos = await coletar_completo(page, lista_basico)
 
-        OUTPUT_COMPLETO.parent.mkdir(parents=True, exist_ok=True)
-        with open(OUTPUT_COMPLETO, "w", encoding="utf-8") as f:
-            json.dump(dados_completos, f, ensure_ascii=False, indent=2)
+        _gravar_json(OUTPUT_COMPLETO, dados_completos)
+        com_cpf = [f for f in lista_basico if _so_digitos(f.get("cpf"))]
+        coletados = {_so_digitos(r.get("cpf")) for r in dados_completos}
+        nao_achados = [str(f.get("nome") or f.get("cpf") or "").strip() for f in com_cpf
+                       if _so_digitos(f.get("cpf")) not in coletados]
+        gravar_progresso(True, len(com_cpf), len(dados_completos), nao_achados, inicio_coleta)
 
         print(f"\n✅ {OUTPUT_COMPLETO} salvo com {len(dados_completos)} registros completos.")
+        if nao_achados:
+            print(f"ℹ️  {len(nao_achados)} funcionário(s) da lista básica não foram encontrados no cadastro pelo CPF.")
         return dados_completos
 
     else:

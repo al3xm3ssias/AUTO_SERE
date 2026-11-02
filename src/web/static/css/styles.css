@@ -849,6 +849,9 @@ tbody td{padding:11px 14px;vertical-align:middle}
   border-bottom:1px solid var(--border);padding-bottom:6px;margin-top:4px;
 }
 .al-detail-row td{padding:0}
+.aviso-coleta{margin:0 0 14px;padding:10px 14px;border:1px solid var(--amber);border-radius:10px;background:rgba(251,191,36,.08);color:var(--txt);font-size:.8rem;line-height:1.45}
+.aviso-coleta b{color:var(--amber)}
+.aviso-coleta .aviso-coleta-pend{margin-top:6px;color:var(--txt3);font-size:.72rem}
 .al-info{margin-top:10px;font-size:.75rem;color:var(--txt3);line-height:1.4}
 
 /* ══════════════════════════════════════════════════════════════════════
