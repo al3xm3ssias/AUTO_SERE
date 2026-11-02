@@ -1,22 +1,23 @@
 # PENDÊNCIAS — AUTO SERE
 
-Consolidação do que ainda falta, a partir de `PROXIMAS_ETAPAS.md` (atualizado em 2026-11-01), `BUGS_CONHECIDOS.md` e da estrutura do projeto.
-Gerado em 2026-11-01. Legenda: `[ ]` pendente · `[!]` depende de ambiente real ou decisão.
+Lista curta do que ainda falta. O detalhe e o histórico estão em [`PROXIMAS_ETAPAS.md`](PROXIMAS_ETAPAS.md) (os números, como 3b e 11q, são os mesmos) e os bugs em [`BUGS_CONHECIDOS.md`](BUGS_CONHECIDOS.md).
+
+Atualizado em 2026-11-02. Legenda: `[ ]` pendente · `[!]` depende de ambiente real ou de decisão · `[x]` decidido/feito.
 
 ---
 
-## 1. Validação no ambiente real (maior risco)
+## 1. Validar no ambiente real (maior risco)
 
 Quase tudo foi testado só com navegador ou dados simulados.
 
 ### SERE
-- [!] Coletas de **Turmas**, **Alunos** (básico e completo) e **Funcionários**: executar de verdade
-- [!] **`vinculos`**: RH (endpoint de estagiários deduzido por analogia) e leitura do holerite (depende do layout atual do site)
+- [!] Coletas de **Turmas**, **Alunos** (básico e completo) e **Funcionários**
+- [!] **`vinculos`**: RH (o endpoint de estagiários foi deduzido por analogia) e leitura do holerite (depende do layout atual do site)
 - [!] **`sus`/SISREG**: consulta real
-- [!] Automações migradas para o registro (item 11 do PROXIMAS_ETAPAS): uma execução real de cada, com "Modo de teste"
+- [!] Uma execução real de cada automação migrada para o registro (item 11), com "Modo de teste"
 
 ### Transferidos
-- [!] Emitir, assinar, baixar e enviar de verdade, com um aluno real
+- [!] Emitir, assinar, baixar e enviar de verdade com um aluno real
 - [!] Leitura de QR com scans reais (testada só com PDFs gerados)
 - [!] `parecer_fund`: fluxo completo no computador da escola e modelos dos demais anos
 
@@ -25,21 +26,31 @@ Quase tudo foi testado só com navegador ou dados simulados.
 
 ### WhatsApp
 - [!] Primeiro pareamento e envio com número real
-- [!] Testar no Windows (`whatsplay`)
+- [!] Testar `whatsplay` no Windows
 
 ### Pré-matrícula e rematrícula
-- [!] **BUG-PRE-001**: consulta por CPF pode ler só o primeiro cadastro (talvez o cancelado). Confirmar quando o site voltar (ver passos em `BUGS_CONHECIDOS.md`)
-- [!] Conferência ao vivo da coleta (BUG-PRE-002 corrigido, falta validar com coleta real)
-- [!] **BUG-REM-001**: clique final de "Confirmar" tratado como sucesso sem conferir a página
+- [!] **BUG-PRE-001**: a consulta por CPF pode ler só o primeiro cadastro (talvez o cancelado). Confirmar quando o site voltar
+- [!] Conferência ao vivo da coleta (BUG-PRE-002 está corrigido, falta validar com coleta real)
+- [!] **BUG-REM-001**: o clique final de "Confirmar" é tratado como sucesso sem conferir a página
+
+### Tela Alunos
+- [!] Abrir com os `alunos.json` e `alunos_completo.json` reais e ver se aparecem divergências falsas (⚠)
 
 ---
 
 ## 2. Funcionalidades pendentes
 
-### `avisos`
-- [ ] Liberar o **envio real** de e-mail (hoje recusado de propósito): confirmação com prévia, intervalo entre e-mails, limite por lote, envio em segundo plano com pausa/cancelamento, registro de quem recebeu e de quem falhou
+### `avisos` (e-mail)
+Uso real, definido em 2026-11-02: (1) escrever **para a escola de origem**, na hora da transferência, pedindo a documentação de aluno que está vindo; (2) avisar os **responsáveis de alunos que estão saindo**. Hoje só existem os públicos "todas as escolas/CMEIs" (em massa) e "pais da pré-matrícula", que não cobrem nenhum dos dois.
+
+- [ ] Público **escola de origem**: um e-mail por aluno que chega, para uma escola escolhida, com nome, CGM e série do aluno e a lista de documentos pedida
+- [!] Decidir de onde vem a escola de origem: o sistema não tem esse dado (digitar na hora, escolher na lista de `escolas_completas.json` ou campo no cadastro)
+- [ ] Público **responsáveis de quem sai**: destinatários de `transferidos.json` / fila de transferidos, com o e-mail do responsável do cadastro
+- [ ] E-mail de escola escrito de forma disfarçada (ex.: "nome [arroba] dominio") não é reconhecido: reconhecer as variações comuns e mostrar "sem e-mail" na tela, não só no log
+- [ ] Responsável sem e-mail: hoje só vai para o log; para quem sai, mostrar na tela e oferecer outro caminho (WhatsApp ou aviso impresso)
+- [ ] Liberar o **envio real** (hoje recusado de propósito): confirmação com prévia, intervalo entre e-mails, limite por lote, envio em segundo plano com pausa/cancelamento, registro de quem recebeu e de quem falhou
 - [ ] Outros canais: WhatsApp e SERE
-- [ ] Pais sem e-mail (hoje só listados no log); e-mails de escolas escritos de forma disfarçada não são reconhecidos
+- [ ] Confirmar se o público em massa "todas as escolas/CMEIs" ainda é útil
 
 ### WhatsApp
 - [ ] **7b**: fila de envio com intervalo e limite diário, pausa/cancelamento, histórico e modelos de mensagem
@@ -47,51 +58,60 @@ Quase tudo foi testado só com navegador ou dados simulados.
 ### Backup
 - [ ] **3b**: backup automático ao fim das coletas (turmas, alunos, funcionários)
 
-### Alunos
-- [ ] **10g**: passo "Alunos" do wizard só no modo básico; decidir se oferece o completo
-- [x] **10h**: tela Alunos une `alunos.json` + `alunos_completo.json` (feito 2026-11-02); falta conferir com os arquivos reais e decidir o que fazer com as divergências (⚠)
-
 ### Funcionários
 - [ ] Modo completo só grava no fim: cancelar ou cair no meio perde a coleta toda (salvar aos poucos, como `alunos_completo`)
-- [ ] Decidir se os termos de ciência pulam quem tem `na_escola = false`
+- [!] Decidir se os termos de ciência pulam quem tem `na_escola = false`
 
 ### Transferidos
 - [ ] Aluno transferido duas vezes no ano: a segunda saída não é tratada
-- [ ] Painel: a tabela "Transferidos" lê só quem está em processo (não mostra pré-corte nem retornados; o "Total" não é o total da escola)
-- [ ] Mapeamento de turmas do QR só por arquivo (`mapeamento_turmas_qr`), sem tela
+- [ ] Painel: a tabela "Transferidos" lê só quem está em processo (o "Total" não é o total da escola; não mostra pré-corte nem retornados)
+- [ ] Mapeamento de turmas do QR só por arquivo, sem tela
 
 ### Script futuro
-- [ ] Decodificar o QR dos pareceres (`parecer_fund.ler_payload_qr`) e enviar ao SERE e por e-mail; escolher a biblioteca de leitura de QR (não está no `requirements.txt`)
+- [ ] Decodificar o QR dos pareceres e enviar ao SERE e por e-mail (falta escolher a biblioteca de leitura de QR)
 
 ---
 
 ## 3. Limpeza e robustez
 
-- [ ] Apagar cópias mortas em `src/automacao/`: `sere_api.py`, `sere_limpeza.py`, `sere_upload.py`, `sere_utils.py`
-- [ ] Conferir e remover duplicatas aparentes: `src/automacao/executar_*.py` (mesmos tamanhos que em `src/comum/`) e `src/automacao/test_gerar_pastas.py` (existe também em `tests/`)
-- [ ] **11q**: trava contra execução simultânea é por processo; criar arquivo de lock em `locks/`
-- [ ] Teste intermitente `tests/test_ui_automacoes.py::test_funcionarios_e_vinculos_estao_no_menu_...` (rótulo "Sistema" cobre o item "Vínculos")
+- [ ] **11q**: a trava contra execução simultânea é por processo; criar arquivo de lock em `locks/`
+- [ ] Teste intermitente `test_ui_automacoes.py::test_funcionarios_e_vinculos...` (o rótulo "Sistema" cobre o item "Vínculos"); falha também no zip original
 - [ ] Modo consulta: desabilitar os botões de escrita das demais telas (hoje o servidor recusa, mas o botão continua clicável)
-- [ ] Editar `config_usuario.json` à mão com o programa aberto só vale ao reiniciar (faixa avisa e oferece "Aplicar agora")
-- [ ] Rodar `python -m pytest tests` para ter a linha de base atual
+- [ ] Editar `config_usuario.json` à mão com o programa aberto só vale ao reiniciar (a faixa avisa e oferece "Aplicar agora")
+- [ ] Rodar `python -m pytest tests` na sua máquina para ter a linha de base
+
+### Código duplicado (conferido em 2026-11-02)
+- [ ] Apagar `src/automacao/sere_api.py`, `sere_limpeza.py`, `sere_upload.py` e `sere_utils.py`: são versões antigas e nenhum arquivo as importa (o projeto usa as de `src/comum/`)
+- [ ] Apagar `src/comum/executar_{aluno,analisa,documento,espec,transferidos,validar}.py`: são cópias idênticas das de `src/automacao/`, **que são as usadas** (o `registro_scripts.py` importa de lá). Atenção: não apagar as de `src/automacao/`. O `src/comum/executar_limpeza.py` só existe lá e é usado, fica
+- [ ] Apagar `src/automacao/test_gerar_pastas.py` (idêntico a `tests/test_gerar_pastas.py`)
+- [ ] Apagar `src/web/templates/partials/alunos_completo_cards.html` (cópia idêntica de `alunos_cards.html`, não usada)
 
 ---
 
 ## 4. Documentação e configuração
 
-- [ ] Atualizar cabeçalho do `PROXIMAS_ETAPAS.md` ("Última atualização: 2026-10-31", mas há entradas de 01/11)
-- [ ] Atualizar `BUGS_CONHECIDOS.md` (última atualização 2026-10-30)
-- [ ] Remover de "Depois (não iniciadas)" o item "Registro de scripts com componentes compartilhados" (já feito, item 11)
+- [ ] `src/web/README.md` e `diagrama_de_funcionamento.md` dizem porta 5000; a padrão é 8000
+- [ ] `.vscode/tasks.json`: a tarefa "Bootstrap: criar_projeto.py" aponta para um arquivo que não existe
+- [ ] `backup_auto_sere.py` tem o caminho `C:\Auto_sere` fixo
 - [ ] Preencher ou remover `AUTO_SERE_MAPA.txt` (1 byte) e os três `src/web/templates/partials/help/*.html` (vazios)
-- [!] `config/config_usuario.json`: `setup_concluido` está `false`; unidade escolar sem `codigo`, `inep`, `telefone`, `email` e `responsavel`
+- [ ] `BUGS_CONHECIDOS.md` parou em 2026-10-30
+- [!] `config/config_usuario.json`: `setup_concluido` está `false` e a unidade escolar está sem `codigo`, `inep`, `telefone`, `email` e `responsavel`
+
+---
+
+## 5. Decidido
+
+- [x] **10g**: o wizard (1ª execução) fica só com o modo **básico** de Alunos, porque o completo demora mais; o completo segue em Automações → Alunos
+- [x] **10h**: a tela Alunos une `alunos.json` e `alunos_completo.json` (2026-11-02)
 
 ---
 
 ## Ordem sugerida
 
 1. Rodar `pytest tests` (linha de base)
-2. Execução real com um aluno no SERE (transferidos e coletas); fechar os `[!]`
-3. Confirmar BUG-PRE-001 quando o site da pré-matrícula voltar
-4. Limpar as cópias mortas
-5. Lock de execução (11q)
-6. Só então liberar o envio real do `avisos` e a fila do WhatsApp
+2. Limpar as duplicatas (seção 3), conferindo antes qual cópia é a usada
+3. Execução real com um aluno no SERE (transferidos e coletas); fechar os `[!]`
+4. Confirmar BUG-PRE-001 quando o site da pré-matrícula voltar
+5. Decidir a origem da escola de origem e criar os dois públicos novos do `avisos`
+6. Lock de execução (11q)
+7. Só então liberar o envio real do `avisos` e a fila do WhatsApp

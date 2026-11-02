@@ -5,6 +5,47 @@ Onde o teste só pôde usar dados ou páginas simuladas (sem acesso ao SERE, SIS
 
 Última atualização: 2026-11-02.
 
+## O que falta agora (resumo, 2026-11-02)
+
+Visão rápida. O detalhe e o histórico de cada item estão nas seções abaixo (os números, como 3b e 11q, são os mesmos).
+
+### A. Validar no ambiente real (maior risco)
+Quase tudo foi testado só com navegador ou dados simulados.
+- [!] **SERE:** coletas de Turmas, Alunos (básico e completo) e Funcionários; `vinculos` (RH e holerite); `sus`/SISREG; e uma execução real de cada automação migrada para o registro (item 11), com "Modo de teste".
+- [!] **Transferidos:** emitir, assinar, baixar e enviar de verdade com um aluno real; leitura de QR com scans reais; `parecer_fund` completo no computador da escola e modelos dos demais anos.
+- [!] **RCO:** `parecer_rco` (login, 2FA, botões, download) no site real.
+- [!] **WhatsApp:** primeiro pareamento e envio com número real; testar `whatsplay` no Windows.
+- [!] **Pré-matrícula e rematrícula:** BUG-PRE-001 (consulta por CPF pode ler o cadastro cancelado), conferência ao vivo da coleta e BUG-REM-001 (clique em "Confirmar" tratado como sucesso sem conferir a página).
+- [!] **Tela Alunos (10h):** abrir com os `alunos.json` e `alunos_completo.json` reais e ver se aparecem divergências falsas (⚠).
+
+### B. Funcionalidades pendentes
+- [ ] **`avisos` — dois públicos novos** (uso real do e-mail, definido em 2026-11-02): (1) **escola de origem**, um e-mail por aluno que chega, pedindo a documentação; (2) **responsáveis de alunos que saem**, avisando sobre a transferência. Hoje só existem "todas as escolas/CMEIs" e "pais da pré-matrícula". Falta decidir de onde vem a escola de origem (não existe esse dado no sistema).
+- [ ] `avisos`: reconhecer e-mail de escola escrito de forma disfarçada e mostrar "sem e-mail" na tela; responsável sem e-mail hoje só vai para o log.
+- [ ] `avisos`: liberar o envio real (confirmação com prévia, intervalo e limite por lote, envio em segundo plano com pausa, registro de quem recebeu/falhou) e outros canais (WhatsApp, SERE).
+- [ ] **7b** WhatsApp: fila de envio com limite diário, pausa, histórico e modelos.
+- [ ] **3b** Backup automático ao fim das coletas.
+- [ ] Funcionários completo: salvar aos poucos (hoje só grava no fim).
+- [ ] Decidir se os termos de ciência pulam quem tem `na_escola = false`.
+- [ ] Transferidos: aluno transferido duas vezes no ano; painel só lê quem está em processo; mapeamento de turmas do QR sem tela.
+- [ ] Script futuro: decodificar o QR dos pareceres e enviar ao SERE e por e-mail (falta escolher a biblioteca de leitura de QR).
+
+### C. Limpeza, robustez e documentação
+- [ ] **11q** Trava contra execução simultânea é por processo; criar arquivo de lock em `locks/`.
+- [ ] Teste intermitente `test_ui_automacoes.py::test_funcionarios_e_vinculos...` (falha também no zip original).
+- [ ] Modo consulta: desabilitar os botões de escrita das demais telas.
+- [ ] Código duplicado (conferido em 2026-11-02):
+  - `src/automacao/sere_api.py`, `sere_limpeza.py`, `sere_upload.py` e `sere_utils.py` são versões antigas **sem uso** (ninguém importa; o projeto usa as de `src/comum/`). Podem ser apagadas.
+  - `src/comum/executar_{aluno,analisa,documento,espec,transferidos,validar}.py` são cópias idênticas das de `src/automacao/`. **As usadas são as de `src/automacao/`** (o `registro_scripts.py` importa de lá); as seis de `src/comum/` sobram. `executar_limpeza.py` só existe em `src/comum/` e é usado, fica.
+  - `src/automacao/test_gerar_pastas.py` é idêntico a `tests/test_gerar_pastas.py`; o de `tests/` basta.
+  - `src/web/templates/partials/alunos_completo_cards.html` é cópia idêntica de `alunos_cards.html` e nenhum template a usa.
+- [ ] Documentação desatualizada: `src/web/README.md` e `diagrama_de_funcionamento.md` dizem porta 5000 (a padrão é 8000); a tarefa "Bootstrap: criar_projeto.py" em `.vscode/tasks.json` aponta para arquivo que não existe; `backup_auto_sere.py` tem `C:\Auto_sere` fixo; `AUTO_SERE_MAPA.txt` (1 byte) e `src/web/templates/partials/help/*.html` (3 arquivos) estão vazios; `BUGS_CONHECIDOS.md` parou em 2026-10-30.
+- [!] `config/config_usuario.json`: `setup_concluido` está `false` e a unidade escolar está sem `codigo`, `inep`, `telefone`, `email` e `responsavel`.
+- [ ] Editar `config_usuario.json` à mão com o programa aberto só vale ao reiniciar (a faixa avisa e oferece "Aplicar agora").
+
+### D. Decidido (não é mais pendência)
+- **10g:** o wizard (1ª execução) fica só com o modo **básico** de Alunos, porque o completo demora mais; o completo segue em Automações → Alunos.
+- **10h:** a tela Alunos une `alunos.json` e `alunos_completo.json` (feito em 2026-11-02).
+
 ## Análise do estado inicial (resumo)
 
 - **Dados**: não há banco de dados; tudo é JSON em `dados/<ano>/` (+ `dados/calendario/`, `config/config_usuario.json`).
@@ -57,7 +98,7 @@ Onde o teste só pôde usar dados ou páginas simuladas (sem acesso ao SERE, SIS
   - [x] 10e. A tela de Automações ganhou caixa de marcar, campo que só aparece para certo valor de outro campo e texto de ajuda por opção (reutilizáveis por outras automações).
   - [x] 10f. O backup pedia uma "pasta de destino" que era ignorada (ele sempre vai para `dados/backup`); o campo foi removido.
   - [!] As coletas reais no SERE só foram testadas com versões simuladas (as funções `*_via_login` são trocadas por falsas nos testes).
-  - [ ] 10g. O passo "Alunos" do wizard continua só no modo básico; decidir se oferece também o completo.
+  - [x] 10g. Decidido (2026-11-02): o passo "Alunos" do wizard (1ª execução) fica só no modo básico, porque o completo demora mais. O completo continua disponível em Automações → Alunos.
   - [x] 10h. A tela **Alunos** agora une `alunos.json` e `alunos_completo.json` pelo CGM (`src/comum/alunos_unificados.py`, rota `/alunos/lista`): coluna "Cadastro" (Completo / Básico / Só completo), filtros "Cadastro completo" e "Só básico", resumo sob os filtros, campos extras do completo no detalhe (documentação, família, socioeconômico, deficiências, observação), campo vazio no básico completado pelo completo e ⚠ quando os dois têm valores diferentes (nenhum é sobrescrito). Testado (`tests/test_alunos_unificados.py`, 11 testes) com dados simulados; falta olhar com os arquivos reais da escola.
 
 ### Registro de scripts e componentes compartilhados (pedido de 2026-10-10)
@@ -74,7 +115,7 @@ Guia: `docs/NOVO_SCRIPT.md`. Núcleo: `src/comum/opcoes_execucao.py` (opções) 
   - [x] 11i. Removidos campos de turma/pasta que o backend ignorava (`sus`, `transferidos`).
   - [!] Todos testados com as funções de coleta trocadas por falsas; falta uma execução real de cada no SERE.
   - [x] 11j. `sus` aceita turma e situação: consulta só os alunos escolhidos e **preserva** o resultado anterior dos demais (atualiza e remove quem não tem mais encaminhamento; reconhece registros antigos pelo CPF). O padrão passa a ser "matriculados de todas as turmas" (antes consultava todos os de `alunos.json`).
-  - [x] 11k. As 12 automações que sobravam foram para o registro (turmas, alunos, sus, cep, termos, gerar_pastas, analisa_pasta, mapear_pastas, cruzamento, mascara, coleta_emails, backup) e a cadeia antiga de `if/elif` de `rotas.py` foi apagada: agora há **um único caminho de execução** (21 automações). Só as 6 "não implementadas" ficam de fora.
+  - [x] 11k. As 12 automações que sobravam foram para o registro (turmas, alunos, sus, cep, termos, gerar_pastas, analisa_pasta, mapear_pastas, cruzamento, mascara, coleta_emails, backup) e a cadeia antiga de `if/elif` de `rotas.py` foi apagada: agora há **um único caminho de execução** (21 automações na época; **31 em 2026-11-02**, ver `python -m src.comum.cli listar`). Só as 6 "não implementadas" ficam de fora.
   - [x] 11l. Itens de menu lateral para `aluno`, `validar`, `espec`, `limpeza` e `prematricula_completa`; o submenu estava limitado a 1200 px e cortaria o fim da lista (agora 2400 px, com teste).
   - [x] 11m. **Linha de comando para todas as automações** (`python -m src.comum.cli`), em vez de refatorar o `sere_2026.py` (que só tem `input()` interativo): o executor lê o registro e dá a cada script as mesmas opções, validação e prévia da tela; `--simular` mostra o que seria processado sem executar; scripts que alteram o SERE pedem SIM ou `--confirmo` (não pedem com `--teste`). Saída 0/1/2. Os nomes vêm da lista da tela.
   - [ ] 11q. A trava contra duas execuções iguais ao mesmo tempo é por processo: tela e linha de comando (ou duas linhas de comando) podem rodar a mesma coleta juntas. Um arquivo de lock em `locks/` resolveria.
@@ -90,16 +131,21 @@ Guia: `docs/NOVO_SCRIPT.md`. Núcleo: `src/comum/opcoes_execucao.py` (opções) 
 - [!] `parecer_rco`: testado só com navegador simulado. Falta rodar com o RCO real (login, 2FA, nomes dos botões e download) — se o site mudou desde o script original, ajustar os seletores em `parecer_rco.py`.
 - [x] **`parecer_fund` (Pareceres do Fundamental)**, `src/automacao/parecer_fund.py`: o modelo Word (.docx) é enviado em Configurações → Modelos de parecer e ligado a uma ou mais turmas; `dados/MODELO/controle_modelos.json` guarda a ligação turma → arquivo. A automação gera um .docx por aluno em `dados/<ano>/PARECERES/<turma>/<nº da chamada> - <nome>.docx`, troca `$ESCOLA`, `$ALUNO`, `$TURMA` (e `$ANO`, `$CGM`, `$CHAMADA`) e põe no FIM um QR code de 150x150 px com o texto `AUTOSERE|PF|<ano>|<CGM>`. Parecer que já existe não é sobrescrito, a menos que se marque "Substituir". Base das pastas: `dados/`, ou `AUTO_SERE_PARECERES_BASE`.
 - [x] **`avisos` (Mandar avisos) — comunicados oficiais por e-mail, só em modo de teste** (`src/automacao/avisos.py`): público **escolas** (escolas e CMEIs de `escolas_completas.json`, vindos da Coleta e-mails, sem a própria escola, com filtro por tipo e por nome) e público **pais** (responsáveis de `pre_matricula.json`, um e-mail por responsável; matriculados por padrão, ou aguardando, ou ambos; nunca cancelados). Modos: **simular** (lista quem receberia, mostra a prévia e grava o registro em `dados/<ano>/AVISOS/`) e **teste** (envia UM e-mail só para o endereço de teste, com `[TESTE]` no assunto). No teste das **escolas**, o e-mail vai para a **escola fictícia ESCOLA MUNICIPAL TESTE DA SILVA** (`ESCOLA_TESTE` em `avisos.py`), com o texto montado como uma escola real o receberia, e funciona mesmo sem a lista de escolas coletada; a escola fictícia nunca entra na lista real. Marcadores: `$ESCOLA $ANO $DATA` + `$ESCOLA_DESTINO` (escolas) ou `$RESPONSAVEL $ALUNO $TURMA` (pais).
-- [ ] **`avisos`: liberar o envio real** (hoje o modo "enviar" é recusado de propósito). Antes de liberar: confirmação com a prévia, intervalo entre e-mails e limite por lote (o Gmail limita o envio diário), envio em segundo plano com pausa/cancelamento e registro de quem recebeu e de quem falhou, para retomar sem repetir.
-- [ ] **`avisos`: outros canais** — WhatsApp (o provedor já existe em `src/servicos/whatsapp`) e SERE; o campo "Canal" da tela já está pronto para receber as opções.
-- [ ] **`avisos`: pais sem e-mail** — hoje ficam só listados no log; avaliar WhatsApp pelo telefone do cadastro. E-mails de escolas escritos de forma disfarçada no site (ex.: "nome [arroba] dominio") não são reconhecidos.
+- **`avisos`: o uso real do e-mail** (definido em 2026-11-02): (1) escrever **para a escola de origem**, na hora da transferência, pedindo a documentação de aluno que está vindo; (2) avisar os **responsáveis de alunos que estão saindo**. Os dois públicos de hoje (todas as escolas/CMEIs e pais da pré-matrícula) não cobrem isso.
+  - [ ] Público **escola de origem**: um e-mail por aluno que chega, para uma escola escolhida, com nome, CGM e série do aluno e a lista de documentos pedida. Não existe no sistema o dado "escola de origem do aluno"; definir de onde vem (digitar na hora, escolher na lista de `escolas_completas.json` ou campo no cadastro).
+  - [ ] Público **responsáveis de quem sai**: destinatários de `transferidos.json` / fila de transferidos, com o e-mail do responsável (`alunos.json` / `alunos_completo.json`).
+  - [ ] E-mail de escola escrito de forma disfarçada no site (ex.: "nome [arroba] dominio") não é reconhecido: a escola de origem ficaria sem destinatário. Reconhecer as variações comuns e, quando falhar, mostrar "sem e-mail" na tela, não só no log.
+  - [ ] Responsável sem e-mail: hoje só vai para o log; para quem sai, mostrar na tela e oferecer outro caminho (WhatsApp ou aviso impresso).
+  - [ ] **Liberar o envio real** (hoje o modo "enviar" é recusado de propósito): confirmação com a prévia, intervalo entre e-mails e limite por lote (o Gmail limita o envio diário), envio em segundo plano com pausa/cancelamento e registro de quem recebeu e de quem falhou, para retomar sem repetir.
+  - [ ] Outros canais: WhatsApp (o provedor já existe em `src/servicos/whatsapp`) e SERE; o campo "Canal" da tela já está pronto.
+  - [ ] Confirmar se o público em massa "todas as escolas/CMEIs" ainda é útil.
 - [x] **`funcionarios` (Funcionários / Servidores) na lista de Automações**: a coleta que consulta os funcionários no SERE (`servidores.py`) só existia como passo da 1ª execução, embora a tela de Funcionários mandasse "executar pelo menu Automações". Agora tem entrada própria: modo **básico** (só a lista → `funcionarios.json`) ou **completo** (cadastro de cada um pelo CPF → `funcionarios_completo.json`), com a opção "Atualizar a lista antes" (sem ela, o completo reaproveita a lista já salva). A tela recebe só um resumo (modo, total, arquivo), não os cadastros.
   - [x] **Correção grave**: `servidores.py` e `funcionarios.py` **não importavam** (`navegar_censo_escolar` só existia numa cópia sem uso de `sere_api.py`), então a coleta de funcionários, inclusive o passo da 1ª execução, nunca rodava. A função voltou para `src/comum/sere_api.py` (a que o projeto importa), com `navegar_relatorios` igual ao que era.
   - [x] Falha de login no SERE agora vira ERRO na tela (antes devolvia lista vazia e terminava "com sucesso"); o navegador é fechado também em erro/cancelamento.
   - [!] Testado só com navegador simulado; a navegação e a leitura das telas do SERE (Censo Escolar → Funcionário/Docente) ainda não rodaram com o SERE real neste projeto.
   - [ ] O modo completo só grava o resultado no fim: cancelar ou cair no meio perde a coleta toda (alunos_completo salva aos poucos).
   - [x] `funcionarios_matriculas.json` (matrícula/`numcad`, lido pelos termos): agora é gerado pela automação **Vínculos dos funcionários** (abaixo). Os campos `numcad`/`nomemp` vêm do RH da Prefeitura, não do SERE.
-  - [ ] Limpeza: `src/automacao/sere_api.py`, `sere_limpeza.py`, `sere_upload.py` e `sere_utils.py` são cópias antigas sem uso (nem importam: faltam módulos) das que ficam em `src/comum/`; podem ser apagadas.
+  - [ ] Limpeza: ver "Código duplicado" no resumo do topo (as quatro `sere_*.py` de `src/automacao/` são antigas e sem uso).
 - [x] **`vinculos` (Vínculos dos funcionários)** — fusão de `servidores.py` + `coleta_servidores.py` + `capturar_matriculas.py` + `mapa_escriturarios.py` em `src/automacao/funcionarios_vinculos.py`: lista do SERE × servidores do RH (por nome, exato ou abreviado) → matrícula; o que não está entre os servidores recebe a flag **terceirizado** (`lista_rh` se consta na lista de terceirizados do RH, `nao_consta_no_rh` por inferência); para cada servidor casado, o **holerite** do mês confirma que o local de trabalho é esta escola (`na_escola`); homônimos são desempatados pelo holerite. Grava `funcionarios_matriculas.json` no formato antigo + campos novos. Ajustes à mão em `funcionarios_ajustes.json`. A tela de Funcionários mostra o selo "Terceirizado" / "Outro local", o filtro "Vínculo" e os cartões Terceirizados / A revisar.
   - [!] Só testado com respostas simuladas: o endpoint de RH estagiários (`…/estagiarios/1`) foi deduzido por analogia, e a leitura do holerite depende do layout atual do site do RH (posição dos campos).
   - [x] **Modos de consulta** (campo "Modo de consulta" da automação, `--modo` na CLI): **1. `sere`** (só refaz a lista do SERE), **2. `vincular`** (SERE × RH por nome → matrícula, **nome do cargo** e **data de admissão** de cada matrícula, sem holerite), **3. `homonimos`** (só quem tem mais de uma matrícula com o nome, ou só o nome/CPF de `--so-nome`: consulta o holerite de cada matrícula e vê qual está lotada aqui) e **`completo`** (o de sempre, padrão). Quem não é verificado no modo 3 mantém o resultado já gravado, desde que as matrículas do RH sejam as mesmas.
@@ -160,9 +206,9 @@ Guia: `docs/NOVO_SCRIPT.md`. Núcleo: `src/comum/opcoes_execucao.py` (opções) 
 - [x] Mensagens de "tela vazia" dizem o que fazer; resumo (raio, data da consulta) acima das tabelas.
 
 ### Depois (não iniciadas)
-- [ ] BUG-REM-001 (conferir o sucesso da rematrícula na página) — precisa confirmar no SERE real.
-- [ ] Registro de scripts com componentes compartilhados (turma, matriculados, transferidos, CGM, teste).
+- [ ] BUG-REM-001 (conferir o sucesso da rematrícula na página): precisa confirmar no SERE real.
 - [ ] Primeiro pareamento e envio reais do WhatsApp (gateway Docker já integrado; ver `docs/WHATSAPP.md`).
+- [x] ~~Registro de scripts com componentes compartilhados~~ (feito: item 11).
 
 ## Como executar
 
