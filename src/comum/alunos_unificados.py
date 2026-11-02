@@ -69,11 +69,11 @@ EQUIVALENTES: dict[str, str] = {
 
 # ── campos que só o completo traz: (grupo, chave, rótulo), na ordem de exibição ─────────────────────
 EXTRAS: list[tuple[str, str, str]] = [
-    ("Identificação (completo)", "cod_inep", "Código INEP"),
-    ("Identificação (completo)", "modalidade", "Modalidade"),
-    ("Identificação (completo)", "ultima_serie_cursada_texto", "Última série cursada"),
-    ("Identificação (completo)", "pais_origem", "País de origem"),
-    ("Identificação (completo)", "povo_indigena", "Povo indígena"),
+    ("Identificação", "cod_inep", "Código INEP"),
+    ("Identificação", "modalidade", "Modalidade"),
+    ("Identificação", "ultima_serie_cursada_texto", "Última série cursada"),
+    ("Nascimento e origem", "pais_origem", "País de origem"),
+    ("Nascimento e origem", "povo_indigena", "Povo indígena"),
     ("Documentação", "modelo_certidao", "Modelo da certidão"),
     ("Documentação", "tipo_certidao", "Tipo da certidão"),
     ("Documentação", "data_emissao_certidao", "Emissão da certidão"),
@@ -90,20 +90,20 @@ EXTRAS: list[tuple[str, str, str]] = [
     ("Documentação", "secao_eleitoral", "Seção eleitoral"),
     ("Documentação", "possui_passaporte", "Possui passaporte"),
     ("Documentação", "passaporte_rne_rnm", "Passaporte / RNE / RNM"),
-    ("Família (completo)", "rg_mae", "RG da mãe"),
-    ("Família (completo)", "uf_rg_mae", "UF do RG da mãe"),
-    ("Família (completo)", "cel_mae", "Celular da mãe"),
-    ("Família (completo)", "rg_pai", "RG do pai"),
-    ("Família (completo)", "uf_rg_pai", "UF do RG do pai"),
-    ("Família (completo)", "cpf_pai", "CPF do pai"),
-    ("Família (completo)", "cel_pai", "Celular do pai"),
-    ("Família (completo)", "filiacao3", "Filiação 3"),
-    ("Contato (completo)", "ramal", "Ramal"),
-    ("Endereço (completo)", "pais_residencia", "País de residência"),
-    ("Endereço (completo)", "zona_residencial", "Zona residencial"),
-    ("Endereço (completo)", "tipo_ident_geo", "Tipo de identificação geográfica"),
-    ("Endereço (completo)", "num_ident_geo", "Nº de identificação geográfica"),
-    ("Endereço (completo)", "localizacao_diferenciada", "Localização diferenciada"),
+    ("Família e responsável", "rg_mae", "RG da mãe"),
+    ("Família e responsável", "uf_rg_mae", "UF do RG da mãe"),
+    ("Família e responsável", "cel_mae", "Celular da mãe"),
+    ("Família e responsável", "rg_pai", "RG do pai"),
+    ("Família e responsável", "uf_rg_pai", "UF do RG do pai"),
+    ("Família e responsável", "cpf_pai", "CPF do pai"),
+    ("Família e responsável", "cel_pai", "Celular do pai"),
+    ("Família e responsável", "filiacao3", "Filiação 3"),
+    ("Contato", "ramal", "Ramal"),
+    ("Endereço", "pais_residencia", "País de residência"),
+    ("Endereço", "zona_residencial", "Zona residencial"),
+    ("Endereço", "tipo_ident_geo", "Tipo de identificação geográfica"),
+    ("Endereço", "num_ident_geo", "Nº de identificação geográfica"),
+    ("Endereço", "localizacao_diferenciada", "Localização diferenciada"),
     ("Programas sociais", "cad_unico", "CadÚnico"),
     ("Perfil socioeconômico", "renda_familiar", "Renda familiar"),
     ("Perfil socioeconômico", "tipo_moradia", "Tipo de moradia"),
@@ -119,6 +119,13 @@ EXTRAS: list[tuple[str, str, str]] = [
     ("Necessidades especiais", "atend_educacional", "Atendimento educacional especializado"),
     ("Observação", "observacao", "Observação"),
 ]
+
+
+def catalogo_extras() -> list[dict]:
+    """Todos os campos que só o cadastro completo traz ({grupo, rotulo}), na ordem de exibição.
+    A tela mostra cada um mesmo quando o aluno não tem o valor (aparece "—")."""
+    return [{"grupo": g, "rotulo": r} for g, _chave, r in EXTRAS]
+
 
 _VAZIOS = {"", "—", "-", "none", "null"}
 

@@ -405,6 +405,8 @@ def alunos_lista():
         "alunos": alunos_resp,
         "campos": campos,
         "total": len(alunos_resp),
+        "extras_catalogo": alunos_unificados.catalogo_extras(),   # campos do completo que a ficha mostra sempre (— se vazio)
+        "basico": {"gerado": (_dados_dir() / "alunos.json").exists()},
         "completo": {
             "gerado": (_dados_dir() / "alunos_completo.json").exists(),
             "atualizado_em": _mtime_formatado("alunos_completo.json"),

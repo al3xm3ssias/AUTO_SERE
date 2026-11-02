@@ -673,17 +673,26 @@ const alunosState = { search: "", sort: { col: "nome", dir: 1 }, filter: "todos"
 let _alunosCache = [];
 let _alunosCampos = [];
 let _alunosCompletoMeta = null;   // resumo do alunos_completo.json devolvido por /alunos/lista
+let _alunosBasicoGerado = true;   // alunos.json existe?
+let _alunosExtrasCatalogo = [];   // campos que só o cadastro completo traz: [{grupo, rotulo}]
 
-// Grupos de campos do cadastro completo (ver src.automacao.alunos.get_dados_aluno)
-// — nomes de campo exatamente como o SERE devolve.
+// Ficha do aluno: UMA tela com os dois cadastros. Cada grupo lista os campos do cadastro básico (alunos.json, nomes
+// exatamente como o SERE devolve; ver src.automacao.alunos.get_dados_aluno) e, logo depois, os do cadastro completo
+// (alunos_completo.json) que pertencem ao mesmo grupo (catálogo vindo de /alunos/lista, src.comum.alunos_unificados).
+// Todo campo aparece sempre; sem valor em nenhum dos dois cadastros, mostra "—".
 const AL_GROUPS = [
   { label: "Identificação", keys: ["Nome", "CGM", "RG", "CPF", "NIS Estudante", "Nacionalidade"] },
-  { label: "Nascimento", keys: ["Data Nascimento", "Sexo", "Cor", "Estado Civil", "Município Nascimento", "UF Nascimento"] },
+  { label: "Nascimento e origem", keys: ["Data Nascimento", "Sexo", "Cor", "Estado Civil", "Município Nascimento", "UF Nascimento"] },
+  { label: "Documentação", keys: ["Data Expedição RG", "Órgão Emissor", "UF RG"] },
+  { label: "Família e responsável", keys: ["Mãe", "Pai", "Responsável", "Parentesco", "CPF Responsável", "NIS Responsável"] },
+  { label: "Contato", keys: ["Celular Aluno", "Celular Responsável", "Telefone Residencial", "Telefone Comercial", "Email Aluno", "Email Responsável", "Email Google"] },
   { label: "Endereço", keys: ["Endereço", "Número", "Complemento", "Bairro", "CEP", "Cidade", "UF"] },
-  { label: "Responsável", keys: ["Mãe", "Pai", "Responsável", "Parentesco", "CPF Responsável", "NIS Responsável", "Celular Aluno", "Celular Responsável", "Telefone Residencial", "Telefone Comercial", "Email Aluno", "Email Responsável"] },
-  { label: "Escola", keys: ["Bolsa Família"] },
+  { label: "Programas sociais", keys: ["Bolsa Família"] },
+  { label: "Perfil socioeconômico", keys: [] },
+  { label: "Necessidades especiais", keys: [] },
+  { label: "Observação", keys: [] },
 ];
-const AL_SKIP_MAIN = new Set(["Email Google"]);
+const AL_VAZIO = "—";
 
 function _getField(aluno, ...chaves) {
   for (const k of chaves) {
@@ -713,65 +722,66 @@ function _cadastroBadge(aluno) {
   return badge("Básico", "bg-muted");
 }
 
+// Valor do cadastro básico por rótulo (sem diferenciar maiúsculas); "" se não houver.
+function _valorBasico(aluno, chave) {
+  const alvo = chave.toLowerCase();
+  const k = Object.keys(aluno).find((x) => !x.startsWith("_") && x.toLowerCase() === alvo);
+  const v = k === undefined ? "" : aluno[k];
+  const s = v === undefined || v === null ? "" : String(v).trim();
+  return s === AL_VAZIO ? "" : s;
+}
+
 function _buildDetailHTML(aluno) {
-  const assigned = new Set();
-  const turma = aluno._turma;
-  const situacao = aluno._situacao;
   const preenchidos = new Set(aluno._preenchido_completo || []);
   const divergentes = new Map((aluno._divergencias || []).map((d) => [d.rotulo, d]));
+  const extrasDoAluno = new Map((aluno._extras || []).map((e) => [e.rotulo, e.valor]));
+  const usados = new Set();
 
-  const campoHtml = (f, mono) => {
-    let tag = "";
-    let aviso = "";
-    if (preenchidos.has(f)) tag = _tagOrigem("completo", "cyan");
-    const div = divergentes.get(f);
-    if (div) {
-      tag += _tagOrigem("⚠ difere do completo", "amber");
-      aviso = ` title="${escaparHtml(`Cadastro completo: ${div.completo}`)}"`;
-    }
-    return `<div class="al-field-group"${aviso}><span class="al-field-lbl">${escaparHtml(f)}${tag}</span><span class="al-field-val${mono ? " mono" : ""}">${escaparHtml(aluno[f])}</span></div>`;
+  // Um campo da ficha: valor ou "—" quando nenhum dos cadastros tem.
+  const campoHtml = (rotulo, valor, tag, mono, aviso) => {
+    const vazio = !valor;
+    const val = vazio
+      ? `<span class="al-field-val al-vazio">${AL_VAZIO}</span>`
+      : `<span class="al-field-val${mono ? " mono" : ""}">${escaparHtml(valor)}</span>`;
+    return `<div class="al-field-group"${aviso || ""}><span class="al-field-lbl">${escaparHtml(rotulo)}${tag || ""}</span>${val}</div>`;
   };
 
   const gruposHtml = AL_GROUPS.map((grupo) => {
-    const campos = _alunosCampos.filter((f) => grupo.keys.some((k) => f.toLowerCase() === k.toLowerCase()));
-    const itens = campos.filter((f) => {
-      const v = aluno[f];
-      return v !== undefined && v !== null && String(v).trim() && String(v).trim() !== "—";
+    let itens = "";
+    grupo.keys.forEach((chave) => {
+      const valor = _valorBasico(aluno, chave);
+      // chave real no cadastro (para não repetir em "Outros")
+      Object.keys(aluno).filter((x) => x.toLowerCase() === chave.toLowerCase()).forEach((x) => usados.add(x));
+      let tag = "";
+      let aviso = "";
+      if (valor && preenchidos.has(chave)) tag = _tagOrigem("completo", "cyan");
+      const div = divergentes.get(chave);
+      if (div) {
+        tag += _tagOrigem("⚠ difere do completo", "amber");
+        aviso = ` title="${escaparHtml(`Cadastro completo: ${div.completo}`)}"`;
+      }
+      itens += campoHtml(chave, valor, tag, false, aviso);
     });
-    itens.forEach((f) => assigned.add(f));
-
-    let extra = "";
-    if (grupo.label === "Escola") {
-      if (turma && turma !== "—") {
-        extra += `<div class="al-field-group"><span class="al-field-lbl">Turma ${_tagOrigem("turmas.json", "cyan")}</span><span class="al-field-val">${escaparHtml(turma)}</span></div>`;
-      }
-      if (situacao && situacao !== "—") {
-        const sitS = String(situacao).toLowerCase();
-        const cor = sitS.includes("matriculado") ? "var(--lime)" : sitS.includes("transf") ? "var(--rose)" : "var(--txt2)";
-        extra += `<div class="al-field-group"><span class="al-field-lbl">Situação ${_tagOrigem("turmas.json", "cyan")}</span><span class="al-field-val" style="color:${cor}; font-weight:700">${escaparHtml(situacao)}</span></div>`;
-      }
-    }
-    if (!itens.length && !extra) return "";
-    return `<div class="al-section-ttl">${escaparHtml(grupo.label)}</div>` + itens.map((f) => campoHtml(f, false)).join("") + extra;
+    _alunosExtrasCatalogo.filter((e) => e.grupo === grupo.label).forEach((e) => {
+      const valor = extrasDoAluno.get(e.rotulo) || "";
+      itens += campoHtml(e.rotulo, valor, valor ? _tagOrigem("completo", "cyan") : "", false, "");
+    });
+    return itens ? `<div class="al-section-ttl">${escaparHtml(grupo.label)}</div>${itens}` : "";
   }).join("");
 
-  // Campos que só o cadastro completo (alunos_completo.json) traz, agrupados como vieram.
-  const extras = aluno._extras || [];
-  const ordemGrupos = [];
-  extras.forEach((e) => { if (!ordemGrupos.includes(e.grupo)) ordemGrupos.push(e.grupo); });
-  const extrasHtml = ordemGrupos.map((g) =>
-    `<div class="al-section-ttl">${escaparHtml(g)}</div>` +
-    extras.filter((e) => e.grupo === g).map((e) =>
-      `<div class="al-field-group"><span class="al-field-lbl">${escaparHtml(e.rotulo)}${_tagOrigem("completo", "cyan")}</span><span class="al-field-val">${escaparHtml(e.valor)}</span></div>`
-    ).join("")
-  ).join("");
+  // Escola: turma e situação vêm de turmas.json
+  const turma = aluno._turma && aluno._turma !== AL_VAZIO ? aluno._turma : "";
+  const situacao = aluno._situacao && aluno._situacao !== AL_VAZIO ? aluno._situacao : "";
+  const sitS = String(situacao).toLowerCase();
+  const corSit = sitS.includes("matriculado") ? "var(--lime)" : sitS.includes("transf") ? "var(--rose)" : "var(--txt2)";
+  const escolaHtml = `<div class="al-section-ttl">Escola</div>` +
+    `<div class="al-field-group"><span class="al-field-lbl">Turma ${_tagOrigem("turmas.json", "cyan")}</span>${turma ? `<span class="al-field-val">${escaparHtml(turma)}</span>` : `<span class="al-field-val al-vazio">${AL_VAZIO}</span>`}</div>` +
+    `<div class="al-field-group"><span class="al-field-lbl">Situação ${_tagOrigem("turmas.json", "cyan")}</span>${situacao ? `<span class="al-field-val" style="color:${corSit}; font-weight:700">${escaparHtml(situacao)}</span>` : `<span class="al-field-val al-vazio">${AL_VAZIO}</span>`}</div>`;
 
-  const resto = _alunosCampos.filter((f) =>
-    !assigned.has(f) && !AL_SKIP_MAIN.has(f) &&
-    aluno[f] !== undefined && aluno[f] !== null && String(aluno[f]).trim() && String(aluno[f]).trim() !== "—"
-  );
+  // Campos do cadastro básico que não pertencem a nenhum grupo acima (só os preenchidos)
+  const resto = _alunosCampos.filter((f) => !usados.has(f) && _valorBasico(aluno, f));
   const restoHtml = resto.length
-    ? `<div class="al-section-ttl">Outros</div>` + resto.map((f) => campoHtml(f, true)).join("")
+    ? `<div class="al-section-ttl">Outros</div>` + resto.map((f) => campoHtml(f, _valorBasico(aluno, f), "", true, "")).join("")
     : "";
 
   // Valores diferentes nos dois cadastros: nenhum é sobrescrito; quem usa a tela confere.
@@ -781,18 +791,24 @@ function _buildDetailHTML(aluno) {
       divs.map((d) => `<div class="al-field-group"><span class="al-field-lbl">${escaparHtml(d.rotulo)}</span><span class="al-field-val">Básico: ${escaparHtml(d.basico)}<br>Completo: ${escaparHtml(d.completo)}</span></div>`).join("")
     : "";
 
-  let origemHtml = "";
-  if (aluno._cadastro === "completo" || aluno._cadastro === "so_completo") {
-    const quando = aluno._coleta_completo ? String(aluno._coleta_completo).replace("T", " ") : "data não registrada";
-    const nota = aluno._cadastro === "so_completo" ? " Este aluno ainda não tem o cadastro básico (rode a automação Alunos no modo Básico)." : "";
-    origemHtml = `<div class="al-section-ttl">Origem dos dados</div><div class="al-field-group" style="grid-column:1/-1"><span class="al-field-val mono">Cadastro completo coletado em ${escaparHtml(quando)}.${escaparHtml(nota)}</span></div>`;
-  } else if (_alunosCompletoMeta && !_alunosCompletoMeta.gerado) {
-    origemHtml = `<div class="al-section-ttl">Origem dos dados</div><div class="al-field-group" style="grid-column:1/-1"><span class="al-field-val mono">Só o cadastro básico. Para ver os demais campos, rode Automações → Alunos no modo Completo.</span></div>`;
+  // De onde veio cada parte da ficha (e o que falta)
+  const notas = [];
+  if (aluno._cadastro === "basico") {
+    notas.push(_alunosCompletoMeta && !_alunosCompletoMeta.gerado
+      ? "O cadastro completo ainda não foi coletado: os campos dele aparecem como —. Rode Automações → Alunos no modo Completo."
+      : "Este aluno ainda não foi coletado no modo Completo: os campos do cadastro completo aparecem como —.");
   } else {
-    origemHtml = `<div class="al-section-ttl">Origem dos dados</div><div class="al-field-group" style="grid-column:1/-1"><span class="al-field-val mono">Só o cadastro básico; este aluno ainda não foi coletado no modo Completo.</span></div>`;
+    const quando = aluno._coleta_completo ? String(aluno._coleta_completo).replace("T", " ") : "data não registrada";
+    notas.push(`Cadastro completo coletado em ${quando}.`);
+    if (aluno._cadastro === "so_completo") {
+      notas.push(_alunosBasicoGerado
+        ? "Este aluno ainda não tem o cadastro básico (rode a automação Alunos no modo Básico): os campos dele aparecem como — quando o completo não os tem."
+        : "O cadastro básico (alunos.json) ainda não existe: os campos dele aparecem como — quando o completo não os tem.");
+    }
   }
+  const origemHtml = `<div class="al-section-ttl">Origem dos dados</div><div class="al-field-group" style="grid-column:1/-1"><span class="al-field-val mono">${escaparHtml(notas.join(" "))}</span></div>`;
 
-  return gruposHtml + extrasHtml + restoHtml + divHtml + origemHtml;
+  return gruposHtml + escolaHtml + restoHtml + divHtml + origemHtml;
 }
 
 function renderAlunosRows() {
@@ -873,7 +889,10 @@ function _renderAlunosInfo() {
   const total = _alunosCache.length;
   const comCompleto = _alunosCache.filter((a) => a._cadastro !== "basico").length;
   let txt;
-  if (!m.gerado) {
+  if (!_alunosBasicoGerado) {
+    txt = "O cadastro básico (alunos.json) ainda não existe: os campos dele aparecem como — quando o cadastro completo não os tem. " +
+      (m.gerado ? `Cadastro completo coletado para ${comCompleto} aluno(s).` : "Rode Automações → Alunos para coletar.");
+  } else if (!m.gerado) {
     txt = "Cadastro completo ainda não coletado: a tabela mostra só o cadastro básico. Rode Automações → Alunos no modo Completo para ver os demais campos.";
   } else {
     txt = `Cadastro completo coletado para ${comCompleto} de ${total} aluno(s)` +
@@ -894,6 +913,8 @@ async function carregarAlunos() {
     _alunosCache = data.alunos || [];
     _alunosCampos = data.campos || [];
     _alunosCompletoMeta = data.completo || null;
+    _alunosBasicoGerado = !(data.basico && data.basico.gerado === false);
+    _alunosExtrasCatalogo = data.extras_catalogo || [];
     _renderAlunosInfo();
   } catch (e) {
     cnt.textContent = "—";

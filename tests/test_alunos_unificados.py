@@ -154,3 +154,25 @@ def test_so_o_completo_existe_e_a_tela_ainda_lista(dados, c):
     gravar(dados, "alunos_completo.json", COMPLETO)
     r = c.get("/web/api/alunos/lista").get_json()
     assert r["total"] == 2 and all(a["_cadastro"] == "so_completo" for a in r["alunos"])
+
+
+# ───────────── ficha única: todos os campos aparecem, com "—" onde não há dado ─────────────
+
+def test_a_resposta_traz_o_catalogo_dos_campos_do_completo_e_se_o_basico_existe(dados, c):
+    gravar(dados, "alunos_completo.json", COMPLETO)
+    r = c.get("/web/api/alunos/lista").get_json()
+    assert r["basico"]["gerado"] is False                                  # só o completo existe
+    rotulos = [e["rotulo"] for e in r["extras_catalogo"]]
+    assert "Código INEP" in rotulos and "Tipo de moradia" in rotulos and "Deficiências" in rotulos
+    assert {e["grupo"] for e in r["extras_catalogo"]} >= {"Identificação", "Documentação", "Família e responsável",
+                                                         "Perfil socioeconômico", "Necessidades especiais", "Observação"}
+    gravar(dados, "alunos.json", BASICO)
+    assert c.get("/web/api/alunos/lista").get_json()["basico"]["gerado"] is True
+
+
+def test_os_dois_html_da_tela_de_alunos_existem_e_a_pagina_traz_a_tela_unica(c):
+    raiz = Path(__file__).resolve().parent.parent / "src" / "web" / "templates" / "partials"
+    assert (raiz / "alunos_cards.html").exists() and (raiz / "alunos_completo_cards.html").exists()
+    pagina = c.get("/").get_data(as_text=True)
+    assert pagina.count('id="alunos-tbody"') == 1                          # a tela aparece uma vez só
+    assert 'data-af="completo"' in pagina and 'id="alunos-info"' in pagina and 'data-sort="cadastro"' in pagina

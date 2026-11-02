@@ -841,6 +841,7 @@ tbody td{padding:11px 14px;vertical-align:middle}
 .al-field-group{display:flex;flex-direction:column;gap:3px}
 .al-field-lbl{font-family:var(--mono);font-size:.6rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--txt3)}
 .al-field-val{font-size:.8rem;color:var(--txt);font-weight:500;word-break:break-word;line-height:1.4}
+.al-field-val.al-vazio{color:var(--txt3);font-weight:400}
 .al-field-val.mono{font-family:var(--mono);font-size:.78rem;color:var(--txt2)}
 .al-section-ttl{
   grid-column:1/-1;

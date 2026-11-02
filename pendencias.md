@@ -84,7 +84,6 @@ Uso real, definido em 2026-11-02: (1) escrever **para a escola de origem**, na h
 - [ ] Apagar `src/automacao/sere_api.py`, `sere_limpeza.py`, `sere_upload.py` e `sere_utils.py`: são versões antigas e nenhum arquivo as importa (o projeto usa as de `src/comum/`)
 - [ ] Apagar `src/comum/executar_{aluno,analisa,documento,espec,transferidos,validar}.py`: são cópias idênticas das de `src/automacao/`, **que são as usadas** (o `registro_scripts.py` importa de lá). Atenção: não apagar as de `src/automacao/`. O `src/comum/executar_limpeza.py` só existe lá e é usado, fica
 - [ ] Apagar `src/automacao/test_gerar_pastas.py` (idêntico a `tests/test_gerar_pastas.py`)
-- [ ] Apagar `src/web/templates/partials/alunos_completo_cards.html` (cópia idêntica de `alunos_cards.html`, não usada)
 
 ---
 
@@ -102,7 +101,7 @@ Uso real, definido em 2026-11-02: (1) escrever **para a escola de origem**, na h
 ## 5. Decidido
 
 - [x] **10g**: o wizard (1ª execução) fica só com o modo **básico** de Alunos, porque o completo demora mais; o completo segue em Automações → Alunos
-- [x] **10h**: a tela Alunos une `alunos.json` e `alunos_completo.json` (2026-11-02)
+- [x] **10h**: a tela Alunos une `alunos.json` e `alunos_completo.json` numa ficha única, com todos os campos sempre visíveis e "—" onde falta dado (2026-11-02). O HTML fica todo em `alunos_completo_cards.html` (não apagar); `alunos_cards.html` só o inclui
 - [x] **Funcionários completo salva aos poucos** (2026-11-02): grava a cada 5 cadastros, não encolhe o arquivo no meio da coleta e, se parar (cancelada, erro ou queda), avisa no log e na tela de Funcionários
 
 ---
