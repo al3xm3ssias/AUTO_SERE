@@ -3,7 +3,7 @@
 Checklist vivo do desenvolvimento. Legenda: `[ ]` pendente · `[-]` em andamento · `[x]` concluído **e testado** · `[!]` bloqueado.
 Onde o teste só pôde usar dados ou páginas simuladas (sem acesso ao SERE, SISREG, pré-matrícula e WhatsApp reais), isso está escrito na tarefa.
 
-Última atualização: 2026-10-31.
+Última atualização: 2026-11-02.
 
 ## Análise do estado inicial (resumo)
 
@@ -58,7 +58,7 @@ Onde o teste só pôde usar dados ou páginas simuladas (sem acesso ao SERE, SIS
   - [x] 10f. O backup pedia uma "pasta de destino" que era ignorada (ele sempre vai para `dados/backup`); o campo foi removido.
   - [!] As coletas reais no SERE só foram testadas com versões simuladas (as funções `*_via_login` são trocadas por falsas nos testes).
   - [ ] 10g. O passo "Alunos" do wizard continua só no modo básico; decidir se oferece também o completo.
-  - [ ] 10h. Nenhuma tela lê `alunos_completo.json` ainda (só é gerado); definir quem vai usá-lo.
+  - [x] 10h. A tela **Alunos** agora une `alunos.json` e `alunos_completo.json` pelo CGM (`src/comum/alunos_unificados.py`, rota `/alunos/lista`): coluna "Cadastro" (Completo / Básico / Só completo), filtros "Cadastro completo" e "Só básico", resumo sob os filtros, campos extras do completo no detalhe (documentação, família, socioeconômico, deficiências, observação), campo vazio no básico completado pelo completo e ⚠ quando os dois têm valores diferentes (nenhum é sobrescrito). Testado (`tests/test_alunos_unificados.py`, 11 testes) com dados simulados; falta olhar com os arquivos reais da escola.
 
 ### Registro de scripts e componentes compartilhados (pedido de 2026-10-10)
 Guia: `docs/NOVO_SCRIPT.md`. Núcleo: `src/comum/opcoes_execucao.py` (opções) e `src/comum/registro_scripts.py` (registro).

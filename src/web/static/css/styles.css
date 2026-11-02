@@ -849,6 +849,7 @@ tbody td{padding:11px 14px;vertical-align:middle}
   border-bottom:1px solid var(--border);padding-bottom:6px;margin-top:4px;
 }
 .al-detail-row td{padding:0}
+.al-info{margin-top:10px;font-size:.75rem;color:var(--txt3);line-height:1.4}
 
 /* ══════════════════════════════════════════════════════════════════════
    FREQUÊNCIA

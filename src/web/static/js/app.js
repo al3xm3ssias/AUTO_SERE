@@ -672,6 +672,7 @@ async function carregarTurmas() {
 const alunosState = { search: "", sort: { col: "nome", dir: 1 }, filter: "todos" };
 let _alunosCache = [];
 let _alunosCampos = [];
+let _alunosCompletoMeta = null;   // resumo do alunos_completo.json devolvido por /alunos/lista
 
 // Grupos de campos do cadastro completo (ver src.automacao.alunos.get_dados_aluno)
 // — nomes de campo exatamente como o SERE devolve.
@@ -701,10 +702,35 @@ function _situacaoBadge(situacao) {
   return badge(situacao || "—", "bg-muted");
 }
 
+// Selo de origem ao lado do rótulo: de onde veio o valor mostrado.
+function _tagOrigem(texto, cor) {
+  return ` <span style="color:var(--${cor}); font-size:.6rem">· ${texto}</span>`;
+}
+
+function _cadastroBadge(aluno) {
+  if (aluno._cadastro === "completo") return badge("Completo", "bg-cyan");
+  if (aluno._cadastro === "so_completo") return badge("Só completo", "bg-violet");
+  return badge("Básico", "bg-muted");
+}
+
 function _buildDetailHTML(aluno) {
   const assigned = new Set();
   const turma = aluno._turma;
   const situacao = aluno._situacao;
+  const preenchidos = new Set(aluno._preenchido_completo || []);
+  const divergentes = new Map((aluno._divergencias || []).map((d) => [d.rotulo, d]));
+
+  const campoHtml = (f, mono) => {
+    let tag = "";
+    let aviso = "";
+    if (preenchidos.has(f)) tag = _tagOrigem("completo", "cyan");
+    const div = divergentes.get(f);
+    if (div) {
+      tag += _tagOrigem("⚠ difere do completo", "amber");
+      aviso = ` title="${escaparHtml(`Cadastro completo: ${div.completo}`)}"`;
+    }
+    return `<div class="al-field-group"${aviso}><span class="al-field-lbl">${escaparHtml(f)}${tag}</span><span class="al-field-val${mono ? " mono" : ""}">${escaparHtml(aluno[f])}</span></div>`;
+  };
 
   const gruposHtml = AL_GROUPS.map((grupo) => {
     const campos = _alunosCampos.filter((f) => grupo.keys.some((k) => f.toLowerCase() === k.toLowerCase()));
@@ -717,28 +743,56 @@ function _buildDetailHTML(aluno) {
     let extra = "";
     if (grupo.label === "Escola") {
       if (turma && turma !== "—") {
-        extra += `<div class="al-field-group"><span class="al-field-lbl">Turma <span style="color:var(--cyan); font-size:.6rem">· turmas.json</span></span><span class="al-field-val">${turma}</span></div>`;
+        extra += `<div class="al-field-group"><span class="al-field-lbl">Turma ${_tagOrigem("turmas.json", "cyan")}</span><span class="al-field-val">${escaparHtml(turma)}</span></div>`;
       }
       if (situacao && situacao !== "—") {
         const sitS = String(situacao).toLowerCase();
         const cor = sitS.includes("matriculado") ? "var(--lime)" : sitS.includes("transf") ? "var(--rose)" : "var(--txt2)";
-        extra += `<div class="al-field-group"><span class="al-field-lbl">Situação <span style="color:var(--cyan); font-size:.6rem">· turmas.json</span></span><span class="al-field-val" style="color:${cor}; font-weight:700">${situacao}</span></div>`;
+        extra += `<div class="al-field-group"><span class="al-field-lbl">Situação ${_tagOrigem("turmas.json", "cyan")}</span><span class="al-field-val" style="color:${cor}; font-weight:700">${escaparHtml(situacao)}</span></div>`;
       }
     }
     if (!itens.length && !extra) return "";
-    return `<div class="al-section-ttl">${grupo.label}</div>` +
-      itens.map((f) => `<div class="al-field-group"><span class="al-field-lbl">${f}</span><span class="al-field-val">${aluno[f]}</span></div>`).join("") + extra;
+    return `<div class="al-section-ttl">${escaparHtml(grupo.label)}</div>` + itens.map((f) => campoHtml(f, false)).join("") + extra;
   }).join("");
+
+  // Campos que só o cadastro completo (alunos_completo.json) traz, agrupados como vieram.
+  const extras = aluno._extras || [];
+  const ordemGrupos = [];
+  extras.forEach((e) => { if (!ordemGrupos.includes(e.grupo)) ordemGrupos.push(e.grupo); });
+  const extrasHtml = ordemGrupos.map((g) =>
+    `<div class="al-section-ttl">${escaparHtml(g)}</div>` +
+    extras.filter((e) => e.grupo === g).map((e) =>
+      `<div class="al-field-group"><span class="al-field-lbl">${escaparHtml(e.rotulo)}${_tagOrigem("completo", "cyan")}</span><span class="al-field-val">${escaparHtml(e.valor)}</span></div>`
+    ).join("")
+  ).join("");
 
   const resto = _alunosCampos.filter((f) =>
     !assigned.has(f) && !AL_SKIP_MAIN.has(f) &&
     aluno[f] !== undefined && aluno[f] !== null && String(aluno[f]).trim() && String(aluno[f]).trim() !== "—"
   );
   const restoHtml = resto.length
-    ? `<div class="al-section-ttl">Outros</div>` + resto.map((f) => `<div class="al-field-group"><span class="al-field-lbl">${f}</span><span class="al-field-val mono">${aluno[f]}</span></div>`).join("")
+    ? `<div class="al-section-ttl">Outros</div>` + resto.map((f) => campoHtml(f, true)).join("")
     : "";
 
-  return gruposHtml + restoHtml;
+  // Valores diferentes nos dois cadastros: nenhum é sobrescrito; quem usa a tela confere.
+  const divs = aluno._divergencias || [];
+  const divHtml = divs.length
+    ? `<div class="al-section-ttl" style="color:var(--amber)">Diferenças entre o cadastro básico e o completo</div>` +
+      divs.map((d) => `<div class="al-field-group"><span class="al-field-lbl">${escaparHtml(d.rotulo)}</span><span class="al-field-val">Básico: ${escaparHtml(d.basico)}<br>Completo: ${escaparHtml(d.completo)}</span></div>`).join("")
+    : "";
+
+  let origemHtml = "";
+  if (aluno._cadastro === "completo" || aluno._cadastro === "so_completo") {
+    const quando = aluno._coleta_completo ? String(aluno._coleta_completo).replace("T", " ") : "data não registrada";
+    const nota = aluno._cadastro === "so_completo" ? " Este aluno ainda não tem o cadastro básico (rode a automação Alunos no modo Básico)." : "";
+    origemHtml = `<div class="al-section-ttl">Origem dos dados</div><div class="al-field-group" style="grid-column:1/-1"><span class="al-field-val mono">Cadastro completo coletado em ${escaparHtml(quando)}.${escaparHtml(nota)}</span></div>`;
+  } else if (_alunosCompletoMeta && !_alunosCompletoMeta.gerado) {
+    origemHtml = `<div class="al-section-ttl">Origem dos dados</div><div class="al-field-group" style="grid-column:1/-1"><span class="al-field-val mono">Só o cadastro básico. Para ver os demais campos, rode Automações → Alunos no modo Completo.</span></div>`;
+  } else {
+    origemHtml = `<div class="al-section-ttl">Origem dos dados</div><div class="al-field-group" style="grid-column:1/-1"><span class="al-field-val mono">Só o cadastro básico; este aluno ainda não foi coletado no modo Completo.</span></div>`;
+  }
+
+  return gruposHtml + extrasHtml + restoHtml + divHtml + origemHtml;
 }
 
 function renderAlunosRows() {
@@ -748,9 +802,12 @@ function renderAlunosRows() {
     const sit = _getSituacao(a).toLowerCase();
     if (alunosState.filter === "matriculado" && !sit.includes("matriculado")) return false;
     if (alunosState.filter === "transferido" && !sit.includes("transf")) return false;
+    if (alunosState.filter === "completo" && a._cadastro === "basico") return false;
+    if (alunosState.filter === "basico" && a._cadastro !== "basico") return false;
     if (!q) return true;
     return _alunosCampos.some((f) => String(a[f] || "").toLowerCase().includes(q)) ||
-      _getTurma(a).toLowerCase().includes(q);
+      _getTurma(a).toLowerCase().includes(q) ||
+      (a._extras || []).some((e) => String(e.valor || "").toLowerCase().includes(q));
   });
 
   const { col, dir } = alunosState.sort;
@@ -759,6 +816,7 @@ function renderAlunosRows() {
     if (col === "nome") { va = _getField(a, "Nome"); vb = _getField(b, "Nome"); }
     else if (col === "cgm") { va = _getField(a, "CGM"); vb = _getField(b, "CGM"); }
     else if (col === "turma") { va = _getTurma(a); vb = _getTurma(b); }
+    else if (col === "cadastro") { va = String(a._cadastro || ""); vb = String(b._cadastro || ""); }
     else { va = _getSituacao(a); vb = _getSituacao(b); }
     return va.localeCompare(vb) * dir;
   });
@@ -788,9 +846,10 @@ function renderAlunosRows() {
       <td class="td-mono">${cgm}</td>
       <td class="td-mono">${turma}</td>
       <td>${_situacaoBadge(situacao)}</td>
+      <td>${_cadastroBadge(a)}${(a._divergencias || []).length ? " " + badge("⚠", "bg-amber") : ""}</td>
     </tr>
     <tr class="al-detail-row" id="${rowId}">
-      <td colspan="5"><div class="al-detail-inner">${_buildDetailHTML(a)}</div></td>
+      <td colspan="6"><div class="al-detail-inner">${_buildDetailHTML(a)}</div></td>
     </tr>`;
   }).join("");
 
@@ -805,6 +864,27 @@ function renderAlunosRows() {
   });
 }
 
+// Linha de resumo sob os filtros: quantos alunos já têm o cadastro completo (alunos_completo.json).
+function _renderAlunosInfo() {
+  const el = document.getElementById("alunos-info");
+  if (!el) return;
+  const m = _alunosCompletoMeta;
+  if (!m) { el.style.display = "none"; return; }
+  const total = _alunosCache.length;
+  const comCompleto = _alunosCache.filter((a) => a._cadastro !== "basico").length;
+  let txt;
+  if (!m.gerado) {
+    txt = "Cadastro completo ainda não coletado: a tabela mostra só o cadastro básico. Rode Automações → Alunos no modo Completo para ver os demais campos.";
+  } else {
+    txt = `Cadastro completo coletado para ${comCompleto} de ${total} aluno(s)` +
+      (m.atualizado_em ? ` · arquivo atualizado em ${m.atualizado_em}` : "") +
+      (m.so_completo ? ` · ${m.so_completo} só com cadastro completo` : "") +
+      (m.com_divergencia ? ` · ${m.com_divergencia} com diferenças entre os cadastros (⚠)` : "") + ".";
+  }
+  el.textContent = txt;
+  el.style.display = "";
+}
+
 async function carregarAlunos() {
   const cnt = document.getElementById("alunos-cnt");
   cnt.textContent = "Carregando…";
@@ -813,10 +893,12 @@ async function carregarAlunos() {
     const data = await apiGet("/alunos/lista");
     _alunosCache = data.alunos || [];
     _alunosCampos = data.campos || [];
+    _alunosCompletoMeta = data.completo || null;
+    _renderAlunosInfo();
   } catch (e) {
     cnt.textContent = "—";
     document.getElementById("alunos-tbody").innerHTML =
-      `<tr><td colspan="5" style="text-align:center; color:var(--txt3); padding:24px;">Endpoint /alunos/lista ainda não conectado.</td></tr>`;
+      `<tr><td colspan="6" style="text-align:center; color:var(--txt3); padding:24px;">Endpoint /alunos/lista ainda não conectado.</td></tr>`;
     console.warn("Alunos: endpoint ainda não conectado", e);
     return;
   }

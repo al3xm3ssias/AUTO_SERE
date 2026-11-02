@@ -44,6 +44,7 @@ from flask import Blueprint, jsonify, request
 
 from src.comum import paths as _paths
 from src.comum.execucao_gui import ExecucaoEmBackground, StatusExecucao
+from src.comum import alunos_unificados
 from src.comum import configuracao as _config
 from src.comum import cep_consulta as _cep
 from src.comum import escola as _escola
@@ -331,18 +332,19 @@ def turmas_lista():
 @api_bp.route("/alunos/lista")
 def alunos_lista():
     """
-    Lê alunos.json (cadastro completo — gerado por
-    src.automacao.alunos.coletar_cadastro_completo_alunos: Nome, CGM, RG,
-    CPF, endereço, responsável, etc.) cruzado com turmas.json (situação e
-    turma mais atuais, já que alunos.json não é recoletado com a mesma
-    frequência). Mesma lógica de DATA.alunos + DATA.turmas_cgm_map do
-    protótipo index.html: por CGM, turmas.json vence para _turma/_situacao.
+    Visão conjunta dos alunos: une alunos.json (cadastro básico, coletado por src.automacao.alunos) e
+    alunos_completo.json (cadastro completo, de src.automacao.alunos_completo) pelo CGM, e cruza com
+    turmas.json (situação e turma mais atuais, já que os cadastros não são recoletados com a mesma
+    frequência). Mesma lógica de DATA.alunos + DATA.turmas_cgm_map do protótipo index.html: por CGM,
+    turmas.json vence para _turma/_situacao.
 
-    Devolve os alunos com TODOS os campos originais do cadastro (para o
-    detalhe expansível no front) mais _turma/_situacao já resolvidos.
+    Devolve os alunos com TODOS os campos originais do cadastro básico (para o detalhe expansível no front),
+    mais _turma/_situacao já resolvidos e o que vem do cadastro completo (ver src.comum.alunos_unificados:
+    _cadastro, _extras, _divergencias...). Um aluno que só tem cadastro completo também aparece.
     """
     alunos = _carregar_json("alunos.json", [])
     turmas = _carregar_json("turmas.json", {})
+    completo = alunos_unificados.indexar_completo(_carregar_json("alunos_completo.json", {}))
 
     # Um CGM pode ter MAIS DE UM registro em turmas.json (aluno transferido que
     # retornou: Transferido + Matriculado). Guarda todos e casa cada cadastro de
@@ -355,12 +357,7 @@ def alunos_lista():
                 continue
             registros_por_cgm.setdefault(cgm, []).append({**aluno, "_turma": nome_turma})
 
-    usados: set[int] = set()
-    alunos_resp = []
-    for aluno in alunos:
-        cgm = str(aluno.get("CGM", aluno.get("cgm", ""))).strip()
-        reg = casar_com_turmas(aluno, registros_por_cgm.get(cgm, []), usados)
-        aluno_completo = dict(aluno)
+    def _aplicar_turma(aluno_completo: dict, reg: Optional[dict]) -> None:
         if reg:
             aluno_completo["_situacao"] = reg.get("Situação", reg.get("Situacao", "—"))
             aluno_completo["_turma"] = reg["_turma"]
@@ -370,17 +367,51 @@ def alunos_lista():
         else:
             aluno_completo["_situacao"] = "—"
             aluno_completo["_turma"] = "—"
+
+    usados: set[int] = set()
+    cgms_basicos: set[str] = set()
+    alunos_resp = []
+    for aluno in alunos if isinstance(alunos, list) else []:
+        cgm = str(aluno.get("CGM", aluno.get("cgm", ""))).strip()
+        cgms_basicos.add(cgm)
+        reg = casar_com_turmas(aluno, registros_por_cgm.get(cgm, []), usados)
+        aluno_completo = dict(aluno)
+        _aplicar_turma(aluno_completo, reg)
+        alunos_unificados.unificar(aluno_completo, completo.get(cgm))
         alunos_resp.append(aluno_completo)
 
-    campos = list(alunos_resp[0].keys()) if alunos_resp else []
-    # _situacao/_turma são metadados de cruzamento, não campos de cadastro —
-    # não entram na lista de campos do cadastro (grupos de detalhe no front).
-    campos = [c for c in campos if not c.startswith("_")]
+    # Quem tem cadastro completo mas ainda não tem o básico (ex.: só rodou o modo completo).
+    so_completo = 0
+    for cgm, reg_completo in completo.items():
+        if cgm in cgms_basicos:
+            continue
+        aluno_novo = alunos_unificados.aluno_so_completo(cgm, reg_completo)
+        _aplicar_turma(aluno_novo, casar_com_turmas(aluno_novo, registros_por_cgm.get(cgm, []), usados))
+        alunos_resp.append(aluno_novo)
+        so_completo += 1
+
+    # _situacao/_turma/_cadastro... são metadados de cruzamento, não campos de cadastro — não entram na lista de
+    # campos do cadastro (grupos de detalhe no front). A lista é a união (na ordem em que aparecem), pois um aluno
+    # que só tem o cadastro completo pode trazer campos que o primeiro não tem.
+    campos: list[str] = []
+    vistos: set[str] = set()
+    for a in alunos_resp:
+        for c in a:
+            if not c.startswith("_") and c not in vistos:
+                vistos.add(c)
+                campos.append(c)
 
     return jsonify({
         "alunos": alunos_resp,
         "campos": campos,
         "total": len(alunos_resp),
+        "completo": {
+            "gerado": (_dados_dir() / "alunos_completo.json").exists(),
+            "atualizado_em": _mtime_formatado("alunos_completo.json"),
+            "total": len(completo),
+            "so_completo": so_completo,
+            "com_divergencia": sum(1 for a in alunos_resp if a.get("_divergencias")),
+        },
     })
 
 

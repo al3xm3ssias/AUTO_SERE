@@ -49,7 +49,7 @@ Quase tudo foi testado só com navegador ou dados simulados.
 
 ### Alunos
 - [ ] **10g**: passo "Alunos" do wizard só no modo básico; decidir se oferece o completo
-- [ ] **10h**: nenhuma tela lê `alunos_completo.json`; definir quem vai usá-lo
+- [x] **10h**: tela Alunos une `alunos.json` + `alunos_completo.json` (feito 2026-11-02); falta conferir com os arquivos reais e decidir o que fazer com as divergências (⚠)
 
 ### Funcionários
 - [ ] Modo completo só grava no fim: cancelar ou cair no meio perde a coleta toda (salvar aos poucos, como `alunos_completo`)
