@@ -318,6 +318,26 @@ def test_rota_troca_e_a_tela_ja_le_o_ano_novo(web, amb):
     assert web.get("/web/api/alunos/lista").get_json()["total"] == 2
 
 
+def test_rota_troca_de_ano_troca_tambem_o_calendario(web, amb):
+    """O calendário é por ano letivo: voltando para 2025 aparece o de 2025 (só leitura); voltando a 2026, o de 2026."""
+    cal = "/web/api/calendario"
+    ev = web.post(f"{cal}/eventos", json={"nome": "Recesso 2026", "tipo": "recesso", "inicio": "2026-10-13"})
+    assert ev.status_code == 201 and (amb / "dados" / "2026" / "calendario.json").exists()
+    (amb / "dados" / "2025" / "calendario.json").write_text(json.dumps({"eventos": [
+        {"id": "z", "nome": "Recesso 2025", "tipo": "recesso", "inicio": "2025-10-14", "fim": "2025-10-14"}], "periodos": []}), encoding="utf-8")
+
+    assert [e["nome"] for e in web.get(f"{cal}/dados").get_json()["eventos"]] == ["Recesso 2026"]
+    assert web.post(URL, json={"ano": "2025"}).get_json()["ativo"] == "2025"
+    d = web.get(f"{cal}/dados").get_json()
+    assert d["ano_letivo"] == "2025" and [e["nome"] for e in d["eventos"]] == ["Recesso 2025"]
+    # ano anterior é só consulta: o servidor recusa cadastrar e apagar no calendário
+    assert web.post(f"{cal}/eventos", json={"nome": "X", "tipo": "recesso", "inicio": "2025-11-03"}).status_code == 403
+    assert web.delete(f"{cal}/eventos/z").status_code == 403
+    assert [e["nome"] for e in web.get(f"{cal}/dados").get_json()["eventos"]] == ["Recesso 2025"]
+    web.post(URL, json={"ano": "2026"})
+    assert [e["nome"] for e in web.get(f"{cal}/dados").get_json()["eventos"]] == ["Recesso 2026"]
+
+
 def test_rota_a_automacao_usa_o_ano_novo(web, amb):
     """O ponto que importa para quem executa: a automação, importada pelo registro, grava no ano que a tela mostra."""
     web.post(URL, json={"ano": "2025"})

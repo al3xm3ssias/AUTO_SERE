@@ -18,7 +18,7 @@ pip install -r requirements.txt
 python -m src.web.app
 ```
 
-Acesse **http://127.0.0.1:5000** no navegador.
+Acesse **http://127.0.0.1:8000** no navegador (porta padrão; mude com `AUTO_SERE_PORT` ou `"servidor"` em `config/config_usuario.json`).
 
 > Rodando como `python -m src.web.app` (e não `python src/web/app.py`)
 > para que os imports `from src.automacao...` funcionem corretamente

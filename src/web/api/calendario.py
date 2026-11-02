@@ -16,11 +16,19 @@ Rotas (registradas em src/web/app.py com url_prefix="/web/api/calendario"):
 
 Persistência (fora do controle de versão junto com o resto de dados/):
 
-    dados/calendario/calendario.json
-    dados/calendario/feriados_cache/AAAA.json
+    dados/<ano letivo>/calendario.json     eventos e períodos do ANO LETIVO em uso (um arquivo por ano)
+    dados/calendario/feriados_cache/AAAA.json   cache dos feriados nacionais (por ano civil, comum a todos)
 
-O calendário atravessa anos (ex.: férias de 19/12 a 03/02), por isso usa um
-único arquivo, e não a pasta por ano letivo (dados/<ano>/).
+O calendário acompanha o ano letivo escolhido em Configurações → Ano letivo, como os demais dados: voltando para
+2025, aparece o calendário de 2025 (em modo somente consulta, como o resto). Cadastros novos vão para o arquivo do
+ano letivo em uso.
+
+Como o calendário atravessa anos (ex.: férias de 19/12/2025 a 03/02/2026), a tela mostra os itens do ano em uso e,
+dos arquivos do ano anterior e do seguinte, só os que tocam o ano civil mostrado (as férias de dezembro continuam
+aparecendo em janeiro). Um item é sempre gravado no arquivo do ano letivo em que foi cadastrado.
+
+O arquivo antigo, único para todos os anos (dados/calendario/calendario.json), é dividido por ano na primeira vez
+(pelo ano da data de início de cada item) e guardado como calendario.json.antes-da-migracao.
 """
 
 from __future__ import annotations
@@ -75,12 +83,8 @@ _lock = threading.Lock()
 
 # ---------------------------------------------------------------- persistência
 def _pasta() -> Path:
-    """Pasta de dados do calendário (função, para os testes poderem trocar)."""
+    """Pasta comum do calendário (só o cache de feriados; função, para os testes poderem trocar)."""
     return _paths.DADOS_DIR / "calendario"
-
-
-def _arquivo_dados() -> Path:
-    return _pasta() / "calendario.json"
 
 
 def _pasta_cache() -> Path:
@@ -91,12 +95,22 @@ def _garantir_pastas() -> None:
     _pasta_cache().mkdir(parents=True, exist_ok=True)
 
 
-def carregar_dados() -> dict:
-    arquivo = _arquivo_dados()
-    if not arquivo.exists():
-        return {"eventos": [], "periodos": []}
-    with open(arquivo, encoding="utf-8") as f:
-        dados = json.load(f)
+def _ano_ativo() -> int:
+    """Ano letivo em uso (Configurações → Ano letivo; senão o ano do calendário)."""
+    try:
+        return int(_paths.ano_atual())
+    except (TypeError, ValueError):
+        return date.today().year
+
+
+def _arquivo_dados(ano: int | None = None) -> Path:
+    """dados/<ano letivo>/calendario.json (do ano em uso se `ano` não for dado)."""
+    return _paths.DADOS_DIR / str(ano if ano is not None else _ano_ativo()) / "calendario.json"
+
+
+def _normalizar(dados) -> dict:
+    if not isinstance(dados, dict):
+        dados = {}
     dados.setdefault("eventos", [])
     dados.setdefault("periodos", [])
     # Períodos gravados antes de existir o campo "tipo": "férias" no nome -> ferias.
@@ -107,13 +121,98 @@ def carregar_dados() -> dict:
     return dados
 
 
-def salvar_dados(dados: dict) -> None:
+def _ler_ano(ano: int) -> dict:
+    """Eventos e períodos gravados no arquivo desse ano letivo (vazio se não existir). Levanta ValueError se o JSON for inválido."""
+    arquivo = _arquivo_dados(ano)
+    if not arquivo.exists():
+        return {"eventos": [], "periodos": []}
+    with open(arquivo, encoding="utf-8") as f:
+        return _normalizar(json.load(f))
+
+
+def _salvar_ano(ano: int, dados: dict) -> None:
     """Grava de forma atômica para não corromper o JSON se o processo cair."""
-    _garantir_pastas()
-    fd, tmp = tempfile.mkstemp(dir=_pasta(), suffix=".tmp")
+    arquivo = _arquivo_dados(ano)
+    arquivo.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=arquivo.parent, suffix=".tmp")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(dados, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, _arquivo_dados())
+    os.replace(tmp, arquivo)
+
+
+def salvar_dados(dados: dict, ano: int | None = None) -> None:
+    _salvar_ano(ano if ano is not None else _ano_ativo(), dados)
+
+
+def _migrar_legado() -> None:
+    """
+    Divide o arquivo antigo (dados/calendario/calendario.json, um só para todos os anos) em dados/<ano>/calendario.json,
+    pelo ano da data de início de cada item (sem data válida, vai para o ano em uso). Não repete itens que já estejam
+    no arquivo do ano (mesmo id) e guarda o arquivo antigo como calendario.json.antes-da-migracao.
+    """
+    legado = _pasta() / "calendario.json"
+    if not legado.exists():
+        return
+    with open(legado, encoding="utf-8") as f:
+        antigo = _normalizar(json.load(f))
+    por_ano: dict[int, dict] = {}
+    for chave in ("eventos", "periodos"):
+        for item in antigo[chave]:
+            d = _data_iso(item.get("inicio"))
+            ano = d.year if d else _ano_ativo()
+            por_ano.setdefault(ano, {"eventos": [], "periodos": []})[chave].append(item)
+    for ano, itens in por_ano.items():
+        atual = _ler_ano(ano)
+        for chave in ("eventos", "periodos"):
+            ids = {x.get("id") for x in atual[chave]}
+            atual[chave] += [x for x in itens[chave] if x.get("id") not in ids]
+        _salvar_ano(ano, atual)
+    destino = legado.with_name("calendario.json.antes-da-migracao")
+    if destino.exists():
+        destino = legado.with_name(f"calendario.json.antes-da-migracao-{int(time.time())}")
+    os.replace(legado, destino)
+
+
+def _toca_o_ano(item: dict, ano: int) -> bool:
+    """O item (inicio/fim ISO) tem algum dia dentro do ano civil `ano`?"""
+    inicio, fim = str(item.get("inicio") or ""), str(item.get("fim") or item.get("inicio") or "")
+    return bool(inicio) and inicio <= f"{ano}-12-31" and fim >= f"{ano}-01-01"
+
+
+def carregar_dados() -> dict:
+    """
+    O que a tela mostra: tudo do arquivo do ano letivo em uso + os itens dos arquivos do ano anterior e do seguinte
+    que tocam este ano (férias que atravessam a virada). Cada id aparece uma vez.
+    """
+    _migrar_legado()
+    ano = _ano_ativo()
+    resultado = {"eventos": [], "periodos": []}
+    vistos: dict[str, set] = {"eventos": set(), "periodos": set()}
+    for y in (ano, ano - 1, ano + 1):
+        dados = _ler_ano(y)
+        for chave in ("eventos", "periodos"):
+            for item in dados[chave]:
+                if item.get("id") in vistos[chave]:
+                    continue
+                if y == ano or _toca_o_ano(item, ano):
+                    vistos[chave].add(item.get("id"))
+                    resultado[chave].append(item)
+    resultado["ano_letivo"] = str(ano)
+    return resultado
+
+
+def _remover_item(chave: str, id_: str) -> bool:
+    """Apaga o item `id_` ("eventos"/"periodos") do arquivo do ano em uso ou dos vizinhos. False se não achou."""
+    _migrar_legado()
+    ano = _ano_ativo()
+    for y in (ano, ano - 1, ano + 1):
+        dados = _ler_ano(y)
+        antes = len(dados[chave])
+        dados[chave] = [x for x in dados[chave] if x.get("id") != id_]
+        if len(dados[chave]) != antes:
+            _salvar_ano(y, dados)
+            return True
+    return False
 
 
 # ---------------------------------------------------------------- datas fixas
@@ -230,21 +329,19 @@ def criar_evento():
         "fim": fim.isoformat(),
     }
     with _lock:
-        dados = carregar_dados()
+        _migrar_legado()
+        ano = _ano_ativo()
+        dados = _ler_ano(ano)
         dados["eventos"].append(evento)
-        salvar_dados(dados)
+        _salvar_ano(ano, dados)
     return jsonify(evento), 201
 
 
 @calendario_bp.delete("/eventos/<id_>")
 def excluir_evento(id_: str):
     with _lock:
-        dados = carregar_dados()
-        antes = len(dados["eventos"])
-        dados["eventos"] = [e for e in dados["eventos"] if e["id"] != id_]
-        if len(dados["eventos"]) == antes:
+        if not _remover_item("eventos", id_):
             return _erro("Registro não encontrado.", 404)
-        salvar_dados(dados)
     return jsonify({"ok": True})
 
 
@@ -273,19 +370,17 @@ def criar_periodo():
         "fim": fim.isoformat(),
     }
     with _lock:
-        dados = carregar_dados()
+        _migrar_legado()
+        ano = _ano_ativo()
+        dados = _ler_ano(ano)
         dados["periodos"].append(periodo)
-        salvar_dados(dados)
+        _salvar_ano(ano, dados)
     return jsonify(periodo), 201
 
 
 @calendario_bp.delete("/periodos/<id_>")
 def excluir_periodo(id_: str):
     with _lock:
-        dados = carregar_dados()
-        antes = len(dados["periodos"])
-        dados["periodos"] = [p for p in dados["periodos"] if p["id"] != id_]
-        if len(dados["periodos"]) == antes:
+        if not _remover_item("periodos", id_):
             return _erro("Registro não encontrado.", 404)
-        salvar_dados(dados)
     return jsonify({"ok": True})

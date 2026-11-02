@@ -22,6 +22,7 @@ Quase tudo foi testado só com navegador ou dados simulados.
 - [ ] **`avisos` — dois públicos novos** (uso real do e-mail, definido em 2026-11-02): (1) **escola de origem**, um e-mail por aluno que chega, pedindo a documentação; (2) **responsáveis de alunos que saem**, avisando sobre a transferência. Hoje só existem "todas as escolas/CMEIs" e "pais da pré-matrícula". Falta decidir de onde vem a escola de origem (não existe esse dado no sistema).
 - [ ] `avisos`: reconhecer e-mail de escola escrito de forma disfarçada e mostrar "sem e-mail" na tela; responsável sem e-mail hoje só vai para o log.
 - [ ] `avisos`: liberar o envio real (confirmação com prévia, intervalo e limite por lote, envio em segundo plano com pausa, registro de quem recebeu/falhou) e outros canais (WhatsApp, SERE).
+- [ ] Preencher os três `src/web/templates/partials/help/*.html` (hoje vazios): textos de ajuda para os usuários (planejado).
 - [ ] **7b** WhatsApp: fila de envio com limite diário, pausa, histórico e modelos.
 - [ ] **3b** Backup automático ao fim das coletas.
 - [ ] Decidir se os termos de ciência pulam quem tem `na_escola = false`.
@@ -36,17 +37,17 @@ Quase tudo foi testado só com navegador ou dados simulados.
   - `src/automacao/sere_api.py`, `sere_limpeza.py`, `sere_upload.py` e `sere_utils.py` são versões antigas **sem uso** (ninguém importa; o projeto usa as de `src/comum/`). Podem ser apagadas.
   - `src/comum/executar_{aluno,analisa,documento,espec,transferidos,validar}.py` são cópias idênticas das de `src/automacao/`. **As usadas são as de `src/automacao/`** (o `registro_scripts.py` importa de lá); as seis de `src/comum/` sobram. `executar_limpeza.py` só existe em `src/comum/` e é usado, fica.
   - `src/automacao/test_gerar_pastas.py` é idêntico a `tests/test_gerar_pastas.py`; o de `tests/` basta.
-- [ ] Documentação desatualizada: `src/web/README.md` e `diagrama_de_funcionamento.md` dizem porta 5000 (a padrão é 8000); a tarefa "Bootstrap: criar_projeto.py" em `.vscode/tasks.json` aponta para arquivo que não existe; `backup_auto_sere.py` tem `C:\Auto_sere` fixo; `AUTO_SERE_MAPA.txt` (1 byte) e `src/web/templates/partials/help/*.html` (3 arquivos) estão vazios; `BUGS_CONHECIDOS.md` parou em 2026-10-30.
-- [!] `config/config_usuario.json`: `setup_concluido` está `false` e a unidade escolar está sem `codigo`, `inep`, `telefone`, `email` e `responsavel`.
 - [ ] Editar `config_usuario.json` à mão com o programa aberto só vale ao reiniciar (a faixa avisa e oferece "Aplicar agora").
 
 ### D. Decidido (não é mais pendência)
 - **10g:** o wizard (1ª execução) fica só com o modo **básico** de Alunos, porque o completo demora mais; o completo segue em Automações → Alunos.
+- **Documentação e arquivos soltos (2026-11-02):** porta padrão 8000 corrigida em `src/web/README.md` e `diagrama_de_funcionamento.md`; `backup_auto_sere.py` agora usa a pasta onde está instalado (não mais `C:\Auto_sere` fixo; testado de uma pasta qualquer); a tarefa "Bootstrap: criar_projeto.py" saiu do `.vscode/tasks.json`, porque o `criar_projeto.py` não é mais necessário.
+- **Não são pendência:** `config_usuario.json` com `setup_concluido = false` e unidade escolar sem dados (é preenchido quando o usuário informa os dados no wizard); `AUTO_SERE_MAPA.txt` vazio (ignorado); `BUGS_CONHECIDOS.md` (só recebe bugs quando aparecerem; nenhum achado até agora).
 - **10h:** a tela Alunos une `alunos.json` e `alunos_completo.json` (feito em 2026-11-02).
 
 ## Análise do estado inicial (resumo)
 
-- **Dados**: não há banco de dados; tudo é JSON em `dados/<ano>/` (+ `dados/calendario/`, `config/config_usuario.json`).
+- **Dados**: não há banco de dados; tudo é JSON em `dados/<ano>/` (inclui o calendário letivo do ano, `calendario.json`; só o cache de feriados fica em `dados/calendario/`) e `config/config_usuario.json`.
 - **Já existia**: telas de Turmas, Alunos, Pré-matrícula, Funcionários, Calendário, Documentos; automações `sus` (`sisreg.py`) e `cep` (regra de raio em `src/comum/cep_api.py`, `RAIO_KM_PADRAO = 2.0`).
 - **Faltava**: telas Encaminhamentos do SUS e Alunos fora do Raio (parciais vazios); backup (respondia 501); nada de WhatsApp.
 
@@ -162,7 +163,7 @@ Guia: `docs/NOVO_SCRIPT.md`. Núcleo: `src/comum/opcoes_execucao.py` (opções) 
 - [x] **Voltar os dados de um ano** — mesma tela: escolhe um backup (cada um é de UM ano), "Conferir" (extrai numa pasta, não altera nada) ou "Restaurar os dados…" (pede confirmação, faz cópia de segurança antes, repõe só os dados do ano por padrão). Correções no `backup.py` que isso exigiu:
   - [x] O backup guarda o ano e a restauração repõe na pasta **desse ano**. Antes, um backup de 2025 restaurado em 2026 gravava os dados de 2025 por cima da pasta de 2026.
   - [x] Cópia de segurança antes de restaurar é do ano que será sobrescrito; se a pasta do ano está vazia, restaura sem ela.
-  - [x] "Só os dados do ano" não mexe em configuração nem calendário; restaurar a configuração não desfaz a escolha de ano letivo.
+  - [x] "Só os dados do ano" não mexe em configuração, mas repõe o calendário do ano (que agora fica em `dados/<ano>/calendario.json`); restaurar a configuração não desfaz a escolha de ano letivo.
   - [x] A retenção (10 mais recentes) vale **por ano**: backups novos de 2026 não apagam os de 2025. Backup de um ano sem dados é recusado (antes saía um zip só com config e calendário).
   - [x] Restaurar o **ano em uso** com automação rodando é recusado; restaurar outro ano pode.
   - Linha de comando: `python -m src.comum.backup --ano 2025` (backup de outro ano) e `... --restaurar ARQ.zip --aplicar --so-dados`.
@@ -177,7 +178,8 @@ Guia: `docs/NOVO_SCRIPT.md`. Núcleo: `src/comum/opcoes_execucao.py` (opções) 
   - O botão "Executar" das automações fica desabilitado; no painel Ano letivo, "Restaurar os dados" e "Criar dados fictícios" também.
   - **Não vale** quando o ano é fixado por `AUTO_SERE_ANO_BASE` (é o caminho de quem precisa trabalhar num ano "atrasado", ex.: janeiro/fevereiro com o ano anterior ainda aberto no SERE) nem para ano igual ou futuro ao do calendário.
   - [ ] Os botões de escrita das demais telas continuam clicáveis em consulta (o servidor recusa e a tela mostra a mensagem); desabilitá-los um a um não foi feito.
-  - [ ] Calendário letivo, modelos de parecer, credenciais e configuração NÃO são por ano (ficam em `dados/calendario`, `dados/MODELO`, `credenciais/` e `config/`): os mesmos em qualquer ano. A pasta de digitalização padrão é por ano (`dados/<ano>/DIGITALIZAÇÃO`), mas uma pasta escolhida à mão vale para todos os anos.
+  - [x] **Calendário letivo por ano** (pedido de 2026-11-02): eventos e períodos ficam em `dados/<ano letivo>/calendario.json` (antes, um arquivo único em `dados/calendario/calendario.json`). Voltando o ano em Configurações → Ano letivo aparece o calendário daquele ano (em somente consulta, como o resto: o servidor recusa cadastrar e apagar), e a tela abre direto nesse ano. Como as férias atravessam a virada (19/12 a 03/02), a tela mostra os itens do ano em uso e, dos arquivos do ano anterior e do seguinte, só os que tocam o ano mostrado. O arquivo antigo é **dividido por ano na primeira abertura** (pelo ano da data de início de cada item) e guardado como `dados/calendario/calendario.json.antes-da-migracao`; nada é apagado. O cache de feriados nacionais continua comum (`dados/calendario/feriados_cache/`). O backup do ano já inclui o calendário dele. Testado (`tests/test_calendario.py`, `test_ui_calendario.py`, `test_ano_letivo_troca.py`) com dados simulados; falta ver a migração com o seu `calendario.json` real.
+  - [ ] Modelos de parecer, credenciais e configuração NÃO são por ano (ficam em `dados/MODELO`, `credenciais/` e `config/`): os mesmos em qualquer ano. (O calendário letivo era assim e passou a ser por ano em 2026-11-02, ver abaixo.) A pasta de digitalização padrão é por ano (`dados/<ano>/DIGITALIZAÇÃO`), mas uma pasta escolhida à mão vale para todos os anos.
 - [!] A tela de Ano letivo, o selo, a faixa e a tela de carregamento têm testes no Chromium (3 testes de navegador) e foram conferidos em captura de tela; nunca rodaram com o SERE real nem com os seus dados de verdade.
 - [ ] Teste de tela intermitente (já presente no Auto_sere.zip que você enviou): `tests/test_ui_automacoes.py::test_funcionarios_e_vinculos_estao_no_menu_...` às vezes falha porque o rótulo "Sistema" do menu fica por cima do item "Vínculos" no clique; passa na maioria das vezes.
 

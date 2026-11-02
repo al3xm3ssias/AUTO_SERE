@@ -34,6 +34,7 @@ Quase tudo foi testado só com navegador ou dados simulados.
 - [!] **BUG-REM-001**: o clique final de "Confirmar" é tratado como sucesso sem conferir a página
 
 ### Tela Alunos
+- [!] Abrir o calendário depois de colocar a atualização: conferir se o `calendario.json` antigo foi dividido certo em `dados/<ano>/calendario.json` (o antigo fica como `dados/calendario/calendario.json.antes-da-migracao`)
 - [!] Abrir com os `alunos.json` e `alunos_completo.json` reais e ver se aparecem divergências falsas (⚠)
 
 ---
@@ -87,20 +88,18 @@ Uso real, definido em 2026-11-02: (1) escrever **para a escola de origem**, na h
 
 ---
 
-## 4. Documentação e configuração
+## 4. Ajuda para os usuários
 
-- [ ] `src/web/README.md` e `diagrama_de_funcionamento.md` dizem porta 5000; a padrão é 8000
-- [ ] `.vscode/tasks.json`: a tarefa "Bootstrap: criar_projeto.py" aponta para um arquivo que não existe
-- [ ] `backup_auto_sere.py` tem o caminho `C:\Auto_sere` fixo
-- [ ] Preencher ou remover `AUTO_SERE_MAPA.txt` (1 byte) e os três `src/web/templates/partials/help/*.html` (vazios)
-- [ ] `BUGS_CONHECIDOS.md` parou em 2026-10-30
-- [!] `config/config_usuario.json`: `setup_concluido` está `false` e a unidade escolar está sem `codigo`, `inep`, `telefone`, `email` e `responsavel`
+- [ ] Preencher os três `src/web/templates/partials/help/*.html` (hoje vazios): textos de ajuda (planejado)
 
 ---
 
 ## 5. Decidido
 
 - [x] **10g**: o wizard (1ª execução) fica só com o modo **básico** de Alunos, porque o completo demora mais; o completo segue em Automações → Alunos
+- [x] **Documentação e arquivos soltos** (2026-11-02): porta 8000 corrigida em `src/web/README.md` e `diagrama_de_funcionamento.md`; `backup_auto_sere.py` usa a pasta da instalação (não mais `C:\Auto_sere` fixo); tarefa "Bootstrap: criar_projeto.py" removida do `.vscode/tasks.json` (o script não é mais necessário)
+- [x] **Não são pendência:** `config_usuario.json` com `setup_concluido = false` e unidade sem dados (preenchido quando o usuário informa os dados); `AUTO_SERE_MAPA.txt` vazio (ignorado); `BUGS_CONHECIDOS.md` (só recebe bugs quando aparecerem; nenhum achado até agora)
+- [x] **Calendário por ano letivo** (2026-11-02): `dados/<ano>/calendario.json`; voltando o ano aparece o calendário daquele ano (só consulta); o arquivo único antigo é dividido por ano na primeira abertura e guardado, sem apagar nada
 - [x] **10h**: a tela Alunos une `alunos.json` e `alunos_completo.json` numa ficha única, com todos os campos sempre visíveis e "—" onde falta dado (2026-11-02). O HTML fica todo em `alunos_completo_cards.html` (não apagar); `alunos_cards.html` só o inclui
 - [x] **Funcionários completo salva aos poucos** (2026-11-02): grava a cada 5 cadastros, não encolhe o arquivo no meio da coleta e, se parar (cancelada, erro ou queda), avisa no log e na tela de Funcionários
 

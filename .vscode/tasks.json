@@ -2,17 +2,6 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Bootstrap: criar_projeto.py",
-            "type": "shell",
-            "command": "${command:python.interpreterPath}",
-            "args": ["criar_projeto.py"],
-            "problemMatcher": [],
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared"
-            }
-        },
-        {
             "label": "Instalar dependências",
             "type": "shell",
             "command": "${command:python.interpreterPath}",

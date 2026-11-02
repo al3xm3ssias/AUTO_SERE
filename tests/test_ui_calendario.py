@@ -22,7 +22,8 @@ MESES = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "A
 
 @pytest.fixture()
 def pagina(tmp_path, monkeypatch):
-    monkeypatch.setattr(cal, "_pasta", lambda: tmp_path / "calendario")
+    monkeypatch.setattr(cal._paths, "DADOS_DIR", tmp_path)                       # dados/<ano>/calendario.json isolado
+    monkeypatch.setattr(cal._paths, "ano_atual", lambda: str(date.today().year))
     # Sem internet e LENTO: a BrasilAPI demora 3 s para falhar (o pior caso para a tela).
     def lento(*a, **k):
         time.sleep(3)
@@ -98,3 +99,17 @@ def test_navegacao_entre_meses(pagina):
     pg.wait_for_function(f"document.getElementById('cal-titulo').textContent === '{MESES[mes - 1]} de {ano}'", timeout=2000)
     pg.click("#cal-hoje")
     pg.wait_for_function(f"document.getElementById('cal-titulo').textContent === '{MESES[hoje.month - 1]} de {hoje.year}'", timeout=2000)
+
+
+def test_voltado_a_um_ano_anterior_abre_o_calendario_daquele_ano(pagina, monkeypatch):
+    pg, url = pagina
+    anterior = date.today().year - 1
+    cal.salvar_dados({"eventos": [{"id": "x", "nome": "Recesso do ano passado", "tipo": "recesso",
+                                   "inicio": f"{anterior}-02-10", "fim": f"{anterior}-02-10"}], "periodos": []}, ano=anterior)
+    monkeypatch.setattr(cal._paths, "ano_atual", lambda: str(anterior))          # Configurações → Ano letivo voltou
+    _abrir_calendario(pg, url)
+    pg.wait_for_function(f'document.getElementById("cal-titulo").innerText === "Janeiro de {anterior}"', timeout=3000)
+    pg.click("#cal-next")
+    pg.wait_for_function(f'document.getElementById("cal-titulo").innerText === "Fevereiro de {anterior}"', timeout=3000)
+    pg.wait_for_selector(f'#cal-vista .cal-cell[data-d="{anterior}-02-10"] .cal-chip', timeout=3000)
+    assert "Recesso do ano passado" in pg.inner_text(f'#cal-vista .cal-cell[data-d="{anterior}-02-10"]')
