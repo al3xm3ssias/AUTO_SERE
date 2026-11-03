@@ -426,7 +426,7 @@ def _turma(monkeypatch, *, abrir=None, selecionar=True, resultados=None):
     async def _selecionar(_p, _t):
         return selecionar
 
-    async def _processar(_p, _b, al):
+    async def _processar(_p, _b, al, chaves=None):
         estado["chamadas"].append(al["cgm"])
         fila = resultados.get(al["cgm"], [])
         efeito = fila.pop(0) if fila else (True, None)
@@ -593,7 +593,7 @@ def _orquestrar(monkeypatch, secoes, alunos_por_secao, resultados=None, abrir_ok
 
     res = {k: list(v) for k, v in (resultados or {}).items()}
 
-    async def _processar(_p, _b, al):
+    async def _processar(_p, _b, al, chaves=None):
         estado["processados"].append(al["cgm"])
         fila = res.get(al["cgm"], [])
         return fila.pop(0) if fila else (True, None)
@@ -707,3 +707,152 @@ def test_navegador_e_headless_configuraveis_com_padrao_igual_ao_original(monkeyp
 
     rodar(rem.rematricular_via_login(turmas_alvo=["X"], login="l", senha="s", navegador="firefox", headless=True))
     assert pw.firefox.headless is True
+
+
+# ----------------------------------------------------------
+# chaves salvas (chave_responsavel.json)
+# ----------------------------------------------------------
+
+from src.automacao import chaves_responsavel as cr  # noqa: E402
+
+
+def _salva(cgm, chave="SALVA", cpf="111", turma="2º Ano - A"):
+    return {"cgm": str(cgm), "nome": f"Aluno {cgm}", "turma": turma, "cpf_responsavel": cpf, "chave": chave,
+            "timestamp": "2026-11-02T10:00:00"}
+
+
+def _passos_chave(monkeypatch, *, aceita=("SALVA", "NOVA"), chave_nova="NOVA", cpf_ficha="222", confirmar=True):
+    """Área do Aluno só aceita as chaves em `aceita`; registra o que foi usado em cada etapa."""
+    uso = {"gerou": 0, "logins": [], "acessos": 0}
+
+    async def gerar(_p):
+        uso["gerou"] += 1
+        return chave_nova
+
+    async def obter_cpf(_p):
+        return cpf_ficha
+
+    async def entrar(_p, cpf, chave):
+        uso["logins"].append((cpf, chave))
+        return chave in aceita
+
+    async def acessar(_p, _n):
+        uso["acessos"] += 1
+        return True
+
+    async def confirmar_(_p):
+        return confirmar
+
+    monkeypatch.setattr(rem, "gerar_chave_acesso", gerar)
+    monkeypatch.setattr(rem, "obter_cpf_responsavel", obter_cpf)
+    monkeypatch.setattr(rem, "fazer_login_area_aluno", entrar)
+    monkeypatch.setattr(rem, "acessar_matricula_online", acessar)
+    monkeypatch.setattr(rem, "confirmar_matricula", confirmar_)
+    return uso
+
+
+def test_chave_salva_pula_a_ficha_do_sere_e_entra_direto(monkeypatch, dados_tmp):
+    uso = _passos_chave(monkeypatch)
+    link = LinkFake("10")
+    chaves = [_salva(10)]
+    assert rodar(rem.processar_aluno(PaginaFake([link]), NavegadorFake(), aluno(10), chaves=chaves)) == (True, None)
+    assert uso["gerou"] == 0 and uso["logins"] == [("111", "SALVA")] and not link.clicado
+    assert not (dados_tmp / cr.ARQUIVO_CHAVES).exists()          # nada foi regravado
+
+
+def test_chave_salva_recusada_gera_nova_atualiza_o_arquivo_e_conclui(monkeypatch, dados_tmp):
+    uso = _passos_chave(monkeypatch, aceita=("NOVA",))
+    link = LinkFake("10")
+    chaves = [_salva(10, chave="VENCIDA"), _salva(11)]
+    assert rodar(rem.processar_aluno(PaginaFake([link]), NavegadorFake(), aluno(10), chaves=chaves)) == (True, None)
+    assert uso["gerou"] == 1 and link.clicado
+    assert uso["logins"] == [("111", "VENCIDA"), ("222", "NOVA")]
+    gravado = {c["cgm"]: c for c in ler(dados_tmp / cr.ARQUIVO_CHAVES)}
+    assert gravado["10"]["chave"] == "NOVA" and gravado["10"]["cpf_responsavel"] == "222" and gravado["10"]["turma"] == "2º Ano - A"
+    assert gravado["11"]["chave"] == "SALVA"                      # o resto do arquivo é preservado
+
+
+def test_chave_salva_recusada_e_nova_tambem_recusada_falha_sem_laco(monkeypatch):
+    uso = _passos_chave(monkeypatch, aceita=())
+    ok, msg = rodar(rem.processar_aluno(PaginaFake([LinkFake("10")]), NavegadorFake(), aluno(10), chaves=[_salva(10)]))
+    assert (ok, msg) == (False, "Erro ao fazer login na Área do Aluno")
+    assert uso["gerou"] == 1 and len(uso["logins"]) == 2           # uma tentativa com a salva, uma com a nova
+
+
+def test_falha_na_confirmacao_com_chave_salva_nao_gera_chave_nova(monkeypatch):
+    uso = _passos_chave(monkeypatch, confirmar=False)
+    ok, msg = rodar(rem.processar_aluno(PaginaFake([LinkFake("10")]), NavegadorFake(), aluno(10), chaves=[_salva(10)]))
+    assert (ok, msg) == (False, "Erro ao confirmar matrícula") and uso["gerou"] == 0 and len(uso["logins"]) == 1
+
+
+def test_chave_salva_ja_matriculado_conta_como_sucesso(monkeypatch):
+    _passos_chave(monkeypatch, confirmar="JA_MATRICULADO")
+    assert rodar(rem.processar_aluno(PaginaFake(), NavegadorFake(), aluno(10), chaves=[_salva(10)])) == (True, None)
+
+
+def test_aluno_sem_chave_salva_gera_na_hora_e_nao_grava(monkeypatch, dados_tmp):
+    uso = _passos_chave(monkeypatch)
+    chaves = [_salva(99)]
+    assert rodar(rem.processar_aluno(PaginaFake([LinkFake("10")]), NavegadorFake(), aluno(10), chaves=chaves)) == (True, None)
+    assert uso["gerou"] == 1 and uso["logins"] == [("222", "NOVA")] and chaves == [_salva(99)]
+    assert not (dados_tmp / cr.ARQUIVO_CHAVES).exists()
+
+
+@pytest.mark.parametrize("salva", [_salva(10, cpf=None), _salva(10, chave="")])
+def test_registro_salvo_incompleto_e_ignorado(monkeypatch, salva):
+    uso = _passos_chave(monkeypatch)
+    assert rodar(rem.processar_aluno(PaginaFake([LinkFake("10")]), NavegadorFake(), aluno(10), chaves=[salva])) == (True, None)
+    assert uso["gerou"] == 1 and uso["logins"] == [("222", "NOVA")]
+
+
+def test_erro_ao_gravar_a_chave_nova_nao_derruba_a_rematricula(monkeypatch):
+    _passos_chave(monkeypatch, aceita=("NOVA",))
+
+    def quebra(_c):
+        raise OSError("disco cheio")
+
+    monkeypatch.setattr(cr, "salvar_chaves", quebra)
+    assert rodar(rem.processar_aluno(PaginaFake([LinkFake("10")]), NavegadorFake(), aluno(10), chaves=[_salva(10)])) == (True, None)
+
+
+def test_orquestracao_carrega_as_chaves_e_repassa_para_cada_aluno(monkeypatch, dados_tmp):
+    cr.salvar_chaves([_salva(2)])
+    vistos = []
+    _orquestrar(monkeypatch, {"2º Ano": ["2º Ano - A"]}, {"2º Ano - A": [aluno(2)]})
+
+    async def _processar(_p, _b, al, chaves=None):
+        vistos.append(chaves)
+        return (True, None)
+
+    monkeypatch.setattr(rem, "processar_aluno", _processar)
+    rodar(rem.rematricular_via_login(turmas_alvo=["2º Ano"], login="l", senha="s"))
+    assert vistos == [[_salva(2)]]
+
+
+def test_ignorar_chaves_salvas_nao_le_o_arquivo(monkeypatch, dados_tmp):
+    (dados_tmp / cr.ARQUIVO_CHAVES).write_bytes(b"[{ruim")       # nem seria lido
+    vistos = []
+    _orquestrar(monkeypatch, {"2º Ano": ["2º Ano - A"]}, {"2º Ano - A": [aluno(2)]})
+
+    async def _processar(_p, _b, al, chaves=None):
+        vistos.append(chaves)
+        return (True, None)
+
+    monkeypatch.setattr(rem, "processar_aluno", _processar)
+    rodar(rem.rematricular_via_login(turmas_alvo=["2º Ano"], login="l", senha="s", usar_chaves_salvas=False))
+    assert vistos == [None]
+
+
+def test_arquivo_de_chaves_ilegivel_nao_impede_a_rematricula_e_nao_e_tocado(monkeypatch, dados_tmp):
+    (dados_tmp / cr.ARQUIVO_CHAVES).write_bytes(b"[{ruim")
+    vistos = []
+    _, est = _orquestrar(monkeypatch, {"2º Ano": ["2º Ano - A"]}, {"2º Ano - A": [aluno(2)]})
+
+    async def _processar(_p, _b, al, chaves=None):
+        vistos.append(chaves)
+        return (True, None)
+
+    monkeypatch.setattr(rem, "processar_aluno", _processar)
+    r = rodar(rem.rematricular_via_login(turmas_alvo=["2º Ano"], login="l", senha="s"))
+    assert vistos == [None] and r["total_sucessos"] == 1
+    assert (dados_tmp / cr.ARQUIVO_CHAVES).read_bytes() == b"[{ruim"

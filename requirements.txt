@@ -38,8 +38,8 @@ Flask==3.0.3
 # que depende do HTML do WhatsApp Web; só atualize depois de ler o código e testar (docs/WHATSAPP.md).
 whatsplay==2.6.1
 
-# --- Pareceres dos transferidos (ler o QR dos pareceres digitalizados; ver src/automacao/pareceres_transferidos.py) ---
-# Só são importados quando a rotina "Pareceres dos transferidos" roda. pypdfium2 renderiza o PDF sem precisar do
+# --- Pareceres digitalizados (ler o QR; ver src/automacao/pareceres_transferidos.py e pareceres_digitalizados.py) ---
+# Só são importados quando a rotina "Pareceres dos transferidos" ou "Pareceres digitalizados" roda. pypdfium2 renderiza o PDF sem precisar do
 # poppler (no Windows, pdf2image exigiria instalar o poppler à parte); pdf2image/pyzbar/qreader são usados se existirem.
 opencv-python-headless>=4.8
 zxing-cpp>=2.2

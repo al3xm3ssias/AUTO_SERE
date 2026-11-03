@@ -1,0 +1,1344 @@
+--- a/src/web/api/rotas.py
++++ b/src/web/api/rotas.py
+@@ -1282,6 +1282,7 @@
+     {"chave": "termos", "nome": "Gerar termos de ciência", "descricao": "Gera termos de ciência para os funcionários."},
+     {"chave": "mapear_pastas", "nome": "Mapear pastas dos alunos", "descricao": "Mapeia e organiza caminhos das pastas dos alunos."},
+     {"chave": "mascara", "nome": "Máscara de dados", "descricao": "Aplica máscara em dados sensíveis (LGPD)."},
++    {"chave": "gerar_chaves", "nome": "Gerar chaves de acesso", "descricao": "Gera no SERE a chave de acesso do responsável de cada aluno matriculado e guarda (com o CPF) para a rematrícula usar. Não rematricula ninguém."},
+     {"chave": "rematricula", "nome": "Rematrícula alunos no SERE", "descricao": "Realiza rematrícula dos alunos no SERE."},
+     {"chave": "prematricula_completa", "nome": "Processo de pré-matrícula", "descricao": "Roda o processo completo de pré-matrícula (coleta, cadastro, pendentes, contatos)."},
+ ]
+--- a/src/web/templates/base.html
++++ b/src/web/templates/base.html
+@@ -220,6 +220,10 @@
+           <span class="nav-item-icon" data-icon="shieldLock"></span>
+           <span class="nav-item-label">Máscara de dados</span>
+         </div>
++        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="gerar_chaves">
++          <span class="nav-item-icon" data-icon="key"></span>
++          <span class="nav-item-label">Gerar chaves de acesso</span>
++        </div>
+         <div class="nav-item nav-subitem" data-view="automacoes" data-auto="rematricula">
+           <span class="nav-item-icon" data-icon="refresh"></span>
+           <span class="nav-item-label">Rematrícula no SERE</span>
+--- a/src/comum/registro_scripts.py
++++ b/src/comum/registro_scripts.py
+@@ -180,8 +180,18 @@
+ 
+ def _plano_rematricula(o, p, tj, ctx) -> Plano:
+     from src.automacao.rematricula import rematricular_via_login
+-    return Plano("coroutine", rematricular_via_login, {
+-        "modo_teste": o.modo_teste, "apenas_erros": o.erros, "turmas_alvo": list(o.turmas) or None})
++    kwargs = {"modo_teste": o.modo_teste, "apenas_erros": o.erros, "turmas_alvo": list(o.turmas) or None}
++    if p.get("ignorar_chaves_salvas"):
++        kwargs["usar_chaves_salvas"] = False
++    return Plano("coroutine", rematricular_via_login, kwargs)
++
++
++def _plano_gerar_chaves(o, p, tj, ctx) -> Plano:
++    from src.automacao.chaves_responsavel import gerar_chaves_via_login
++    kwargs = {"modo_teste": o.modo_teste, "turmas_alvo": list(o.turmas) or None}
++    if p.get("regenerar"):
++        kwargs["regenerar"] = True
++    return Plano("coroutine", gerar_chaves_via_login, kwargs)
+ 
+ 
+ def _plano_prematricula(o, p, tj, ctx) -> Plano:
+@@ -779,10 +789,21 @@
+                                   "label": "Só quem ainda tem documento pendente",
+                                   "descricao": "Pula os alunos que já estão com todos os documentos no SERE."}]))
+ 
++registrar(Script("gerar_chaves", (_T, _TE), _plano_gerar_chaves, confirmar=True, turmas_de=_turmas_da_rematricula,
++                 aviso_confirmacao="Gera no SERE a chave de acesso do responsável de cada aluno e guarda a chave e o CPF em "
++                                   "dados/<ano>/chave_responsavel.json, para a Rematrícula usar. Não rematricula ninguém.",
++                 ajuda_teste="Gera a chave de só 1 aluno por turma, para você conferir antes de rodar tudo.",
++                 extras=lambda: [{"tipo": "caixa", "id": "campo-regenerar", "nome": "regenerar",
++                                  "label": "Gerar de novo mesmo para quem já tem chave salva",
++                                  "descricao": "Por padrão pula quem já tem chave salva e quem já foi rematriculado."}]))
++
+ registrar(Script("rematricula", (_T, _TE, _E), _plano_rematricula, confirmar=True, turmas_de=_turmas_da_rematricula,
+                  aviso_confirmacao="Faz a rematrícula desses alunos no SERE.",
+                  ajuda_teste="Faz a rematrícula de só 1 aluno por turma, para você conferir antes de rodar tudo. "
+-                             "Atenção: não é simulação — esses alunos são rematriculados de verdade."))
++                             "Atenção: não é simulação — esses alunos são rematriculados de verdade.",
++                 extras=lambda: [{"tipo": "caixa", "id": "campo-ignorar-chaves", "nome": "ignorar_chaves_salvas",
++                                  "label": "Ignorar as chaves salvas (gerar todas na hora)",
++                                  "descricao": "Por padrão, quem tem chave salva (automação \"Gerar chaves\") entra direto na Área do Aluno."}]))
+ 
+ registrar(Script("prematricula_completa", (_D,), _plano_prematricula,
+                  ajuda_debug="Modo de análise: salva uma captura de tela de cada etapa em dados/<ano>/screenshots, "
+--- a/src/automacao/rematricula.py
++++ b/src/automacao/rematricula.py
+@@ -34,6 +34,9 @@
+     estava copiada em dois lugares, e o registro de erro crítico não removia
+     a entrada anterior do mesmo aluno, gerando duplicatas).
+   - Login e navegação repetidos 3 vezes viraram _abrir_por_turmas().
++  - Chaves salvas: se existir dados/<ano>/chave_responsavel.json (gerado por
++    src.automacao.chaves_responsavel), o aluno que tem chave nele entra direto na Área do Aluno, sem abrir a
++    ficha no SERE. Chave recusada -> gera nova na hora, atualiza o arquivo e tenta uma vez de novo.
+   - O JavaScript das páginas está em strings raw (r\"\"\"...\"\"\"): `\\s` e
+     `\\d` em string comum são "escape inválido" e viram SyntaxError em
+     versões futuras do Python.
+@@ -49,6 +52,7 @@
+ 
+ from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+ 
++from src.automacao import chaves_responsavel
+ from src.comum import paths
+ from src.comum.arquivos_json import (
+     ArquivoJsonCorrompidoError,
+@@ -656,45 +660,51 @@
+ # PROCESSAMENTO
+ # ==========================================================
+ 
+-async def processar_aluno(page_sere, browser, aluno):
++async def _abrir_ficha_gerar_chave(page_sere, aluno):
+     """
+-    Rematricula um aluno. Devolve (sucesso: bool, erro_detalhado: str | None).
+-    ErroReiniciarNavegador é propagado para o chamador reiniciar a sessão.
+-    """
+-    page_aluno = None
+-
+-    try:
+-        print(f"\n{'='*70}")
+-        print(f"👤 Processando: {aluno['Nome']} (CGM: {aluno['cgm']})")
+-        print(f"{'='*70}")
+-
+-        await page_sere.wait_for_selector("a[href*='AoClicarAluno']", timeout=20000)
+-        links_alunos = await page_sere.query_selector_all("a[href*='AoClicarAluno']")
+-
+-        aluno_encontrado = False
+-        for link in links_alunos:
+-            cgm = (await link.inner_text()).strip()
+-            if cgm == aluno["cgm"]:
+-                print("🔗 Acessando perfil do aluno...")
+-                await link.click()
+-                await page_sere.wait_for_timeout(2000)
+-                aluno_encontrado = True
+-                break
+-
+-        if not aluno_encontrado:
+-            erro_detalhado = "Aluno não encontrado na lista"
+-            print(f"❌ {erro_detalhado}")
+-            return False, erro_detalhado
++    Abre a ficha do aluno no SERE, gera a chave de acesso e lê o CPF do responsável.
++    Devolve (chave, cpf, erro). Com erro None a ficha continua aberta (quem chamou
++    volta para a lista com voltar_para_turma). ErroReiniciarNavegador propaga.
++    """
++    await page_sere.wait_for_selector("a[href*='AoClicarAluno']", timeout=20000)
++    links_alunos = await page_sere.query_selector_all("a[href*='AoClicarAluno']")
++
++    aluno_encontrado = False
++    for link in links_alunos:
++        cgm = (await link.inner_text()).strip()
++        if cgm == aluno["cgm"]:
++            print("🔗 Acessando perfil do aluno...")
++            await link.click()
++            await page_sere.wait_for_timeout(2000)
++            aluno_encontrado = True
++            break
++
++    if not aluno_encontrado:
++        erro_detalhado = "Aluno não encontrado na lista"
++        print(f"❌ {erro_detalhado}")
++        return None, None, erro_detalhado
++
++    chave = await gerar_chave_acesso(page_sere)
++
++    cpf = await obter_cpf_responsavel(page_sere)
++    if not cpf:
++        erro_detalhado = "CPF do responsável não encontrado"
++        print(f"❌ {erro_detalhado}")
++        await voltar_para_turma(page_sere)
++        return None, None, erro_detalhado
+ 
+-        chave = await gerar_chave_acesso(page_sere)
++    return chave, cpf, None
+ 
+-        cpf = await obter_cpf_responsavel(page_sere)
+-        if not cpf:
+-            erro_detalhado = "CPF do responsável não encontrado"
+-            print(f"❌ {erro_detalhado}")
+-            await voltar_para_turma(page_sere)
+-            return False, erro_detalhado
+ 
++async def _rematricular_na_area_aluno(browser, aluno, cpf, chave):
++    """
++    Entra na Área do Aluno com CPF + chave e confirma a matrícula online.
++    Devolve (resultado, erro, chave_recusada): resultado True | "JA_MATRICULADO" | False;
++    chave_recusada=True quando falhou no login ou ao abrir a matrícula online — os dois
++    sintomas de chave inválida/expirada (o login não confere se a chave foi aceita).
++    """
++    page_aluno = None
++    try:
+         page_aluno = await browser.new_page()
+         await page_aluno.goto(URL_AREA_ALUNO)
+         await page_aluno.wait_for_timeout(2000)
+@@ -702,32 +712,82 @@
+         if not await fazer_login_area_aluno(page_aluno, cpf, chave):
+             erro_detalhado = "Erro ao fazer login na Área do Aluno"
+             print(f"❌ {erro_detalhado}")
+-            await voltar_para_turma(page_sere)
+-            return False, erro_detalhado
++            return False, erro_detalhado, True
+ 
+         if not await acessar_matricula_online(page_aluno, aluno["Nome"]):
+             erro_detalhado = "Erro ao acessar matrícula online"
+             print(f"⚠️ {erro_detalhado}")
+-            await voltar_para_turma(page_sere)
+-            return False, erro_detalhado
++            return False, erro_detalhado, True
+ 
+         resultado = await confirmar_matricula(page_aluno)
+ 
+         if resultado == "JA_MATRICULADO":
+-            await voltar_para_turma(page_sere)
+-            print(f"✅ {aluno['Nome']} - JÁ MATRICULADO")
+-            return True, None
++            return resultado, None, False
+ 
+         if not resultado:
+             erro_detalhado = "Erro ao confirmar matrícula"
+             print(f"⚠️ {erro_detalhado}")
+-            await voltar_para_turma(page_sere)
+-            return False, erro_detalhado
++            return False, erro_detalhado, False
+ 
+-        await voltar_para_turma(page_sere)
++        return True, None, False
++
++    finally:
++        if page_aluno:
++            await page_aluno.close()
+ 
+-        print(f"✅ {aluno['Nome']} - REMATRÍCULA PROCESSADA!")
++
++def _desfecho(aluno, resultado, erro):
++    if resultado == "JA_MATRICULADO":
++        print(f"✅ {aluno['Nome']} - JÁ MATRICULADO")
+         return True, None
++    if not resultado:
++        return False, erro
++    print(f"✅ {aluno['Nome']} - REMATRÍCULA PROCESSADA!")
++    return True, None
++
++
++async def processar_aluno(page_sere, browser, aluno, chaves=None):
++    """
++    Rematricula um aluno. Devolve (sucesso: bool, erro_detalhado: str | None).
++    ErroReiniciarNavegador é propagado para o chamador reiniciar a sessão.
++
++    chaves: lista de chave_responsavel.json (ver src.automacao.chaves_responsavel) ou None.
++    Com chave salva utilizável para o aluno, entra direto na Área do Aluno, sem abrir a ficha no
++    SERE. Se a chave salva for recusada (expirada, por ex.), gera uma nova no SERE, atualiza a lista
++    e o arquivo, e tenta uma única vez de novo. Sem chave salva, gera na hora (e não grava).
++    """
++    try:
++        print(f"\n{'='*70}")
++        print(f"👤 Processando: {aluno['Nome']} (CGM: {aluno['cgm']})")
++        print(f"{'='*70}")
++
++        salvo = chaves_responsavel.buscar_chave(chaves, aluno["cgm"]) if chaves is not None else None
++        regenerando = False
++
++        if chaves_responsavel.chave_utilizavel(salvo):
++            print("🗝️ Usando a chave salva...")
++            resultado, erro, recusada = await _rematricular_na_area_aluno(
++                browser, aluno, salvo["cpf_responsavel"], salvo["chave"]
++            )
++            if not recusada:
++                return _desfecho(aluno, resultado, erro)
++            print("⚠️ A chave salva não funcionou (expirada?). Gerando uma nova no SERE...")
++            regenerando = True
++
++        chave, cpf, erro = await _abrir_ficha_gerar_chave(page_sere, aluno)
++        if erro:
++            return False, erro
++
++        if regenerando:
++            try:
++                chaves_responsavel.registrar_chave(chaves, aluno, salvo.get("turma", ""), chave, cpf)
++                chaves_responsavel.salvar_chaves(chaves)
++            except Exception as e:  # guardar a chave nova é auxiliar: não pode derrubar a rematrícula
++                print(f"⚠️ Não consegui atualizar a chave salva: {e}")
++
++        resultado, erro, _recusada = await _rematricular_na_area_aluno(browser, aluno, cpf, chave)
++        await voltar_para_turma(page_sere)
++        return _desfecho(aluno, resultado, erro)
+ 
+     except ErroReiniciarNavegador:
+         raise
+@@ -736,12 +796,8 @@
+         print(f"❌ Erro ao processar aluno: {erro_detalhado}")
+         return False, erro_detalhado
+ 
+-    finally:
+-        if page_aluno:
+-            await page_aluno.close()
+-
+ 
+-async def processar_turma(browser, turma_nome, alunos_para_processar, sucessos, erros, historico, login, senha):
++async def processar_turma(browser, turma_nome, alunos_para_processar, sucessos, erros, historico, login, senha, chaves=None):
+     """
+     Processa uma turma/seção completa com recuperação automática.
+ 
+@@ -779,7 +835,7 @@
+                 print(f"\n[{indice_atual + 1}/{len(alunos_para_processar)}]", end=" ")
+ 
+                 try:
+-                    sucesso, erro_msg = await processar_aluno(page_turma, browser, aluno)
++                    sucesso, erro_msg = await processar_aluno(page_turma, browser, aluno, chaves=chaves)
+ 
+                     registrar_resultado(sucessos, erros, historico, aluno, turma_nome, sucesso, erro_msg)
+                     salvar_resultados(sucessos, erros, historico)
+@@ -846,6 +902,7 @@
+     senha=None,
+     navegador="chromium",
+     headless=False,
++    usar_chaves_salvas=True,
+ ):
+     """
+     Roda a rematrícula. Devolve um resumo:
+@@ -855,6 +912,10 @@
+     turmas_alvo: lista de nomes-base (padrão TURMAS_ALVO); cada nome pode
+     corresponder a várias seções (ex.: "2º Ano" -> "2º Ano - A", "2º Ano - B").
+     headless=False por padrão (o original abre o navegador visível).
++
++    usar_chaves_salvas: usa as chaves de dados/<ano>/chave_responsavel.json (gerar_chaves_via_login) para
++    quem tiver; quem não tiver, ou cuja chave for recusada, gera na hora como sempre. Arquivo de chaves
++    ilegível não impede a rematrícula: avisa e gera todas na hora (o arquivo não é tocado).
+     """
+     turmas_alvo = list(turmas_alvo) if turmas_alvo is not None else list(TURMAS_ALVO)
+ 
+@@ -879,6 +940,14 @@
+     print(f"📊 Sucessos anteriores: {len(sucessos_anteriores)}")
+     print(f"📊 Erros anteriores: {len(erros_anteriores)}")
+ 
++    chaves = None
++    if usar_chaves_salvas:
++        try:
++            chaves = chaves_responsavel.carregar_chaves()
++            print(f"🗝️ Chaves salvas disponíveis: {len(chaves)}")
++        except chaves_responsavel.ChavesCorrompidasError as e:
++            print(f"⚠️ {e}\n⚠️ Seguindo sem chaves salvas: todas serão geradas na hora.")
++
+     sucessos = list(sucessos_anteriores)
+     erros = list(erros_anteriores)          # carregados: o contador de tentativas acumula
+     historico = list(historico_anterior)    # carregado: o histórico não é sobrescrito
+@@ -939,7 +1008,7 @@
+ 
+                     await processar_turma(
+                         browser, secao_texto, alunos_para_processar,
+-                        sucessos, erros, historico, login, senha,
++                        sucessos, erros, historico, login, senha, chaves=chaves,
+                     )
+ 
+         finally:
+--- /dev/null
++++ b/src/automacao/chaves_responsavel.py
+@@ -0,0 +1,343 @@
++"""
++chaves_responsavel.py — Gera e guarda a chave de acesso do responsável de cada aluno
++=============================================================================
++Versão integrada do antigo script avulso `gerar_chaves.py`. Para cada aluno
++matriculado das turmas alvo da rematrícula, abre a ficha no SERE, gera a chave
++de acesso do responsável, lê o CPF do responsável e grava os dois em
++
++    dados/<ano>/chave_responsavel.json     (mesmo nome e mesmo formato do script avulso)
++
++A rematrícula (src.automacao.rematricula) lê esse arquivo e, para o aluno que
++tem chave salva, pula a etapa de gerar chave no SERE e entra direto na Área do
++Aluno. Se a chave salva não funcionar (expirada, por exemplo), a rematrícula
++gera uma nova na hora e atualiza este arquivo.
++
++NÃO rematricula ninguém: só coleta CGM, nome, turma, CPF do responsável e chave.
++
++Formato de cada registro (igual ao do script avulso):
++    {"cgm", "nome", "turma", "data_nascimento", "cpf_responsavel", "chave", "timestamp"}
++
++Segurança: o arquivo guarda CPF + chave de acesso em texto puro. Fica em
++dados/<ano>/, que o .gitignore já bloqueia (dados/**/*.json). Não copie para
++fora da máquina da escola.
++
++Uso:
++    from src.automacao.chaves_responsavel import gerar_chaves_via_login
++    resumo = await gerar_chaves_via_login(modo_teste=True)
++"""
++
++from __future__ import annotations
++
++import asyncio
++from datetime import datetime, timedelta
++from pathlib import Path
++
++from playwright.async_api import async_playwright
++
++from src.comum import paths
++from src.comum.arquivos_json import (
++    ArquivoJsonCorrompidoError,
++    carregar_json,
++    salvar_json_atomico,
++)
++
++ARQUIVO_CHAVES = "chave_responsavel.json"
++
++
++class ChavesCorrompidasError(ArquivoJsonCorrompidoError):
++    """chave_responsavel.json está ilegível. Ele NÃO é tocado."""
++
++
++# ==========================================================
++# PERSISTÊNCIA (funções puras; o caminho é resolvido na hora do uso,
++# então a troca de ano letivo é respeitada sem recarregar o módulo)
++# ==========================================================
++
++def caminho_chaves() -> Path:
++    return Path(paths.dados_ano_atual()) / ARQUIVO_CHAVES
++
++
++def carregar_chaves() -> list:
++    """Chaves salvas. Arquivo inexistente -> []. Ilegível -> ChavesCorrompidasError (arquivo intacto)."""
++    return carregar_json(caminho_chaves(), list, tipo_esperado=list, erro=ChavesCorrompidasError)
++
++
++def salvar_chaves(chaves: list) -> None:
++    """Grava de forma atômica (a versão anterior permanece intacta se algo falhar)."""
++    salvar_json_atomico(caminho_chaves(), chaves, indent=4)
++
++
++def _cgm(valor) -> str:
++    return str(valor if valor is not None else "").strip()
++
++
++def buscar_chave(chaves, cgm) -> dict | None:
++    """Registro do CGM na lista (ignora itens que não sejam registros), ou None."""
++    alvo = _cgm(cgm)
++    for item in chaves or []:
++        if isinstance(item, dict) and _cgm(item.get("cgm")) == alvo:
++            return item
++    return None
++
++
++def chave_utilizavel(registro, validade_horas: float | None = None, agora: datetime | None = None) -> bool:
++    """
++    True se o registro tem chave E CPF do responsável (sem os dois não dá para entrar na Área do Aluno).
++    Com `validade_horas`, exige também timestamp válido e não mais velho que isso.
++    Sem `validade_horas` a idade não é conferida (o prazo real da chave no SERE não é conhecido pelo sistema).
++    """
++    if not isinstance(registro, dict):
++        return False
++    if not str(registro.get("chave") or "").strip() or not str(registro.get("cpf_responsavel") or "").strip():
++        return False
++    if validade_horas is None:
++        return True
++    try:
++        gerada_em = datetime.fromisoformat(str(registro.get("timestamp")))
++    except (TypeError, ValueError):
++        return False
++    return (agora or datetime.now()) - gerada_em <= timedelta(hours=validade_horas)
++
++
++def registrar_chave(chaves: list, aluno: dict, turma: str, chave: str, cpf: str, agora: datetime | None = None) -> dict:
++    """Coloca (ou substitui, por CGM) o registro do aluno na lista em memória e o devolve."""
++    registro = {
++        "cgm": _cgm(aluno["cgm"]),
++        "nome": aluno.get("Nome") or aluno.get("nome") or "",
++        "turma": turma,
++        "data_nascimento": aluno.get("Data Nasc.", aluno.get("data_nascimento", "")),
++        "cpf_responsavel": cpf,
++        "chave": chave,
++        "timestamp": (agora or datetime.now()).isoformat(),
++    }
++    chaves[:] = [c for c in chaves if not (isinstance(c, dict) and _cgm(c.get("cgm")) == registro["cgm"])]
++    chaves.append(registro)
++    return registro
++
++
++# ==========================================================
++# GERAÇÃO NO SERE
++# ==========================================================
++
++async def _gerar_chave_do_aluno(page_sere, aluno):
++    """
++    Abre a ficha do aluno, gera a chave, lê o CPF e volta para a lista da turma.
++    Devolve (chave, cpf, erro); erro None = deu certo. ErroReiniciarNavegador propaga.
++    """
++    from src.automacao import rematricula as rem
++
++    print(f"\n{'=' * 70}")
++    print(f"🔑 Gerando chave para: {aluno['Nome']} (CGM: {aluno['cgm']})")
++    print(f"{'=' * 70}")
++
++    chave, cpf, erro = await rem._abrir_ficha_gerar_chave(page_sere, aluno)
++    if erro is None:
++        await rem.voltar_para_turma(page_sere)
++    return chave, cpf, erro
++
++
++async def _processar_secao(browser, secao, alunos, chaves, login, senha, resumo) -> bool:
++    """
++    Gera a chave de cada aluno da seção, com a mesma recuperação da rematrícula (reinicia a sessão em erro
++    crítico; desiste do aluno após MAX_TENTATIVAS_NAVEGADOR e da seção após MAX_FALHAS_SESSAO falhas de sessão).
++    Grava o arquivo a cada chave gerada. Devolve False se a seção foi abandonada.
++    """
++    from src.automacao import rematricula as rem
++
++    indice = 0
++    tentativa_navegador = 0
++    falhas_sessao = 0
++
++    while indice < len(alunos):
++        page = None
++        try:
++            page = await rem._abrir_por_turmas(browser, login, senha)
++            if page is None:
++                falhas_sessao += 1
++                if falhas_sessao >= rem.MAX_FALHAS_SESSAO:
++                    print(f"❌ {falhas_sessao} falhas seguidas de login/navegação. Abandonando '{secao}'.")
++                    return False
++                print(f"❌ Falha no login/navegação (tentativa {falhas_sessao}/{rem.MAX_FALHAS_SESSAO}), tentando novamente...")
++                await asyncio.sleep(3)
++                continue
++
++            if not await rem.selecionar_turma(page, secao):
++                print(f"❌ Não foi possível selecionar a seção '{secao}'")
++                return False
++
++            while indice < len(alunos):
++                aluno = alunos[indice]
++                print(f"\n[{indice + 1}/{len(alunos)}]", end=" ")
++
++                try:
++                    chave, cpf, erro = await _gerar_chave_do_aluno(page, aluno)
++                    if erro is None:
++                        registrar_chave(chaves, aluno, secao, chave, cpf)
++                        salvar_chaves(chaves)
++                        resumo["geradas"] += 1
++                        print(f"✅ {aluno['Nome']} - CHAVE SALVA")
++                    else:
++                        resumo["falhas"].append({"cgm": aluno["cgm"], "nome": aluno["Nome"], "turma": secao, "erro": erro})
++                        print(f"⚠️ {aluno['Nome']} - {erro}")
++
++                    indice += 1
++                    tentativa_navegador = 0
++                    falhas_sessao = 0
++                    if indice < len(alunos):
++                        await asyncio.sleep(2)
++
++                except rem.ErroReiniciarNavegador as e:
++                    print(f"\n🔄 ERRO CRÍTICO DETECTADO: {e}")
++                    print("🔄 Fechando navegador e reiniciando do aluno atual...")
++                    tentativa_navegador += 1
++
++                    if tentativa_navegador >= rem.MAX_TENTATIVAS_NAVEGADOR:
++                        print(f"❌ Máximo de tentativas ({rem.MAX_TENTATIVAS_NAVEGADOR}) atingido. Pulando: {aluno['Nome']}")
++                        resumo["falhas"].append({
++                            "cgm": aluno["cgm"], "nome": aluno["Nome"], "turma": secao,
++                            "erro": f"Erro crítico após {rem.MAX_TENTATIVAS_NAVEGADOR} tentativas: {e}",
++                        })
++                        indice += 1
++                        tentativa_navegador = 0
++
++                    await page.close()
++                    page = None
++                    await asyncio.sleep(5)
++                    break  # reinicia a sessão a partir do aluno atual
++
++            if indice >= len(alunos):
++                return True
++
++        except Exception as e:
++            print(f"❌ Erro inesperado ao processar a seção: {e}")
++            falhas_sessao += 1
++            if falhas_sessao >= rem.MAX_FALHAS_SESSAO:
++                print(f"❌ {falhas_sessao} falhas seguidas. Abandonando '{secao}'.")
++                return False
++            await asyncio.sleep(5)
++
++        finally:
++            if page:
++                try:
++                    await page.close()
++                except Exception:
++                    pass
++
++    return True
++
++
++async def gerar_chaves_via_login(
++    modo_teste=False,
++    turmas_alvo=None,
++    login=None,
++    senha=None,
++    navegador="chromium",
++    headless=False,
++    regenerar=False,
++    validade_horas=None,
++):
++    """
++    Gera e salva a chave de acesso do responsável dos alunos matriculados. Devolve um resumo:
++      {"total_chaves", "geradas", "falhas": [{cgm, nome, turma, erro}], "arquivo"}
++
++    turmas_alvo:    nomes-base (padrão: TURMAS_ALVO da rematrícula); cada um pode ter várias seções.
++    modo_teste:     1 aluno pendente por seção.
++    regenerar:      gera de novo mesmo para quem já tem chave utilizável salva.
++    validade_horas: se informado, chave salva há mais tempo que isso conta como vencida e é gerada de novo.
++
++    Pula quem já tem chave utilizável (a menos que `regenerar`) e quem já está em rematriculas_sucesso.json
++    (já rematriculado, não precisa de chave). Arquivo de chaves ou de sucessos ilegível aborta ANTES de abrir
++    o navegador, sem alterar nada.
++    """
++    from src.automacao import rematricula as rem
++
++    turmas_alvo = list(turmas_alvo) if turmas_alvo is not None else list(rem.TURMAS_ALVO)
++
++    if login is None or senha is None:
++        login_padrao, senha_padrao = rem._credenciais_padrao()
++        login = login_padrao if login is None else login
++        senha = senha_padrao if senha is None else senha
++
++    print("\n" + "=" * 70)
++    print("🔑 GERAÇÃO DE CHAVES DE ACESSO DO RESPONSÁVEL")
++    if modo_teste:
++        print("🧪 MODO TESTE - 1 aluno por seção")
++    print("=" * 70)
++
++    chaves = carregar_chaves()
++    sucessos = rem.carregar_sucessos_anteriores()
++    print(f"📊 Chaves já salvas: {len(chaves)}")
++
++    resumo = {"geradas": 0, "falhas": []}
++
++    async with async_playwright() as p:
++        browser = await getattr(p, navegador).launch(headless=headless)
++
++        try:
++            for turma_nome in turmas_alvo:
++                print(f"\n{'=' * 70}\n📚 PROCESSANDO TURMA (base): {turma_nome}\n{'=' * 70}")
++
++                page_temp = await rem._abrir_por_turmas(browser, login, senha)
++                if page_temp is None:
++                    continue
++                secoes = await rem.listar_secao_turmas(page_temp, turma_nome)
++                await page_temp.close()
++
++                if not secoes:
++                    print(f"\n⚠️ Nenhuma seção encontrada para '{turma_nome}'")
++                    continue
++
++                for secao in secoes:
++                    print(f"\n--- Iniciando seção: {secao} ---")
++
++                    page_secao = await rem._abrir_por_turmas(browser, login, senha)
++                    if page_secao is None:
++                        continue
++                    if not await rem.selecionar_turma(page_secao, secao):
++                        print(f"\n⚠️ Seção '{secao}' não encontrada ao tentar selecionar")
++                        await page_secao.close()
++                        continue
++                    alunos = await rem.obter_alunos_matriculados(page_secao)
++                    await page_secao.close()
++
++                    if not alunos:
++                        print(f"\n⚠️ Nenhum aluno matriculado em '{secao}'")
++                        continue
++
++                    pendentes = [
++                        a for a in alunos
++                        if not rem.aluno_ja_processado(a, sucessos)
++                        and (regenerar or not chave_utilizavel(buscar_chave(chaves, a["cgm"]), validade_horas))
++                    ]
++                    if modo_teste:
++                        pendentes = pendentes[:1]
++
++                    if not pendentes:
++                        print(f"✅ Todos os alunos de '{secao}' já têm chave (ou já foram rematriculados)!")
++                        continue
++
++                    await _processar_secao(browser, secao, pendentes, chaves, login, senha, resumo)
++
++        finally:
++            await browser.close()
++
++    salvar_chaves(chaves)
++
++    print("\n\n" + "=" * 70)
++    print("📊 RESUMO FINAL")
++    print("=" * 70)
++    print(f"🔑 Chaves geradas agora: {resumo['geradas']}")
++    print(f"🔑 Total de chaves salvas: {len(chaves)}")
++    if resumo["falhas"]:
++        print(f"⚠️ Alunos sem chave ({len(resumo['falhas'])}):")
++        for f in resumo["falhas"]:
++            print(f"  - {f['nome']} (CGM: {f['cgm']}, {f['turma']}): {f['erro']}")
++    print(f"📁 Arquivo: {caminho_chaves()}")
++    print("=" * 70 + "\n")
++
++    return {
++        "total_chaves": len(chaves),
++        "geradas": resumo["geradas"],
++        "falhas": resumo["falhas"],
++        "arquivo": caminho_chaves(),
++    }
+--- a/tests/test_rematricula.py
++++ b/tests/test_rematricula.py
+@@ -426,7 +426,7 @@
+     async def _selecionar(_p, _t):
+         return selecionar
+ 
+-    async def _processar(_p, _b, al):
++    async def _processar(_p, _b, al, chaves=None):
+         estado["chamadas"].append(al["cgm"])
+         fila = resultados.get(al["cgm"], [])
+         efeito = fila.pop(0) if fila else (True, None)
+@@ -593,7 +593,7 @@
+ 
+     res = {k: list(v) for k, v in (resultados or {}).items()}
+ 
+-    async def _processar(_p, _b, al):
++    async def _processar(_p, _b, al, chaves=None):
+         estado["processados"].append(al["cgm"])
+         fila = res.get(al["cgm"], [])
+         return fila.pop(0) if fila else (True, None)
+@@ -707,3 +707,152 @@
+ 
+     rodar(rem.rematricular_via_login(turmas_alvo=["X"], login="l", senha="s", navegador="firefox", headless=True))
+     assert pw.firefox.headless is True
++
++
++# ----------------------------------------------------------
++# chaves salvas (chave_responsavel.json)
++# ----------------------------------------------------------
++
++from src.automacao import chaves_responsavel as cr  # noqa: E402
++
++
++def _salva(cgm, chave="SALVA", cpf="111", turma="2º Ano - A"):
++    return {"cgm": str(cgm), "nome": f"Aluno {cgm}", "turma": turma, "cpf_responsavel": cpf, "chave": chave,
++            "timestamp": "2026-11-02T10:00:00"}
++
++
++def _passos_chave(monkeypatch, *, aceita=("SALVA", "NOVA"), chave_nova="NOVA", cpf_ficha="222", confirmar=True):
++    """Área do Aluno só aceita as chaves em `aceita`; registra o que foi usado em cada etapa."""
++    uso = {"gerou": 0, "logins": [], "acessos": 0}
++
++    async def gerar(_p):
++        uso["gerou"] += 1
++        return chave_nova
++
++    async def obter_cpf(_p):
++        return cpf_ficha
++
++    async def entrar(_p, cpf, chave):
++        uso["logins"].append((cpf, chave))
++        return chave in aceita
++
++    async def acessar(_p, _n):
++        uso["acessos"] += 1
++        return True
++
++    async def confirmar_(_p):
++        return confirmar
++
++    monkeypatch.setattr(rem, "gerar_chave_acesso", gerar)
++    monkeypatch.setattr(rem, "obter_cpf_responsavel", obter_cpf)
++    monkeypatch.setattr(rem, "fazer_login_area_aluno", entrar)
++    monkeypatch.setattr(rem, "acessar_matricula_online", acessar)
++    monkeypatch.setattr(rem, "confirmar_matricula", confirmar_)
++    return uso
++
++
++def test_chave_salva_pula_a_ficha_do_sere_e_entra_direto(monkeypatch, dados_tmp):
++    uso = _passos_chave(monkeypatch)
++    link = LinkFake("10")
++    chaves = [_salva(10)]
++    assert rodar(rem.processar_aluno(PaginaFake([link]), NavegadorFake(), aluno(10), chaves=chaves)) == (True, None)
++    assert uso["gerou"] == 0 and uso["logins"] == [("111", "SALVA")] and not link.clicado
++    assert not (dados_tmp / cr.ARQUIVO_CHAVES).exists()          # nada foi regravado
++
++
++def test_chave_salva_recusada_gera_nova_atualiza_o_arquivo_e_conclui(monkeypatch, dados_tmp):
++    uso = _passos_chave(monkeypatch, aceita=("NOVA",))
++    link = LinkFake("10")
++    chaves = [_salva(10, chave="VENCIDA"), _salva(11)]
++    assert rodar(rem.processar_aluno(PaginaFake([link]), NavegadorFake(), aluno(10), chaves=chaves)) == (True, None)
++    assert uso["gerou"] == 1 and link.clicado
++    assert uso["logins"] == [("111", "VENCIDA"), ("222", "NOVA")]
++    gravado = {c["cgm"]: c for c in ler(dados_tmp / cr.ARQUIVO_CHAVES)}
++    assert gravado["10"]["chave"] == "NOVA" and gravado["10"]["cpf_responsavel"] == "222" and gravado["10"]["turma"] == "2º Ano - A"
++    assert gravado["11"]["chave"] == "SALVA"                      # o resto do arquivo é preservado
++
++
++def test_chave_salva_recusada_e_nova_tambem_recusada_falha_sem_laco(monkeypatch):
++    uso = _passos_chave(monkeypatch, aceita=())
++    ok, msg = rodar(rem.processar_aluno(PaginaFake([LinkFake("10")]), NavegadorFake(), aluno(10), chaves=[_salva(10)]))
++    assert (ok, msg) == (False, "Erro ao fazer login na Área do Aluno")
++    assert uso["gerou"] == 1 and len(uso["logins"]) == 2           # uma tentativa com a salva, uma com a nova
++
++
++def test_falha_na_confirmacao_com_chave_salva_nao_gera_chave_nova(monkeypatch):
++    uso = _passos_chave(monkeypatch, confirmar=False)
++    ok, msg = rodar(rem.processar_aluno(PaginaFake([LinkFake("10")]), NavegadorFake(), aluno(10), chaves=[_salva(10)]))
++    assert (ok, msg) == (False, "Erro ao confirmar matrícula") and uso["gerou"] == 0 and len(uso["logins"]) == 1
++
++
++def test_chave_salva_ja_matriculado_conta_como_sucesso(monkeypatch):
++    _passos_chave(monkeypatch, confirmar="JA_MATRICULADO")
++    assert rodar(rem.processar_aluno(PaginaFake(), NavegadorFake(), aluno(10), chaves=[_salva(10)])) == (True, None)
++
++
++def test_aluno_sem_chave_salva_gera_na_hora_e_nao_grava(monkeypatch, dados_tmp):
++    uso = _passos_chave(monkeypatch)
++    chaves = [_salva(99)]
++    assert rodar(rem.processar_aluno(PaginaFake([LinkFake("10")]), NavegadorFake(), aluno(10), chaves=chaves)) == (True, None)
++    assert uso["gerou"] == 1 and uso["logins"] == [("222", "NOVA")] and chaves == [_salva(99)]
++    assert not (dados_tmp / cr.ARQUIVO_CHAVES).exists()
++
++
++@pytest.mark.parametrize("salva", [_salva(10, cpf=None), _salva(10, chave="")])
++def test_registro_salvo_incompleto_e_ignorado(monkeypatch, salva):
++    uso = _passos_chave(monkeypatch)
++    assert rodar(rem.processar_aluno(PaginaFake([LinkFake("10")]), NavegadorFake(), aluno(10), chaves=[salva])) == (True, None)
++    assert uso["gerou"] == 1 and uso["logins"] == [("222", "NOVA")]
++
++
++def test_erro_ao_gravar_a_chave_nova_nao_derruba_a_rematricula(monkeypatch):
++    _passos_chave(monkeypatch, aceita=("NOVA",))
++
++    def quebra(_c):
++        raise OSError("disco cheio")
++
++    monkeypatch.setattr(cr, "salvar_chaves", quebra)
++    assert rodar(rem.processar_aluno(PaginaFake([LinkFake("10")]), NavegadorFake(), aluno(10), chaves=[_salva(10)])) == (True, None)
++
++
++def test_orquestracao_carrega_as_chaves_e_repassa_para_cada_aluno(monkeypatch, dados_tmp):
++    cr.salvar_chaves([_salva(2)])
++    vistos = []
++    _orquestrar(monkeypatch, {"2º Ano": ["2º Ano - A"]}, {"2º Ano - A": [aluno(2)]})
++
++    async def _processar(_p, _b, al, chaves=None):
++        vistos.append(chaves)
++        return (True, None)
++
++    monkeypatch.setattr(rem, "processar_aluno", _processar)
++    rodar(rem.rematricular_via_login(turmas_alvo=["2º Ano"], login="l", senha="s"))
++    assert vistos == [[_salva(2)]]
++
++
++def test_ignorar_chaves_salvas_nao_le_o_arquivo(monkeypatch, dados_tmp):
++    (dados_tmp / cr.ARQUIVO_CHAVES).write_bytes(b"[{ruim")       # nem seria lido
++    vistos = []
++    _orquestrar(monkeypatch, {"2º Ano": ["2º Ano - A"]}, {"2º Ano - A": [aluno(2)]})
++
++    async def _processar(_p, _b, al, chaves=None):
++        vistos.append(chaves)
++        return (True, None)
++
++    monkeypatch.setattr(rem, "processar_aluno", _processar)
++    rodar(rem.rematricular_via_login(turmas_alvo=["2º Ano"], login="l", senha="s", usar_chaves_salvas=False))
++    assert vistos == [None]
++
++
++def test_arquivo_de_chaves_ilegivel_nao_impede_a_rematricula_e_nao_e_tocado(monkeypatch, dados_tmp):
++    (dados_tmp / cr.ARQUIVO_CHAVES).write_bytes(b"[{ruim")
++    vistos = []
++    _, est = _orquestrar(monkeypatch, {"2º Ano": ["2º Ano - A"]}, {"2º Ano - A": [aluno(2)]})
++
++    async def _processar(_p, _b, al, chaves=None):
++        vistos.append(chaves)
++        return (True, None)
++
++    monkeypatch.setattr(rem, "processar_aluno", _processar)
++    r = rodar(rem.rematricular_via_login(turmas_alvo=["2º Ano"], login="l", senha="s"))
++    assert vistos == [None] and r["total_sucessos"] == 1
++    assert (dados_tmp / cr.ARQUIVO_CHAVES).read_bytes() == b"[{ruim"
+--- /dev/null
++++ b/tests/test_chaves_responsavel.py
+@@ -0,0 +1,377 @@
++"""Testes de src/automacao/chaves_responsavel.py (persistência pura e gerador com sessão simulada)."""
++
++import asyncio
++import json
++from datetime import datetime, timedelta
++
++import pytest
++
++from src.automacao import chaves_responsavel as cr
++from src.automacao import rematricula as rem
++from src.comum import paths
++
++
++@pytest.fixture(autouse=True)
++def dados_tmp(tmp_path, monkeypatch):
++    monkeypatch.setattr(paths, "dados_ano_atual", lambda: tmp_path)
++
++    async def _sem_espera(*_a, **_k):
++        return None
++
++    monkeypatch.setattr(cr.asyncio, "sleep", _sem_espera)
++    return tmp_path
++
++
++def rodar(coro):
++    return asyncio.run(asyncio.wait_for(coro, 5))
++
++
++def aluno(cgm, nome=None):
++    return {"cgm": str(cgm), "Nome": nome or f"Aluno {cgm}", "Data Nasc.": "01/01/2019"}
++
++
++def ler(caminho):
++    return json.loads(caminho.read_text(encoding="utf-8"))
++
++
++# ----------------------------------------------------------
++# persistência e regras puras
++# ----------------------------------------------------------
++
++def test_arquivo_inexistente_vira_lista_vazia_e_nome_e_o_do_script_avulso(dados_tmp):
++    assert cr.carregar_chaves() == []
++    assert cr.caminho_chaves() == dados_tmp / "chave_responsavel.json"
++
++
++def test_salvar_e_carregar_ida_e_volta_sem_temporarios(dados_tmp):
++    cr.salvar_chaves([{"cgm": "1", "chave": "K"}])
++    assert cr.carregar_chaves() == [{"cgm": "1", "chave": "K"}]
++    assert [p for p in dados_tmp.iterdir() if p.name.endswith(".tmp")] == []
++
++
++@pytest.mark.parametrize("conteudo", [b"[{ruim", b'{"nao": "lista"}'])
++def test_arquivo_ilegivel_ou_com_tipo_errado_levanta_e_nao_e_alterado(dados_tmp, conteudo):
++    (dados_tmp / cr.ARQUIVO_CHAVES).write_bytes(conteudo)
++    with pytest.raises(cr.ChavesCorrompidasError):
++        cr.carregar_chaves()
++    assert (dados_tmp / cr.ARQUIVO_CHAVES).read_bytes() == conteudo
++
++
++def test_arquivo_do_script_avulso_e_lido_como_esta(dados_tmp):
++    legado = [{"cgm": "123", "nome": "Ana", "turma": "2º Ano - A", "data_nascimento": "01/01/2019",
++               "cpf_responsavel": "12345678901", "chave": "ABC", "timestamp": "2026-11-02T10:00:00"}]
++    (dados_tmp / cr.ARQUIVO_CHAVES).write_text(json.dumps(legado), encoding="utf-8")
++    assert cr.chave_utilizavel(cr.buscar_chave(cr.carregar_chaves(), "123"))
++
++
++def test_buscar_ignora_lixo_e_compara_cgm_como_texto():
++    chaves = ["lixo", None, {"sem": "cgm"}, {"cgm": 55, "chave": "K", "cpf_responsavel": "1"}]
++    assert cr.buscar_chave(chaves, " 55 ")["chave"] == "K"
++    assert cr.buscar_chave(chaves, "56") is None
++    assert cr.buscar_chave(None, "1") is None
++
++
++@pytest.mark.parametrize("registro,esperado", [
++    ({"chave": "K", "cpf_responsavel": "123"}, True),
++    ({"chave": "K", "cpf_responsavel": None}, False),      # sem CPF não dá para entrar na Área do Aluno
++    ({"chave": "", "cpf_responsavel": "123"}, False),
++    ({"chave": "  ", "cpf_responsavel": "123"}, False),
++    (None, False),
++    ("texto", False),
++])
++def test_chave_utilizavel_exige_chave_e_cpf(registro, esperado):
++    assert cr.chave_utilizavel(registro) is esperado
++
++
++def test_validade_em_horas():
++    agora = datetime(2026, 11, 3, 12, 0)
++    base = {"chave": "K", "cpf_responsavel": "1"}
++    recente = {**base, "timestamp": (agora - timedelta(hours=2)).isoformat()}
++    velha = {**base, "timestamp": (agora - timedelta(hours=30)).isoformat()}
++    assert cr.chave_utilizavel(recente, 24, agora) and not cr.chave_utilizavel(velha, 24, agora)
++    assert cr.chave_utilizavel(velha, None, agora)                       # sem prazo informado: idade não é conferida
++    assert not cr.chave_utilizavel({**base, "timestamp": "ontem"}, 24, agora)   # timestamp ilegível: conservador
++    assert not cr.chave_utilizavel(base, 24, agora)
++
++
++def test_registrar_chave_substitui_por_cgm_e_preserva_o_resto():
++    chaves = ["lixo", {"cgm": "1", "chave": "velha"}, {"cgm": "2", "chave": "outra"}]
++    r = cr.registrar_chave(chaves, aluno(1), "2º Ano - A", "nova", "999", agora=datetime(2026, 11, 3, 9, 0))
++    assert r == {"cgm": "1", "nome": "Aluno 1", "turma": "2º Ano - A", "data_nascimento": "01/01/2019",
++                 "cpf_responsavel": "999", "chave": "nova", "timestamp": "2026-11-03T09:00:00"}
++    assert [c["chave"] for c in chaves if isinstance(c, dict)] == ["outra", "nova"] and "lixo" in chaves
++
++
++# ----------------------------------------------------------
++# _gerar_chave_do_aluno
++# ----------------------------------------------------------
++
++def test_gerar_chave_do_aluno_volta_para_a_lista_so_quando_deu_certo(monkeypatch):
++    voltou = []
++
++    async def voltar(_p):
++        voltou.append(1)
++
++    monkeypatch.setattr(rem, "voltar_para_turma", voltar)
++
++    async def ok(_p, _a):
++        return "K", "123", None
++
++    monkeypatch.setattr(rem, "_abrir_ficha_gerar_chave", ok)
++    assert rodar(cr._gerar_chave_do_aluno(object(), aluno(1))) == ("K", "123", None) and voltou == [1]
++
++    async def falha(_p, _a):
++        return None, None, "CPF do responsável não encontrado"   # a própria função já voltou
++
++    monkeypatch.setattr(rem, "_abrir_ficha_gerar_chave", falha)
++    assert rodar(cr._gerar_chave_do_aluno(object(), aluno(1)))[2] == "CPF do responsável não encontrado"
++    assert voltou == [1]
++
++
++# ----------------------------------------------------------
++# _processar_secao (recuperação de sessão)
++# ----------------------------------------------------------
++
++class PaginaFake:
++    fechada = False
++
++    async def close(self):
++        self.fechada = True
++
++
++def _secao(monkeypatch, *, abrir=None, selecionar=True, efeitos=None):
++    """efeitos: {cgm: [(chave, cpf, erro) | exceção, ...]}; esgotado => ('K<cgm>', 'CPF', None)."""
++    estado = {"aberturas": 0, "chamadas": []}
++    abrir = list(abrir or [])
++    efeitos = {k: list(v) for k, v in (efeitos or {}).items()}
++
++    async def _abrir(_b, _l, _s):
++        estado["aberturas"] += 1
++        return PaginaFake() if (abrir.pop(0) if abrir else True) else None
++
++    async def _selecionar(_p, _t):
++        return selecionar
++
++    async def _gerar(_p, al):
++        estado["chamadas"].append(al["cgm"])
++        fila = efeitos.get(al["cgm"], [])
++        efeito = fila.pop(0) if fila else (f"K{al['cgm']}", "CPF", None)
++        if isinstance(efeito, BaseException):
++            raise efeito
++        return efeito
++
++    monkeypatch.setattr(rem, "_abrir_por_turmas", _abrir)
++    monkeypatch.setattr(rem, "selecionar_turma", _selecionar)
++    monkeypatch.setattr(cr, "_gerar_chave_do_aluno", _gerar)
++    return estado
++
++
++def _rodar_secao(alunos, chaves=None):
++    resumo = {"geradas": 0, "falhas": []}
++    chaves = [] if chaves is None else chaves
++    r = rodar(cr._processar_secao(object(), "2º Ano - A", alunos, chaves, "l", "s", resumo))
++    return r, chaves, resumo
++
++
++def test_secao_grava_a_cada_chave_gerada(monkeypatch, dados_tmp):
++    _secao(monkeypatch)
++    r, chaves, resumo = _rodar_secao([aluno(1), aluno(2)])
++    assert r is True and resumo["geradas"] == 2 and resumo["falhas"] == []
++    assert [c["cgm"] for c in ler(dados_tmp / cr.ARQUIVO_CHAVES)] == ["1", "2"]
++    assert chaves[0]["turma"] == "2º Ano - A" and chaves[0]["chave"] == "K1" and chaves[0]["cpf_responsavel"] == "CPF"
++
++
++def test_falha_comum_vai_para_o_resumo_nao_salva_chave_e_segue(monkeypatch, dados_tmp):
++    _secao(monkeypatch, efeitos={"1": [(None, None, "CPF do responsável não encontrado")]})
++    r, chaves, resumo = _rodar_secao([aluno(1), aluno(2)])
++    assert r is True and [c["cgm"] for c in chaves] == ["2"]
++    assert resumo["falhas"] == [{"cgm": "1", "nome": "Aluno 1", "turma": "2º Ano - A",
++                                 "erro": "CPF do responsável não encontrado"}]
++
++
++def test_erro_critico_uma_vez_reinicia_e_conclui_o_mesmo_aluno(monkeypatch):
++    est = _secao(monkeypatch, efeitos={"1": [rem.ErroReiniciarNavegador("travou")]})
++    r, chaves, resumo = _rodar_secao([aluno(1), aluno(2)])
++    assert r is True and est["chamadas"] == ["1", "1", "2"] and est["aberturas"] == 2
++    assert [c["cgm"] for c in chaves] == ["1", "2"] and resumo["falhas"] == []
++
++
++def test_erro_critico_tres_vezes_desiste_do_aluno_e_avanca(monkeypatch):
++    est = _secao(monkeypatch, efeitos={"1": [rem.ErroReiniciarNavegador("x")] * 3})
++    r, chaves, resumo = _rodar_secao([aluno(1), aluno(2)])
++    assert r is True and est["chamadas"] == ["1", "1", "1", "2"] and [c["cgm"] for c in chaves] == ["2"]
++    assert "Erro crítico após 3 tentativas" in resumo["falhas"][0]["erro"]
++
++
++def test_login_sempre_falhando_nao_fica_em_loop_infinito(monkeypatch):
++    est = _secao(monkeypatch, abrir=[False] * 50)
++    r, chaves, _ = _rodar_secao([aluno(1)])
++    assert r is False and chaves == [] and est["aberturas"] == rem.MAX_FALHAS_SESSAO
++
++
++def test_turma_nao_encontrada_abandona_a_secao(monkeypatch):
++    est = _secao(monkeypatch, selecionar=False)
++    r, chaves, _ = _rodar_secao([aluno(1)])
++    assert r is False and chaves == [] and est["chamadas"] == []
++
++
++# ----------------------------------------------------------
++# gerar_chaves_via_login (orquestração)
++# ----------------------------------------------------------
++
++class _Nav:
++    fechado = False
++
++    async def close(self):
++        self.fechado = True
++
++
++class _Lancador:
++    def __init__(self, nav):
++        self.nav, self.headless = nav, None
++
++    async def launch(self, headless=True):
++        self.headless = headless
++        return self.nav
++
++
++class _PW:
++    def __init__(self, nav):
++        self.chromium = _Lancador(nav)
++
++
++class _Ctx:
++    def __init__(self, nav):
++        self.pw = _PW(nav)
++
++    async def __aenter__(self):
++        return self.pw
++
++    async def __aexit__(self, *_a):
++        return False
++
++
++def _orquestrar(monkeypatch, secoes, alunos_por_secao, falhar=()):
++    nav = _Nav()
++    ctx = _Ctx(nav)
++    monkeypatch.setattr(cr, "async_playwright", lambda: ctx)
++    est = {"aberta": None, "geradas": [], "ctx": ctx}
++
++    async def _abrir(_b, _l, _s):
++        return PaginaFake()
++
++    async def _listar(_p, turma):
++        return secoes.get(turma, [])
++
++    async def _selecionar(_p, secao):
++        est["aberta"] = secao
++        return True
++
++    async def _obter(_p):
++        return alunos_por_secao.get(est["aberta"], [])
++
++    async def _secao(_b, secao, alunos, chaves, _l, _s, resumo):
++        for a in alunos:
++            est["geradas"].append(a["cgm"])
++            if a["cgm"] in falhar:
++                resumo["falhas"].append({"cgm": a["cgm"], "nome": a["Nome"], "turma": secao, "erro": "x"})
++                continue
++            cr.registrar_chave(chaves, a, secao, f"K{a['cgm']}", "CPF")
++            cr.salvar_chaves(chaves)
++            resumo["geradas"] += 1
++        return True
++
++    monkeypatch.setattr(rem, "_abrir_por_turmas", _abrir)
++    monkeypatch.setattr(rem, "listar_secao_turmas", _listar)
++    monkeypatch.setattr(rem, "selecionar_turma", _selecionar)
++    monkeypatch.setattr(rem, "obter_alunos_matriculados", _obter)
++    monkeypatch.setattr(cr, "_processar_secao", _secao)
++    return nav, est
++
++
++def _gerar(**kw):
++    return rodar(cr.gerar_chaves_via_login(login="l", senha="s", **kw))
++
++
++def test_gera_so_para_quem_nao_tem_chave_utilizavel_nem_ja_rematriculou(monkeypatch, dados_tmp):
++    cr.salvar_chaves([{"cgm": "1", "chave": "K1", "cpf_responsavel": "CPF"},       # tem chave: pula
++                      {"cgm": "2", "chave": "K2", "cpf_responsavel": None}])        # sem CPF: não vale, gera de novo
++    rem.salvar_resultados([{"cgm": "3", "nome": "x", "turma": "T"}], [], [])        # já rematriculado: pula
++    nav, est = _orquestrar(monkeypatch, {"2º Ano": ["2º Ano - A"]}, {"2º Ano - A": [aluno(1), aluno(2), aluno(3), aluno(4)]})
++    r = _gerar(turmas_alvo=["2º Ano"])
++    assert est["geradas"] == ["2", "4"] and r["geradas"] == 2 and r["falhas"] == []
++    por_cgm = {c["cgm"]: c for c in ler(dados_tmp / cr.ARQUIVO_CHAVES)}
++    assert set(por_cgm) == {"1", "2", "4"} and por_cgm["1"]["chave"] == "K1" and por_cgm["2"]["chave"] == "K2"
++    assert r["total_chaves"] == 3 and r["arquivo"] == dados_tmp / cr.ARQUIVO_CHAVES and nav.fechado
++
++
++def test_regenerar_gera_de_novo_para_quem_ja_tem_chave(monkeypatch):
++    cr.salvar_chaves([{"cgm": "1", "chave": "velha", "cpf_responsavel": "CPF"}])
++    _, est = _orquestrar(monkeypatch, {"2º Ano": ["2º Ano - A"]}, {"2º Ano - A": [aluno(1), aluno(2)]})
++    _gerar(turmas_alvo=["2º Ano"], regenerar=True)
++    assert est["geradas"] == ["1", "2"]
++    assert {c["cgm"]: c["chave"] for c in cr.carregar_chaves()} == {"1": "K1", "2": "K2"}
++
++
++def test_validade_gera_de_novo_a_chave_vencida(monkeypatch):
++    velho = (datetime.now() - timedelta(hours=48)).isoformat()
++    novo = datetime.now().isoformat()
++    cr.salvar_chaves([{"cgm": "1", "chave": "K", "cpf_responsavel": "C", "timestamp": velho},
++                      {"cgm": "2", "chave": "K", "cpf_responsavel": "C", "timestamp": novo}])
++    _, est = _orquestrar(monkeypatch, {"2º Ano": ["2º Ano - A"]}, {"2º Ano - A": [aluno(1), aluno(2)]})
++    _gerar(turmas_alvo=["2º Ano"], validade_horas=24)
++    assert est["geradas"] == ["1"]
++
++
++def test_modo_teste_gera_so_o_primeiro_pendente_de_cada_secao(monkeypatch):
++    cr.salvar_chaves([{"cgm": "1", "chave": "K", "cpf_responsavel": "C"}])
++    _, est = _orquestrar(
++        monkeypatch, {"2º Ano": ["2º Ano - A", "2º Ano - B"]},
++        {"2º Ano - A": [aluno(1), aluno(2), aluno(3)], "2º Ano - B": [aluno(7), aluno(8)]},
++    )
++    _gerar(turmas_alvo=["2º Ano"], modo_teste=True)
++    assert est["geradas"] == ["2", "7"]
++
++
++def test_secao_sem_pendentes_e_turma_sem_secoes_nao_quebram(monkeypatch):
++    cr.salvar_chaves([{"cgm": "1", "chave": "K", "cpf_responsavel": "C"}])
++    _, est = _orquestrar(monkeypatch, {"2º Ano": ["2º Ano - A"]}, {"2º Ano - A": [aluno(1)]})
++    r = _gerar(turmas_alvo=["2º Ano", "Inexistente"])
++    assert est["geradas"] == [] and r["total_chaves"] == 1
++
++
++def test_falhas_aparecem_no_resumo(monkeypatch):
++    _, est = _orquestrar(monkeypatch, {"2º Ano": ["2º Ano - A"]}, {"2º Ano - A": [aluno(1), aluno(2)]}, falhar={"2"})
++    r = _gerar(turmas_alvo=["2º Ano"])
++    assert r["geradas"] == 1 and [f["cgm"] for f in r["falhas"]] == ["2"]
++
++
++@pytest.mark.parametrize("arquivo", [cr.ARQUIVO_CHAVES, rem.ARQUIVO_SUCESSO])
++def test_arquivo_ilegivel_aborta_antes_de_abrir_o_navegador(monkeypatch, dados_tmp, arquivo):
++    (dados_tmp / arquivo).write_bytes(b"[{ruim")
++
++    def nao_deveria(*_a, **_k):
++        raise AssertionError("não devia abrir o navegador")
++
++    monkeypatch.setattr(cr, "async_playwright", nao_deveria)
++    with pytest.raises(Exception, match="ilegível"):
++        _gerar()
++    assert (dados_tmp / arquivo).read_bytes() == b"[{ruim"
++
++
++def test_credenciais_padrao_e_navegador_headless_configuraveis(monkeypatch):
++    from src.comum import credenciais
++    monkeypatch.setattr(credenciais, "LOGIN", "login_sere")
++    monkeypatch.setattr(credenciais, "SENHA", "senha_sere")
++    _, est = _orquestrar(monkeypatch, {}, {})
++    logins = []
++
++    async def _abrir(_b, login, senha):
++        logins.append((login, senha))
++        return PaginaFake()
++
++    monkeypatch.setattr(rem, "_abrir_por_turmas", _abrir)
++    rodar(cr.gerar_chaves_via_login(turmas_alvo=["X"]))
++    assert logins == [("login_sere", "senha_sere")] and est["ctx"].pw.chromium.headless is False   # padrão: visível
++    rodar(cr.gerar_chaves_via_login(turmas_alvo=["X"], login="l", senha="s", headless=True))
++    assert est["ctx"].pw.chromium.headless is True
+--- a/tests/test_registro_scripts.py
++++ b/tests/test_registro_scripts.py
+@@ -476,3 +476,41 @@
+     c, _, _ = ctx
+     assert _post(c, "nao_existe").status_code == 404
+     assert _post(c, "agendador").status_code == 501
++
++
++def test_gerar_chaves_e_opcao_de_ignorar_chaves_salvas_na_rematricula():
++    from src.automacao.chaves_responsavel import gerar_chaves_via_login
++    from src.automacao.rematricula import rematricular_via_login
++    g = reg.obter("gerar_chaves")
++    assert g.turmas_de is not None and g.confirmar and set(g.recursos) == {oe.RECURSO_TURMA, oe.RECURSO_TESTE}
++    p = g.planejar(Opcoes(), {}, {}, {})
++    assert p.tipo == "coroutine" and p.funcao is gerar_chaves_via_login
++    assert p.kwargs == {"modo_teste": False, "turmas_alvo": None}
++    p = g.planejar(Opcoes(turmas=("2º Ano",), modo_teste=True), {"regenerar": True}, {}, {})
++    assert p.kwargs == {"modo_teste": True, "turmas_alvo": ["2º Ano"], "regenerar": True}
++    assert [e["nome"] for e in g.extras()] == ["regenerar"]
++
++    r = reg.obter("rematricula")
++    assert r.planejar(Opcoes(), {}, {}, {}).kwargs == {"modo_teste": False, "apenas_erros": False, "turmas_alvo": None}
++    p = r.planejar(Opcoes(), {"ignorar_chaves_salvas": True}, {}, {})
++    assert p.funcao is rematricular_via_login and p.kwargs["usar_chaves_salvas"] is False
++    assert [e["nome"] for e in r.extras()] == ["ignorar_chaves_salvas"]
++
++
++def test_gerar_chaves_executa_pela_rota(tmp_path, monkeypatch):
++    import json
++    monkeypatch.setattr(rotas, "_dados_dir", lambda: tmp_path)
++    (tmp_path / "turmas.json").write_text(json.dumps(TURMAS), encoding="utf-8")
++    with rotas._EXECUCOES_LOCK:
++        rotas._EXECUCOES.clear()
++    import src.automacao.chaves_responsavel as cr
++    chamadas = []
++
++    async def fake(**kw):
++        print("geração simulada"); chamadas.append(kw)
++
++    monkeypatch.setattr(cr, "gerar_chaves_via_login", fake)
++    c = create_app().test_client()
++    assert _post(c, "gerar_chaves", turmas=["INFANTIL 4"], modo_teste=True, regenerar=True).status_code == 200
++    assert _esperar(c, "gerar_chaves")["status"] == "concluido"
++    assert chamadas == [{"modo_teste": True, "turmas_alvo": ["INFANTIL 4"], "regenerar": True}]
+--- a/documentacao/00_Arquitetura.md
++++ b/documentacao/00_Arquitetura.md
+@@ -27,10 +27,10 @@
+ 6. Scripts que alteram o SERE têm `confirmar=True`: pedem confirmação com a prévia (`SIM` na CLI ou `--confirmo`),
+    exceto no **modo de teste**.
+ 
+-## Automações registradas (31 chaves)
++## Automações registradas (33 chaves)
+ 
+-`analisa_sere`, `validar`, `documentos`, `limpeza`, `espec`, `aluno`, `rematricula`, `prematricula_completa`,
+-`transferidos_fila`, `transferidos_gerar`, `transferidos`, `pareceres_transferidos`, `parecer_rco`, `parecer_fund`,
++`analisa_sere`, `validar`, `documentos`, `limpeza`, `espec`, `aluno`, `gerar_chaves`, `rematricula`, `prematricula_completa`,
++`transferidos_fila`, `transferidos_gerar`, `transferidos`, `pareceres_transferidos`, `pareceres_digitalizados`, `parecer_rco`, `parecer_fund`,
+ `avisos`, `turmas`, `alunos`, `funcionarios`, `vinculos`, `sus`, `cep`, `termos`, `comprimir`, `compara_anos`,
+ `gerar_pastas`, `analisa_pasta`, `mapear_pastas`, `cruzamento`, `mascara`, `coleta_emails`, `backup`.
+ 
+--- a/documentacao/Dados_e_Arquivos.md
++++ b/documentacao/Dados_e_Arquivos.md
+@@ -35,6 +35,7 @@
+ | `processo_transferidos.json` | detecção de mudanças | histórico de movimentos |
+ | `pre_matricula.json` | `prematricula_completa` | tela, avisos, comunicado (`turmas_intencao`, `cadastros`, `avisos_whatsapp`) |
+ | `rematriculas_sucesso/erro/historico.json` | `rematricula` | controle de progresso |
++| `chave_responsavel.json` | `gerar_chaves` (e `rematricula`, ao trocar uma chave recusada) | `rematricula`; **contém CPF + chave de acesso** |
+ | `alunos_encaminhamento.json` | `sus` | tela, painel |
+ | `alunos_fora_raio.json/.xlsx`, `alunos_coordenadas.json` | `cep` | tela, painel |
+ | `escolas_completas.json` | `coleta_emails` | seletor de escola, avisos |
+--- a/documentacao/PreMatricula_Rematricula.md
++++ b/documentacao/PreMatricula_Rematricula.md
+@@ -45,6 +45,7 @@
+ | `rematricula_sere.py` | SERE: selecionar turma, listar matriculados, gerar chave, obter CPF do responsável |
+ | `rematricula_area_aluno.py` | areadoaluno.seed.pr.gov.br: login CPF+chave, selecionar aluno (PrimeFaces), cascata de "Sim" |
+ | `rematricula_persistencia.py` | controle de progresso |
++| `chaves_responsavel.py` | gera e guarda as chaves de acesso (ver abaixo) |
+ 
+ Arquivos em `dados/<ano>/`: `rematriculas_sucesso.json` (**nunca reprocessa**), `rematriculas_erro.json` (com nº de
+ tentativas acumulado), `rematriculas_historico.json` (todas as tentativas de todas as execuções).
+@@ -52,6 +53,28 @@
+ não prende mais em laço). Fonte própria de turmas (`turmas_de=_turmas_da_rematricula`), com a normalização tolerante a
+ acento/traço/NBSP.
+ 
++### Chaves de acesso salvas (`chaves_responsavel.py`, chave `gerar_chaves`)
++Automação separada que **só gera e guarda** a chave de acesso do responsável (e o CPF dele); não rematricula ninguém. Mesma
++lógica do antigo script avulso `gerar_chaves.py`, com a recuperação de sessão da rematrícula (limite de tentativas) e gravação
++atômica. Grava em `dados/<ano>/chave_responsavel.json` — **mesmo nome e formato do script avulso**: se você já tem um arquivo
++gerado por ele, copie para `dados/<ano>/` e a rematrícula passa a usá-lo.
++
++| Situação do aluno | O que a rematrícula faz |
++|---|---|
++| tem chave **e** CPF salvos | pula a ficha do SERE e entra direto na Área do Aluno |
++| a chave salva é recusada (login ou abrir a matrícula online falha) | gera uma nova no SERE, **atualiza o arquivo** e tenta **uma** vez de novo |
++| não tem chave salva (ou o registro está sem CPF) | gera na hora, como antes (não grava) |
++| falha ao **confirmar** a matrícula | não gera chave nova (o problema não é a chave) |
++
++Pontos de atenção:
++- O prazo de validade da chave no SERE **não é conhecido pelo sistema**. Por isso não há prazo fixo: chave vencida é detectada na
++  hora (recusada) e trocada. `gerar_chaves_via_login(validade_horas=N)` regenera as salvas há mais de N horas; `regenerar=True`
++  (caixa na tela) regenera todas.
++- O gerador pula quem já tem chave utilizável e quem já está em `rematriculas_sucesso.json`.
++- Opção "Ignorar as chaves salvas" na rematrícula (`usar_chaves_salvas=False`) gera todas na hora. Arquivo de chaves ilegível
++  **não impede** a rematrícula (avisa e gera na hora); no gerador ele aborta antes de abrir o navegador. Em ambos o arquivo não é alterado.
++- O arquivo guarda **CPF + chave em texto puro**; fica em `dados/<ano>/` (bloqueado pelo `.gitignore`). Não envie por e-mail/WhatsApp.
++
+ ## Bugs abertos (`BUGS_CONHECIDOS.md`)
+ | ID | Estado |
+ |---|---|

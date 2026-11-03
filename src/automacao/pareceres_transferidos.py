@@ -5,7 +5,7 @@ Une o antigo processa-parecer.py (ler o QR e identificar o aluno) e o comprimir_
 ao limite do SERE) com o envio ao SERE (sere_2026.modo_transferidos):
 
     TRANSFERENCIAS/PROCESSAMENTO DE PARECERES/*.pdf|jpg|png…   (digitalizados, com o QR do parecer)
-        1. lê o QR (nome + turma) e acha o aluno no turmas.json
+        1. lê o QR e acha o aluno no turmas.json (QR novo AUTOSERE|PF|ano|CGM, do parecer_fund, ou o antigo com nome + turma)
         2. copia para  TRANSFERENCIAS/PARECERES/<turma>/NN-NOME.ext
         3. se passa do limite do SERE, comprime (o original fica em ORIGINAIS_ANTES_DA_COMPRESSAO)
         4. marca parecer.digitalizado_em em transferidos.json
@@ -339,6 +339,49 @@ def identificar_aluno(turmas_data: dict, nome_qr: str, turma_qr: str) -> tuple[O
     return None, f"aluno '{nome_qr}' não encontrado na turma '{turma}'"
 
 
+def identificar_por_cgm(turmas_data: dict, cgm: str, preferir_transferido: bool = True) -> tuple[Optional[Identificacao], str]:
+    """
+    (Identificacao, "") ou (None, motivo), procurando o CGM em todas as turmas. Com o mesmo CGM em mais de um registro
+    (transferido e depois matriculado de novo), `preferir_transferido` escolhe qual vale: o transferido (padrão: é dele
+    o parecer dos transferidos) ou o que não é transferido.
+    """
+    from src.comum.registros_aluno import eh_transferido
+
+    cgm = str(cgm or "").strip()
+    achados = [(turma, a) for turma, linhas in turmas_data.items() if isinstance(linhas, list)
+               for a in linhas if str(a.get("CGM", "")).strip() == cgm]
+    if not achados:
+        return None, f"CGM {cgm} não encontrado no turmas.json"
+    achados.sort(key=lambda ta: eh_transferido(ta[1].get("Situação", "")) != preferir_transferido)
+    turma, a = achados[0]
+    return Identificacao(a.get("N"), a.get("Nome", ""), turma, cgm), ""
+
+
+def identificar_pelo_texto_do_qr(texto: str, turmas_data: dict, ano: str,
+                                 preferir_transferido: bool = True) -> tuple[Optional[Identificacao], str]:
+    """
+    Do texto lido no QR até o aluno. Aceita os dois formatos que existem:
+      * novo, gerado pelo parecer_fund:  AUTOSERE|PF|<ano>|<CGM>   (confere o ano e acha o aluno pelo CGM)
+      * antigo, do processa-parecer.py:  {"nome": "...", "turma": "..."}
+    Devolve (Identificacao, "") ou (None, motivo).
+    """
+    from src.automacao import parecer_fund as pf
+
+    payload = pf.ler_payload_qr(texto)
+    if payload:
+        if payload["ano"] != str(ano):
+            return None, f"parecer de {payload['ano']}, mas o ano letivo em uso é {ano}"
+        return identificar_por_cgm(turmas_data, payload["cgm"], preferir_transferido)
+    try:
+        qr = json.loads(texto)
+        nome_qr, turma_qr = str(qr.get("nome", "")).strip(), str(qr.get("turma", "")).strip()
+    except (ValueError, AttributeError):
+        return None, "QR não é de um parecer (nem AUTOSERE|PF|ano|CGM, nem o JSON antigo com nome e turma)"
+    if not nome_qr or not turma_qr:
+        return None, "QR sem nome ou turma"
+    return identificar_aluno(turmas_data, nome_qr, turma_qr)
+
+
 def nome_do_arquivo(numero, nome: str, extensao: str) -> str:
     base = f"{str(numero).zfill(2)}-{nome}{extensao}"
     for c in '<>:"/\\|?*':
@@ -414,6 +457,12 @@ class ResumoPareceres:
     simulacao: bool = False
 
 
+def _ano_da_pasta(dados: Path) -> str:
+    """Ano letivo da pasta de dados (dados/<ano>); se a pasta não tem o nome de um ano, o ano em uso."""
+    from src.comum import paths as _paths
+    return dados.name if re.fullmatch(r"\d{4}", dados.name) else str(_paths.ano_atual())
+
+
 def processar_pareceres_da_pasta(simulacao: bool = False, limite_mb: Optional[float] = None, modo_teste: bool = False,
                                  dados_dir: Optional[Path] = None, log: Callable[[str], None] = print) -> ResumoPareceres:
     """Passos 1–5 (tudo menos o envio ao SERE). Ver o cabeçalho do módulo."""
@@ -453,19 +502,7 @@ def processar_pareceres_da_pasta(simulacao: bool = False, limite_mb: Optional[fl
             resumo.erros.append((arq.name, "QR code não encontrado"))
             log("  ERRO: QR code não encontrado.")
             continue
-        try:
-            qr = json.loads(texto)
-            nome_qr, turma_qr = str(qr.get("nome", "")).strip(), str(qr.get("turma", "")).strip()
-        except (ValueError, AttributeError):
-            resumo.erros.append((arq.name, "QR não é o JSON esperado"))
-            log(f"  ERRO: não foi possível interpretar o QR: {texto}")
-            continue
-        if not nome_qr or not turma_qr:
-            resumo.erros.append((arq.name, "QR sem nome ou turma"))
-            log(f"  ERRO: nome ou turma vazios no QR: {texto}")
-            continue
-
-        ident, motivo = identificar_aluno(turmas_data, nome_qr, turma_qr)
+        ident, motivo = identificar_pelo_texto_do_qr(texto, turmas_data, _ano_da_pasta(dados))
         if ident is None:
             resumo.erros.append((arq.name, motivo))
             log(f"  ERRO: {motivo}.")

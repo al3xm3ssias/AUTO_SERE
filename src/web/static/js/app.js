@@ -251,6 +251,7 @@ const TITULOS = {
   transferidos: "Transferidos",
   funcionarios: "Funcionários",
   calendario: "Calendário letivo",
+  "corte-etario": "Corte etário",
   encaminhamentos: "Encaminhamentos do SUS",
   "fora-do-raio": "Alunos fora do raio",
   automacoes: "Automações",
@@ -290,6 +291,9 @@ function irPara(view, opts = {}) {
   } else if (view === "calendario") {
     // calendario.js expõe carregarCalendario(); antes ninguém a chamava e a tela abria em branco.
     if (window.carregarCalendario) window.carregarCalendario();
+  } else if (view === "corte-etario") {
+    // corte_etario.js expõe carregarCorteEtario(); sem esta chamada a tela abre sem a tabela.
+    if (window.carregarCorteEtario) window.carregarCorteEtario();
   }
   if (view === "painel") {
     carregarPainel();
@@ -1718,6 +1722,7 @@ const ICONES_AUTOMACAO = {
   transferidos: "transfer",
   parecer_fund: "certificate",
   parecer_rco: "certificate",
+  pareceres_digitalizados: "certificate",
   transferidos_fila: "transfer",
   transferidos_gerar: "transfer",
   pareceres_transferidos: "certificate",
@@ -3143,6 +3148,74 @@ function conectarFormSenhaSere() {
     }
   });
 }
+
+/* ---------- Mandar mensagem (fila da pré-matrícula) ---------- */
+
+async function abrirMensagemPrematricula(id) {
+  let modelo;
+  try {
+    const res = await fetch(`${API_BASE}/whatsapp/modelo-prematricula?id=${encodeURIComponent(id)}`);
+    try { modelo = await res.json(); } catch (e) { modelo = {}; }
+    if (res.status === 404 && !modelo.erro) {
+      throw new Error("O servidor não tem a rota de mensagens. Reinicie o AUTO SERE (o whatsapp.py novo não foi carregado).");
+    }
+    if (!res.ok) throw new Error(modelo.erro || "Não consegui preparar a mensagem.");
+  } catch (e) {
+    toast(e.message);
+    return;
+  }
+  if (!modelo.telefone) {
+    toast("Este responsável não tem telefone coletado ainda.");
+    return;
+  }
+  let status = {};
+  try { status = await apiGet("/whatsapp/status"); } catch (e) { /* segue: o envio mostra o erro */ }
+  const real = !status.simulado;
+
+  abrirModal(`Mensagem para o responsável de ${modelo.nome}`, (corpo, fechar) => {
+    corpo.innerHTML = `
+      <div class="field"><label>WhatsApp do responsável</label>
+        <input type="text" id="mdl-msg-numero" value="${escaparHtml(modelo.telefone)}" autocomplete="off"></div>
+      <div class="field"><label>Mensagem</label>
+        <textarea id="mdl-msg-texto" rows="6" maxlength="1000"
+          style="width:100%;background:var(--input-bg);color:var(--txt);border:1px solid var(--border);border-radius:8px;padding:10px;font:inherit;resize:vertical">${escaparHtml(modelo.texto)}</textarea></div>
+      ${real ? `<label class="checklist-item" style="margin-bottom:10px"><input type="checkbox" id="mdl-msg-confirmo"> Confirmo o envio de uma mensagem de verdade</label>`
+             : `<p style="color:var(--txt3);font-size:.78rem;margin-bottom:10px">Modo simulado: nada será enviado de verdade.</p>`}
+      <div id="mdl-msg-erro" style="color:var(--rose);font-size:.78rem;min-height:1.1em;margin-bottom:8px"></div>
+      <div class="modal-acoes">
+        <button class="btn-sm" id="mdl-msg-cancelar" style="padding:9px 16px;font-size:.78rem">Cancelar</button>
+        <button class="btn-primary" id="mdl-msg-enviar">Enviar</button>
+      </div>`;
+    const erro = corpo.querySelector("#mdl-msg-erro");
+    const btn = corpo.querySelector("#mdl-msg-enviar");
+    corpo.querySelector("#mdl-msg-cancelar").addEventListener("click", fechar);
+    btn.addEventListener("click", async () => {
+      const confirmo = !!corpo.querySelector("#mdl-msg-confirmo")?.checked;
+      if (real && !confirmo) { erro.textContent = "Marque a confirmação para enviar de verdade."; return; }
+      btn.disabled = true;
+      erro.textContent = "";
+      try {
+        const r = await apiPost("/whatsapp/enviar", {
+          numero: corpo.querySelector("#mdl-msg-numero").value,
+          texto: corpo.querySelector("#mdl-msg-texto").value,
+          confirmo,
+        });
+        fechar();
+        toast(r.mensagem || "Mensagem enviada.");
+      } catch (e) {
+        erro.textContent = e.message;
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+document.addEventListener("click", (ev) => {
+  const link = ev.target.closest("[data-mensagem]");
+  if (!link) return;
+  ev.preventDefault();
+  abrirMensagemPrematricula(link.dataset.mensagem);
+});
 
 /* ---------- Modal genérico ---------- */
 

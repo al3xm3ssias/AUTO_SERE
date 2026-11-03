@@ -35,6 +35,7 @@ Gravação de JSON: `arquivos_json.salvar_json_atomico` (temporário + `os.repla
 | `processo_transferidos.json` | detecção de mudanças | histórico de movimentos |
 | `pre_matricula.json` | `prematricula_completa` | tela, avisos, comunicado (`turmas_intencao`, `cadastros`, `avisos_whatsapp`) |
 | `rematriculas_sucesso/erro/historico.json` | `rematricula` | controle de progresso |
+| `chave_responsavel.json` | `gerar_chaves` (e `rematricula`, ao trocar uma chave recusada) | `rematricula`; **contém CPF + chave de acesso** |
 | `alunos_encaminhamento.json` | `sus` | tela, painel |
 | `alunos_fora_raio.json/.xlsx`, `alunos_coordenadas.json` | `cep` | tela, painel |
 | `escolas_completas.json` | `coleta_emails` | seletor de escola, avisos |

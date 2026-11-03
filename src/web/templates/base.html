@@ -74,6 +74,10 @@
         <span class="nav-item-icon" data-icon="calendar"></span>
         <span class="nav-item-label">Calendário letivo</span>
       </div>
+      <div class="nav-item" data-view="corte-etario">
+        <span class="nav-item-icon" data-icon="ageCut"></span>
+        <span class="nav-item-label">Corte etário</span>
+      </div>
 
       <div class="nav-item" data-view="documentos">
         <span class="nav-item-icon" data-icon="files"></span>
@@ -172,6 +176,10 @@
           <span class="nav-item-icon" data-icon="certificate"></span>
           <span class="nav-item-label">Pareceres fundamental</span>
         </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="pareceres_digitalizados">
+          <span class="nav-item-icon" data-icon="certificate"></span>
+          <span class="nav-item-label">Pareceres digitalizados</span>
+        </div>
         <div class="nav-item nav-subitem" data-view="automacoes" data-auto="parecer_rco">
           <span class="nav-item-icon" data-icon="certificate"></span>
           <span class="nav-item-label">Pareceres infantil</span>
@@ -211,6 +219,10 @@
         <div class="nav-item nav-subitem" data-view="automacoes" data-auto="mascara">
           <span class="nav-item-icon" data-icon="shieldLock"></span>
           <span class="nav-item-label">Máscara de dados</span>
+        </div>
+        <div class="nav-item nav-subitem" data-view="automacoes" data-auto="gerar_chaves">
+          <span class="nav-item-icon" data-icon="key"></span>
+          <span class="nav-item-label">Gerar chaves de acesso</span>
         </div>
         <div class="nav-item nav-subitem" data-view="automacoes" data-auto="rematricula">
           <span class="nav-item-icon" data-icon="refresh"></span>
@@ -274,6 +286,7 @@
         {% include "painel.html" %}
         {% include "menu.html" %}
         {% include "calendario.html" %}
+        {% include "corte_etario.html" %}
         {% include "automacoes.html" %}
         {% include "configuracoes.html" %}
         {% include "primeira_execucao.html" %}
@@ -313,6 +326,8 @@
 <script src="{{ url_for('web.static', filename='js/icons.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/app.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/calendario.js') }}"></script>
+<script src="{{ url_for('web.static', filename='js/vendor/jspdf.umd.min.js') }}"></script>
+<script src="{{ url_for('web.static', filename='js/corte_etario.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/whatsapp.js') }}"></script>
 <script>
   // Service worker (necessário para o Chrome oferecer "Instalar"). Falha silenciosa.

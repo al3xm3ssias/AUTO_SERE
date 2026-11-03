@@ -37,6 +37,7 @@ src/web/
 │   ├── painel.html               # tela "Painel principal"
 │   ├── menu.html                 # inclui as 4 telas de listagem (turmas/alunos/...)
 │   ├── calendario.html           # tela "Calendário letivo"
+│   ├── corte_etario.html         # tela "Corte etário" (turma por mês/ano de nascimento)
 │   ├── automacoes.html           # lista de automações + tela de execução
 │   ├── configuracoes.html        # telas de credenciais/config
 │   ├── primeira_execucao.html    # wizard de 1ª execução obrigatória
@@ -47,7 +48,9 @@ src/web/
     ├── css/styles.css           # design system completo: tokens, 3 temas, componentes
     ├── js/icons.js                # ícones SVG inline (sem CDN — ver nota abaixo)
     ├── js/app.js                  # navegação SPA + todas as chamadas fetch()
-    └── js/calendario.js           # lógica da tela Calendário (IIFE; expõe carregarCalendario)
+    ├── js/calendario.js           # lógica da tela Calendário (IIFE; expõe carregarCalendario)
+    ├── js/corte_etario.js         # lógica da tela Corte etário (IIFE; expõe carregarCorteEtario)
+    └── js/vendor/jspdf.umd.min.js # jsPDF local (exportação do quadro em PDF, funciona offline)
 ```
 
 ## Calendário letivo
@@ -188,3 +191,14 @@ topo de `rotas.py`.
 4. Se quiser rodar tarefas longas sem travar a requisição HTTP, considere
    rodá-las em thread/subprocess e expor um endpoint de status/polling
    (a UI já tem um estado de "Executando..." pronto no botão).
+
+## Corte etário
+
+Tela **Menu → Corte etário** (view `corte-etario`). Quadro mês × ano de nascimento com a turma
+(Berçário ao 5º ano) em que a criança entra no ano letivo escolhido: vale a idade completa até
+**31/03**. Não usa API — tudo roda no navegador (`js/corte_etario.js`).
+
+- Abre no ano letivo seguinte a partir de novembro (período de matrículas); setas ← → ou botões trocam o ano.
+- Para mudar a data de corte, as turmas ou a regra do Berçário, edite as constantes no topo de `corte_etario.js`.
+- **Exportar PDF** baixa o quadro em A4 paisagem, sempre nas cores do tema claro.
+- Cores das turmas: variáveis `--ce-t0…--ce-t10` no fim de `styles.css`, uma paleta por tema.

@@ -6,6 +6,8 @@ API do WhatsApp para a interface web  —  prefixo /web/api/whatsapp
     POST /conectar       pede ao gateway para iniciar a sessão (gera o QR Code)
     POST /verificar      confirma a conexão perguntando ao WhatsApp por um número
     POST /teste          envia UMA mensagem de teste (trava dupla: WHATSAPP_ENVIO_REAL + confirmo)
+    GET  /modelo-prematricula?id=...   texto sugerido + telefone do responsável (fila da pré-matrícula)
+    POST /enviar         envia UMA mensagem a um responsável (mesma trava dupla do /teste)
     POST /envio-real     liga/desliga a permissão de envio real
     POST /provedor       escolhe o modo: simulado, whatsplay (sem Docker) ou blake (gateway Docker)
     POST /desconectar    logout no gateway
@@ -44,6 +46,11 @@ LIMITE_CORPO_WEBHOOK = 30 * 1024 * 1024
 
 _ultimo_teste = 0.0
 _trava_teste = threading.Lock()
+
+LIMITE_TEXTO_MENSAGEM = 1000
+INTERVALO_MIN_ENVIO_S = 2.0
+_ultimo_envio = 0.0
+_trava_envio = threading.Lock()
 
 
 def _erro(mensagem: str, codigo: int = 400, **extra):
@@ -163,6 +170,69 @@ def teste():
     return jsonify({"ok": True, "simulado": r.simulado, "destino": destino, "id_mensagem": r.id_mensagem,
                     "mensagem": ("Simulado: nada foi enviado de verdade." if r.simulado
                                  else f"Mensagem de teste enviada para {destino}.")})
+
+
+# ───────────────────── mensagem a um responsável (painel) ─────────────────────
+def _modelo_texto_prematricula(item: dict) -> str:
+    try:
+        from src.comum import escola as _escola
+        nome_escola = _escola.nome()
+    except Exception:
+        nome_escola = "nossa escola"
+    return (f"Olá! Aqui é da {nome_escola}. Sobre a pré-matrícula de {item.get('nome', '')} "
+            f"({item.get('turma', '')}): surgiu uma vaga e gostaríamos de falar com você. "
+            f"Pode nos responder esta mensagem?")
+
+
+@whatsapp_bp.route("/modelo-prematricula")
+def modelo_prematricula():
+    from src.web.api.rotas import _fila_prematricula
+    ident = str(request.args.get("id") or "").strip()
+    if not ident:
+        return _erro("Informe o aluno (id).")
+    item = next((r for r in _fila_prematricula() if str(r.get("id")) == ident), None)
+    if item is None:
+        return _erro("Aluno não está mais na fila da pré-matrícula.", 404)
+    telefone = item.get("telefone_responsavel")
+    telefone = "" if not telefone or telefone == "—" else str(telefone)
+    return jsonify({"ok": True, "nome": item.get("nome", ""), "turma": item.get("turma", ""),
+                    "telefone": telefone, "texto": _modelo_texto_prematricula(item)})
+
+
+@whatsapp_bp.route("/enviar", methods=["POST"])
+def enviar():
+    global _ultimo_envio
+    ger, problema = _gerenciador()
+    if ger is None:
+        return _erro(problema or "WhatsApp não configurado.")
+    corpo = request.get_json(silent=True) or {}
+    try:
+        alvo = normalizar_numero(corpo.get("numero"))
+    except ValueError as exc:
+        return _erro(str(exc))
+    texto = str(corpo.get("texto") or "").strip()
+    if not texto:
+        return _erro("Escreva a mensagem antes de enviar.")
+    if len(texto) > LIMITE_TEXTO_MENSAGEM:
+        return _erro(f"Mensagem longa demais (máximo {LIMITE_TEXTO_MENSAGEM} caracteres).")
+    if not ger.simulado and not corpo.get("confirmo"):
+        return _erro("Confirme que quer enviar uma mensagem de verdade.", codigo_erro="falta_confirmacao")
+    with _trava_envio:
+        agora = time.monotonic()
+        if agora - _ultimo_envio < INTERVALO_MIN_ENVIO_S:
+            return _erro("Espere alguns segundos entre um envio e outro.", 429)
+        _ultimo_envio = agora
+    try:
+        r = ger.provedor.enviar(alvo, texto)
+    except EnvioNaoAutorizadoError as exc:
+        return _erro(str(exc), 403, codigo_erro="envio_real_bloqueado")
+    destino = mascarar_numero(alvo)
+    if not r.ok:
+        log.warning("whatsapp: envio para %s falhou: %s", destino, r.erro)
+        return jsonify({"ok": False, "erro": r.erro, "destino": destino}), 502
+    return jsonify({"ok": True, "simulado": r.simulado, "destino": destino, "id_mensagem": r.id_mensagem,
+                    "mensagem": ("Simulado: nada foi enviado de verdade." if r.simulado
+                                 else f"Mensagem enviada para {destino}.")})
 
 
 @whatsapp_bp.route("/envio-real", methods=["POST"])

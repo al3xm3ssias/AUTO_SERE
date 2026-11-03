@@ -45,12 +45,35 @@ responsável, entra na **Área do Aluno** (site do Estado) com CPF + chave e con
 | `rematricula_sere.py` | SERE: selecionar turma, listar matriculados, gerar chave, obter CPF do responsável |
 | `rematricula_area_aluno.py` | areadoaluno.seed.pr.gov.br: login CPF+chave, selecionar aluno (PrimeFaces), cascata de "Sim" |
 | `rematricula_persistencia.py` | controle de progresso |
+| `chaves_responsavel.py` | gera e guarda as chaves de acesso (ver abaixo) |
 
 Arquivos em `dados/<ano>/`: `rematriculas_sucesso.json` (**nunca reprocessa**), `rematriculas_erro.json` (com nº de
 tentativas acumulado), `rematriculas_historico.json` (todas as tentativas de todas as execuções).
 Opções: modo teste (1 aluno por seção), `apenas_erros`. Tem **limite de tentativas** por turma (falha de login/navegação
 não prende mais em laço). Fonte própria de turmas (`turmas_de=_turmas_da_rematricula`), com a normalização tolerante a
 acento/traço/NBSP.
+
+### Chaves de acesso salvas (`chaves_responsavel.py`, chave `gerar_chaves`)
+Automação separada que **só gera e guarda** a chave de acesso do responsável (e o CPF dele); não rematricula ninguém. Mesma
+lógica do antigo script avulso `gerar_chaves.py`, com a recuperação de sessão da rematrícula (limite de tentativas) e gravação
+atômica. Grava em `dados/<ano>/chave_responsavel.json` — **mesmo nome e formato do script avulso**: se você já tem um arquivo
+gerado por ele, copie para `dados/<ano>/` e a rematrícula passa a usá-lo.
+
+| Situação do aluno | O que a rematrícula faz |
+|---|---|
+| tem chave **e** CPF salvos | pula a ficha do SERE e entra direto na Área do Aluno |
+| a chave salva é recusada (login ou abrir a matrícula online falha) | gera uma nova no SERE, **atualiza o arquivo** e tenta **uma** vez de novo |
+| não tem chave salva (ou o registro está sem CPF) | gera na hora, como antes (não grava) |
+| falha ao **confirmar** a matrícula | não gera chave nova (o problema não é a chave) |
+
+Pontos de atenção:
+- O prazo de validade da chave no SERE **não é conhecido pelo sistema**. Por isso não há prazo fixo: chave vencida é detectada na
+  hora (recusada) e trocada. `gerar_chaves_via_login(validade_horas=N)` regenera as salvas há mais de N horas; `regenerar=True`
+  (caixa na tela) regenera todas.
+- O gerador pula quem já tem chave utilizável e quem já está em `rematriculas_sucesso.json`.
+- Opção "Ignorar as chaves salvas" na rematrícula (`usar_chaves_salvas=False`) gera todas na hora. Arquivo de chaves ilegível
+  **não impede** a rematrícula (avisa e gera na hora); no gerador ele aborta antes de abrir o navegador. Em ambos o arquivo não é alterado.
+- O arquivo guarda **CPF + chave em texto puro**; fica em `dados/<ano>/` (bloqueado pelo `.gitignore`). Não envie por e-mail/WhatsApp.
 
 ## Bugs abertos (`BUGS_CONHECIDOS.md`)
 | ID | Estado |

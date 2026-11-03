@@ -1270,6 +1270,7 @@ AUTOMACOES_DISPONIVEIS = [
     {"chave": "transferidos_gerar", "nome": "Gerar guia e histórico", "descricao": "Emite, assina e baixa do SERE o histórico escolar e a guia de transferência dos alunos da fila, salvando em TRANSFERENCIAS."},
     {"chave": "transferidos", "nome": "Enviar transferidos ao SERE", "descricao": "Envia à pasta virtual do SERE a guia, o histórico e o parecer dos transferidos que estão nas pastas de TRANSFERENCIAS."},
     {"chave": "pareceres_transferidos", "nome": "Pareceres dos transferidos", "descricao": "Lê o QR dos pareceres digitalizados, arquiva em PARECERES, comprime se passar do limite e envia ao SERE, numa rotina só."},
+    {"chave": "pareceres_digitalizados", "nome": "Pareceres digitalizados (Fundamental)", "descricao": "Lê o QR dos pareceres do Fundamental digitalizados (pasta PARECERES/_PROCESSAR), arquiva na turma do aluno, comprime se passar do limite e, se marcado, envia ao SERE e por e-mail ao responsável."},
     {"chave": "parecer_fund", "nome": "Pareceres fundamental", "descricao": "Gera o parecer de cada aluno do Fundamental a partir do modelo Word da turma (envie os modelos em Configurações → Modelos de parecer). Cada parecer leva um QR code no fim."},
     {"chave": "parecer_rco", "nome": "Pareceres infantil", "descricao": "Baixa do RCO os pareceres (PDF) dos alunos matriculados no Infantil IV e V. O RCO manda um código por e-mail: a tela pede para você digitar."},
     {"chave": "comprimir", "nome": "Comprimir documentos", "descricao": "Encolhe os PDFs e imagens (alunos, guias, históricos e pareceres) que passam do limite de 1,5 MB do SERE, guardando os originais."},
@@ -1281,6 +1282,7 @@ AUTOMACOES_DISPONIVEIS = [
     {"chave": "termos", "nome": "Gerar termos de ciência", "descricao": "Gera termos de ciência para os funcionários."},
     {"chave": "mapear_pastas", "nome": "Mapear pastas dos alunos", "descricao": "Mapeia e organiza caminhos das pastas dos alunos."},
     {"chave": "mascara", "nome": "Máscara de dados", "descricao": "Aplica máscara em dados sensíveis (LGPD)."},
+    {"chave": "gerar_chaves", "nome": "Gerar chaves de acesso", "descricao": "Gera no SERE a chave de acesso do responsável de cada aluno matriculado e guarda (com o CPF) para a rematrícula usar. Não rematricula ninguém."},
     {"chave": "rematricula", "nome": "Rematrícula alunos no SERE", "descricao": "Realiza rematrícula dos alunos no SERE."},
     {"chave": "prematricula_completa", "nome": "Processo de pré-matrícula", "descricao": "Roda o processo completo de pré-matrícula (coleta, cadastro, pendentes, contatos)."},
 ]

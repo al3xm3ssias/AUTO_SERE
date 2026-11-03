@@ -34,6 +34,9 @@ Diferenças em relação ao script original:
     estava copiada em dois lugares, e o registro de erro crítico não removia
     a entrada anterior do mesmo aluno, gerando duplicatas).
   - Login e navegação repetidos 3 vezes viraram _abrir_por_turmas().
+  - Chaves salvas: se existir dados/<ano>/chave_responsavel.json (gerado por
+    src.automacao.chaves_responsavel), o aluno que tem chave nele entra direto na Área do Aluno, sem abrir a
+    ficha no SERE. Chave recusada -> gera nova na hora, atualiza o arquivo e tenta uma vez de novo.
   - O JavaScript das páginas está em strings raw (r\"\"\"...\"\"\"): `\\s` e
     `\\d` em string comum são "escape inválido" e viram SyntaxError em
     versões futuras do Python.
@@ -49,6 +52,7 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 
+from src.automacao import chaves_responsavel
 from src.comum import paths
 from src.comum.arquivos_json import (
     ArquivoJsonCorrompidoError,
@@ -656,45 +660,51 @@ async def voltar_para_turma(page):
 # PROCESSAMENTO
 # ==========================================================
 
-async def processar_aluno(page_sere, browser, aluno):
+async def _abrir_ficha_gerar_chave(page_sere, aluno):
     """
-    Rematricula um aluno. Devolve (sucesso: bool, erro_detalhado: str | None).
-    ErroReiniciarNavegador é propagado para o chamador reiniciar a sessão.
+    Abre a ficha do aluno no SERE, gera a chave de acesso e lê o CPF do responsável.
+    Devolve (chave, cpf, erro). Com erro None a ficha continua aberta (quem chamou
+    volta para a lista com voltar_para_turma). ErroReiniciarNavegador propaga.
+    """
+    await page_sere.wait_for_selector("a[href*='AoClicarAluno']", timeout=20000)
+    links_alunos = await page_sere.query_selector_all("a[href*='AoClicarAluno']")
+
+    aluno_encontrado = False
+    for link in links_alunos:
+        cgm = (await link.inner_text()).strip()
+        if cgm == aluno["cgm"]:
+            print("🔗 Acessando perfil do aluno...")
+            await link.click()
+            await page_sere.wait_for_timeout(2000)
+            aluno_encontrado = True
+            break
+
+    if not aluno_encontrado:
+        erro_detalhado = "Aluno não encontrado na lista"
+        print(f"❌ {erro_detalhado}")
+        return None, None, erro_detalhado
+
+    chave = await gerar_chave_acesso(page_sere)
+
+    cpf = await obter_cpf_responsavel(page_sere)
+    if not cpf:
+        erro_detalhado = "CPF do responsável não encontrado"
+        print(f"❌ {erro_detalhado}")
+        await voltar_para_turma(page_sere)
+        return None, None, erro_detalhado
+
+    return chave, cpf, None
+
+
+async def _rematricular_na_area_aluno(browser, aluno, cpf, chave):
+    """
+    Entra na Área do Aluno com CPF + chave e confirma a matrícula online.
+    Devolve (resultado, erro, chave_recusada): resultado True | "JA_MATRICULADO" | False;
+    chave_recusada=True quando falhou no login ou ao abrir a matrícula online — os dois
+    sintomas de chave inválida/expirada (o login não confere se a chave foi aceita).
     """
     page_aluno = None
-
     try:
-        print(f"\n{'='*70}")
-        print(f"👤 Processando: {aluno['Nome']} (CGM: {aluno['cgm']})")
-        print(f"{'='*70}")
-
-        await page_sere.wait_for_selector("a[href*='AoClicarAluno']", timeout=20000)
-        links_alunos = await page_sere.query_selector_all("a[href*='AoClicarAluno']")
-
-        aluno_encontrado = False
-        for link in links_alunos:
-            cgm = (await link.inner_text()).strip()
-            if cgm == aluno["cgm"]:
-                print("🔗 Acessando perfil do aluno...")
-                await link.click()
-                await page_sere.wait_for_timeout(2000)
-                aluno_encontrado = True
-                break
-
-        if not aluno_encontrado:
-            erro_detalhado = "Aluno não encontrado na lista"
-            print(f"❌ {erro_detalhado}")
-            return False, erro_detalhado
-
-        chave = await gerar_chave_acesso(page_sere)
-
-        cpf = await obter_cpf_responsavel(page_sere)
-        if not cpf:
-            erro_detalhado = "CPF do responsável não encontrado"
-            print(f"❌ {erro_detalhado}")
-            await voltar_para_turma(page_sere)
-            return False, erro_detalhado
-
         page_aluno = await browser.new_page()
         await page_aluno.goto(URL_AREA_ALUNO)
         await page_aluno.wait_for_timeout(2000)
@@ -702,32 +712,82 @@ async def processar_aluno(page_sere, browser, aluno):
         if not await fazer_login_area_aluno(page_aluno, cpf, chave):
             erro_detalhado = "Erro ao fazer login na Área do Aluno"
             print(f"❌ {erro_detalhado}")
-            await voltar_para_turma(page_sere)
-            return False, erro_detalhado
+            return False, erro_detalhado, True
 
         if not await acessar_matricula_online(page_aluno, aluno["Nome"]):
             erro_detalhado = "Erro ao acessar matrícula online"
             print(f"⚠️ {erro_detalhado}")
-            await voltar_para_turma(page_sere)
-            return False, erro_detalhado
+            return False, erro_detalhado, True
 
         resultado = await confirmar_matricula(page_aluno)
 
         if resultado == "JA_MATRICULADO":
-            await voltar_para_turma(page_sere)
-            print(f"✅ {aluno['Nome']} - JÁ MATRICULADO")
-            return True, None
+            return resultado, None, False
 
         if not resultado:
             erro_detalhado = "Erro ao confirmar matrícula"
             print(f"⚠️ {erro_detalhado}")
-            await voltar_para_turma(page_sere)
-            return False, erro_detalhado
+            return False, erro_detalhado, False
 
-        await voltar_para_turma(page_sere)
+        return True, None, False
 
-        print(f"✅ {aluno['Nome']} - REMATRÍCULA PROCESSADA!")
+    finally:
+        if page_aluno:
+            await page_aluno.close()
+
+
+def _desfecho(aluno, resultado, erro):
+    if resultado == "JA_MATRICULADO":
+        print(f"✅ {aluno['Nome']} - JÁ MATRICULADO")
         return True, None
+    if not resultado:
+        return False, erro
+    print(f"✅ {aluno['Nome']} - REMATRÍCULA PROCESSADA!")
+    return True, None
+
+
+async def processar_aluno(page_sere, browser, aluno, chaves=None):
+    """
+    Rematricula um aluno. Devolve (sucesso: bool, erro_detalhado: str | None).
+    ErroReiniciarNavegador é propagado para o chamador reiniciar a sessão.
+
+    chaves: lista de chave_responsavel.json (ver src.automacao.chaves_responsavel) ou None.
+    Com chave salva utilizável para o aluno, entra direto na Área do Aluno, sem abrir a ficha no
+    SERE. Se a chave salva for recusada (expirada, por ex.), gera uma nova no SERE, atualiza a lista
+    e o arquivo, e tenta uma única vez de novo. Sem chave salva, gera na hora (e não grava).
+    """
+    try:
+        print(f"\n{'='*70}")
+        print(f"👤 Processando: {aluno['Nome']} (CGM: {aluno['cgm']})")
+        print(f"{'='*70}")
+
+        salvo = chaves_responsavel.buscar_chave(chaves, aluno["cgm"]) if chaves is not None else None
+        regenerando = False
+
+        if chaves_responsavel.chave_utilizavel(salvo):
+            print("🗝️ Usando a chave salva...")
+            resultado, erro, recusada = await _rematricular_na_area_aluno(
+                browser, aluno, salvo["cpf_responsavel"], salvo["chave"]
+            )
+            if not recusada:
+                return _desfecho(aluno, resultado, erro)
+            print("⚠️ A chave salva não funcionou (expirada?). Gerando uma nova no SERE...")
+            regenerando = True
+
+        chave, cpf, erro = await _abrir_ficha_gerar_chave(page_sere, aluno)
+        if erro:
+            return False, erro
+
+        if regenerando:
+            try:
+                chaves_responsavel.registrar_chave(chaves, aluno, salvo.get("turma", ""), chave, cpf)
+                chaves_responsavel.salvar_chaves(chaves)
+            except Exception as e:  # guardar a chave nova é auxiliar: não pode derrubar a rematrícula
+                print(f"⚠️ Não consegui atualizar a chave salva: {e}")
+
+        resultado, erro, _recusada = await _rematricular_na_area_aluno(browser, aluno, cpf, chave)
+        await voltar_para_turma(page_sere)
+        return _desfecho(aluno, resultado, erro)
 
     except ErroReiniciarNavegador:
         raise
@@ -736,12 +796,8 @@ async def processar_aluno(page_sere, browser, aluno):
         print(f"❌ Erro ao processar aluno: {erro_detalhado}")
         return False, erro_detalhado
 
-    finally:
-        if page_aluno:
-            await page_aluno.close()
 
-
-async def processar_turma(browser, turma_nome, alunos_para_processar, sucessos, erros, historico, login, senha):
+async def processar_turma(browser, turma_nome, alunos_para_processar, sucessos, erros, historico, login, senha, chaves=None):
     """
     Processa uma turma/seção completa com recuperação automática.
 
@@ -779,7 +835,7 @@ async def processar_turma(browser, turma_nome, alunos_para_processar, sucessos, 
                 print(f"\n[{indice_atual + 1}/{len(alunos_para_processar)}]", end=" ")
 
                 try:
-                    sucesso, erro_msg = await processar_aluno(page_turma, browser, aluno)
+                    sucesso, erro_msg = await processar_aluno(page_turma, browser, aluno, chaves=chaves)
 
                     registrar_resultado(sucessos, erros, historico, aluno, turma_nome, sucesso, erro_msg)
                     salvar_resultados(sucessos, erros, historico)
@@ -846,6 +902,7 @@ async def rematricular_via_login(
     senha=None,
     navegador="chromium",
     headless=False,
+    usar_chaves_salvas=True,
 ):
     """
     Roda a rematrícula. Devolve um resumo:
@@ -855,6 +912,10 @@ async def rematricular_via_login(
     turmas_alvo: lista de nomes-base (padrão TURMAS_ALVO); cada nome pode
     corresponder a várias seções (ex.: "2º Ano" -> "2º Ano - A", "2º Ano - B").
     headless=False por padrão (o original abre o navegador visível).
+
+    usar_chaves_salvas: usa as chaves de dados/<ano>/chave_responsavel.json (gerar_chaves_via_login) para
+    quem tiver; quem não tiver, ou cuja chave for recusada, gera na hora como sempre. Arquivo de chaves
+    ilegível não impede a rematrícula: avisa e gera todas na hora (o arquivo não é tocado).
     """
     turmas_alvo = list(turmas_alvo) if turmas_alvo is not None else list(TURMAS_ALVO)
 
@@ -878,6 +939,14 @@ async def rematricular_via_login(
 
     print(f"📊 Sucessos anteriores: {len(sucessos_anteriores)}")
     print(f"📊 Erros anteriores: {len(erros_anteriores)}")
+
+    chaves = None
+    if usar_chaves_salvas:
+        try:
+            chaves = chaves_responsavel.carregar_chaves()
+            print(f"🗝️ Chaves salvas disponíveis: {len(chaves)}")
+        except chaves_responsavel.ChavesCorrompidasError as e:
+            print(f"⚠️ {e}\n⚠️ Seguindo sem chaves salvas: todas serão geradas na hora.")
 
     sucessos = list(sucessos_anteriores)
     erros = list(erros_anteriores)          # carregados: o contador de tentativas acumula
@@ -939,7 +1008,7 @@ async def rematricular_via_login(
 
                     await processar_turma(
                         browser, secao_texto, alunos_para_processar,
-                        sucessos, erros, historico, login, senha,
+                        sucessos, erros, historico, login, senha, chaves=chaves,
                     )
 
         finally:

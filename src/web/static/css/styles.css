@@ -1809,3 +1809,73 @@ tbody td{padding:11px 14px;vertical-align:middle}
 @keyframes ano-barra{to{width:100%}}
 #ano-overlay-botao[hidden]{display:none}
 @media (max-width:760px){.ano-badge{font-size:.62rem;padding:4px 9px;margin-right:6px}}
+
+/* ══════════════════════════════════════════════════════════════════════
+   CORTE ETÁRIO (tela "Corte etário" — corte_etario.js)
+   Paleta das 11 turmas por tema (claro/médio/escuro). `.ce-forcar-claro`
+   é usada pelo JS para ler as cores do tema claro ao exportar o PDF.
+══════════════════════════════════════════════════════════════════════ */
+.ce-paleta, [data-theme="escuro"] .ce-paleta {
+  --ce-t0: #6e5a45;  --ce-t1: #546b3a;  --ce-t2: #4a5b73;  --ce-t3: #3f6a8f;
+  --ce-t4: #7a4f4c;  --ce-t5: #85612c;  --ce-t6: #7a6e30;  --ce-t7: #62507d;
+  --ce-t8: #3d7064;  --ce-t9: #7a4a66;  --ce-t10: #4b5390;
+  --ce-nao: #2d2c3a; --ce-celula-tinta: #f0eef8; --ce-nao-tinta: #8f8ca8;
+}
+[data-theme="medio"] .ce-paleta {
+  --ce-t0: #eccaa6;  --ce-t1: #c2dc96;  --ce-t2: #bdd2ea;  --ce-t3: #94c0e6;
+  --ce-t4: #e8b0ab;  --ce-t5: #e8b872;  --ce-t6: #e8d98a;  --ce-t7: #cdb9e6;
+  --ce-t8: #9fd6c6;  --ce-t9: #e5b2d0;  --ce-t10: #b3bde6;
+  --ce-nao: #cfcdd9; --ce-celula-tinta: #26253a; --ce-nao-tinta: #615f7a;
+}
+[data-theme="claro"] .ce-paleta, .ce-paleta.ce-forcar-claro {
+  --ce-t0: #f7e3cc;  --ce-t1: #d8ecb8;  --ce-t2: #dce8f5;  --ce-t3: #b5d6f2;
+  --ce-t4: #f4cdc9;  --ce-t5: #f6cf9a;  --ce-t6: #f6ebb0;  --ce-t7: #e3d5f2;
+  --ce-t8: #bfe8dc;  --ce-t9: #f2cde2;  --ce-t10: #ccd3f2;
+  --ce-nao: #ebe9ee; --ce-celula-tinta: #2b2b3a; --ce-nao-tinta: #7a7890;
+}
+
+.ce-toolbar { flex-wrap: wrap; gap: 10px; }
+.ce-nav { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.ce-nav .btn-sm[hidden] { display: none; }
+.ce-ano { min-width: 140px; text-align: center; line-height: 1.1; padding: 0 6px; }
+.ce-ano strong { display: block; font-size: 1.9rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--txt); }
+.ce-ano small { color: var(--txt3); font-size: .72rem; font-family: var(--mono); }
+
+.ce-rolagem { overflow: auto; max-height: calc(100vh - 320px); min-height: 320px;
+  border: 1px solid var(--border2); border-radius: var(--radius); background: var(--surface); }
+.ce-tabela { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 1080px;
+  table-layout: fixed; font-variant-numeric: tabular-nums; }
+.ce-tabela col.ce-c-mes { width: 140px; }
+.ce-tabela th, .ce-tabela td { text-align: center; padding: 0; height: 40px;
+  border-right: 2px solid var(--surface); border-bottom: 2px solid var(--surface); }
+.ce-tabela tr > :last-child { border-right: 0; }
+.ce-tabela tbody tr:last-child > * { border-bottom: 0; }
+
+.ce-tabela thead th { position: sticky; z-index: 2; color: var(--txt); font-weight: 700; }
+.ce-tabela thead tr:first-child th { top: 0; height: 38px; background: var(--surface3); font-size: .8rem;
+  font-family: var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.ce-tabela thead tr:last-child th { top: 38px; height: 36px; background: var(--surface2); font-size: .95rem; font-weight: 800; }
+.ce-tabela thead th.ce-canto { left: 0; z-index: 4; text-align: left; padding-left: 14px; line-height: 1.2;
+  background: var(--surface3); font-size: .72rem; }
+.ce-tabela tbody th { position: sticky; left: 0; z-index: 1; text-align: left; padding-left: 14px;
+  background: var(--surface); color: var(--txt); font-weight: 700; font-size: .78rem;
+  font-family: var(--mono); letter-spacing: .06em; text-transform: uppercase; border-right: 3px solid var(--border2); }
+
+.ce-tabela td { color: var(--ce-celula-tinta); background: var(--ce-nao); font-weight: 700; font-size: .78rem;
+  text-transform: uppercase; white-space: nowrap; transition: filter .1s ease; }
+.ce-tabela td:hover { filter: brightness(.96) saturate(1.1); }
+.ce-tabela td.ce-t0 { background: var(--ce-t0); } .ce-tabela td.ce-t1 { background: var(--ce-t1); }
+.ce-tabela td.ce-t2 { background: var(--ce-t2); } .ce-tabela td.ce-t3 { background: var(--ce-t3); }
+.ce-tabela td.ce-t4 { background: var(--ce-t4); } .ce-tabela td.ce-t5 { background: var(--ce-t5); }
+.ce-tabela td.ce-t6 { background: var(--ce-t6); } .ce-tabela td.ce-t7 { background: var(--ce-t7); }
+.ce-tabela td.ce-t8 { background: var(--ce-t8); } .ce-tabela td.ce-t9 { background: var(--ce-t9); }
+.ce-tabela td.ce-t10 { background: var(--ce-t10); }
+.ce-tabela td.ce-nao { color: var(--ce-nao-tinta); font-weight: 500; }
+/* linha do corte entre março e abril */
+.ce-tabela tr.ce-pos-corte > * { border-top: 4px solid var(--cyan); }
+
+.ce-legenda { list-style: none; padding: 0; margin: 16px 0 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.ce-legenda li { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px 4px 5px;
+  border-radius: 999px; background: var(--surface2); border: 1px solid var(--border); font-size: .76rem; color: var(--txt); }
+.ce-legenda i { width: 18px; height: 18px; border-radius: 50%; display: inline-block; border: 1px solid rgba(128,128,128,.3); }
+.ce-nota { color: var(--txt3); font-size: .78rem; max-width: 100ch; margin: 12px 0 0; line-height: 1.5; }

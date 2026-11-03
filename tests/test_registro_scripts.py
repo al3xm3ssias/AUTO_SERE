@@ -476,3 +476,41 @@ def test_automacao_desconhecida_e_nao_implementada(ctx):
     c, _, _ = ctx
     assert _post(c, "nao_existe").status_code == 404
     assert _post(c, "agendador").status_code == 501
+
+
+def test_gerar_chaves_e_opcao_de_ignorar_chaves_salvas_na_rematricula():
+    from src.automacao.chaves_responsavel import gerar_chaves_via_login
+    from src.automacao.rematricula import rematricular_via_login
+    g = reg.obter("gerar_chaves")
+    assert g.turmas_de is not None and g.confirmar and set(g.recursos) == {oe.RECURSO_TURMA, oe.RECURSO_TESTE}
+    p = g.planejar(Opcoes(), {}, {}, {})
+    assert p.tipo == "coroutine" and p.funcao is gerar_chaves_via_login
+    assert p.kwargs == {"modo_teste": False, "turmas_alvo": None}
+    p = g.planejar(Opcoes(turmas=("2º Ano",), modo_teste=True), {"regenerar": True}, {}, {})
+    assert p.kwargs == {"modo_teste": True, "turmas_alvo": ["2º Ano"], "regenerar": True}
+    assert [e["nome"] for e in g.extras()] == ["regenerar"]
+
+    r = reg.obter("rematricula")
+    assert r.planejar(Opcoes(), {}, {}, {}).kwargs == {"modo_teste": False, "apenas_erros": False, "turmas_alvo": None}
+    p = r.planejar(Opcoes(), {"ignorar_chaves_salvas": True}, {}, {})
+    assert p.funcao is rematricular_via_login and p.kwargs["usar_chaves_salvas"] is False
+    assert [e["nome"] for e in r.extras()] == ["ignorar_chaves_salvas"]
+
+
+def test_gerar_chaves_executa_pela_rota(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(rotas, "_dados_dir", lambda: tmp_path)
+    (tmp_path / "turmas.json").write_text(json.dumps(TURMAS), encoding="utf-8")
+    with rotas._EXECUCOES_LOCK:
+        rotas._EXECUCOES.clear()
+    import src.automacao.chaves_responsavel as cr
+    chamadas = []
+
+    async def fake(**kw):
+        print("geração simulada"); chamadas.append(kw)
+
+    monkeypatch.setattr(cr, "gerar_chaves_via_login", fake)
+    c = create_app().test_client()
+    assert _post(c, "gerar_chaves", turmas=["INFANTIL 4"], modo_teste=True, regenerar=True).status_code == 200
+    assert _esperar(c, "gerar_chaves")["status"] == "concluido"
+    assert chamadas == [{"modo_teste": True, "turmas_alvo": ["INFANTIL 4"], "regenerar": True}]

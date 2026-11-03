@@ -180,8 +180,18 @@ def _turmas_da_rematricula() -> list[str]:
 
 def _plano_rematricula(o, p, tj, ctx) -> Plano:
     from src.automacao.rematricula import rematricular_via_login
-    return Plano("coroutine", rematricular_via_login, {
-        "modo_teste": o.modo_teste, "apenas_erros": o.erros, "turmas_alvo": list(o.turmas) or None})
+    kwargs = {"modo_teste": o.modo_teste, "apenas_erros": o.erros, "turmas_alvo": list(o.turmas) or None}
+    if p.get("ignorar_chaves_salvas"):
+        kwargs["usar_chaves_salvas"] = False
+    return Plano("coroutine", rematricular_via_login, kwargs)
+
+
+def _plano_gerar_chaves(o, p, tj, ctx) -> Plano:
+    from src.automacao.chaves_responsavel import gerar_chaves_via_login
+    kwargs = {"modo_teste": o.modo_teste, "turmas_alvo": list(o.turmas) or None}
+    if p.get("regenerar"):
+        kwargs["regenerar"] = True
+    return Plano("coroutine", gerar_chaves_via_login, kwargs)
 
 
 def _plano_prematricula(o, p, tj, ctx) -> Plano:
@@ -333,6 +343,58 @@ def _plano_pareceres_transferidos(o, p, tj, ctx) -> Plano:
     return Plano("coroutine", executar_pareceres_transferidos, {
         "simulacao": bool(p.get("simulacao")), "enviar": bool(p.get("enviar", True)),
         "limite_mb": _ler_limite_mb(p), "modo_teste": o.modo_teste})
+
+
+def _validar_pareceres_digitalizados(p: dict) -> None:
+    from src.automacao import avisos as av
+    from src.automacao import pareceres_digitalizados as pd
+    _ler_limite_mb(p)
+    modo = p.get("email_modo") or "nao"
+    if modo not in pd.MODOS_EMAIL:
+        raise ValueError(f"Modo de e-mail inválido: '{modo}'.")
+    pd.conferir_marcadores(str(p.get("assunto") or pd.ASSUNTO_PADRAO), "Assunto")
+    pd.conferir_marcadores(str(p.get("mensagem") or pd.MENSAGEM_PADRAO), "Mensagem")
+    teste = str(p.get("email_teste") or "").strip()
+    if modo == "teste" and teste and not av.email_valido(teste):
+        raise ValueError(f"O endereço de teste '{teste}' não é um e-mail válido.")
+    if modo != "nao" and not p.get("simulacao") and not av._credenciais_email_ok():
+        raise ValueError("O e-mail da escola ainda não está configurado: preencha EMAIL_REMETENTE e EMAIL_SENHA_APP em credenciais/.env.")
+
+
+def _plano_pareceres_digitalizados(o, p, tj, ctx) -> Plano:
+    from src.automacao import pareceres_digitalizados as pd
+    return Plano("coroutine", pd.executar_pareceres_digitalizados, {
+        "simulacao": bool(p.get("simulacao")), "enviar_sere": bool(p.get("enviar_sere", False)),
+        "email_modo": p.get("email_modo") or "nao", "email_teste": str(p.get("email_teste") or "").strip(),
+        "assunto": str(p.get("assunto") or pd.ASSUNTO_PADRAO), "mensagem": str(p.get("mensagem") or pd.MENSAGEM_PADRAO),
+        "limite_mb": _ler_limite_mb(p), "modo_teste": o.modo_teste,
+        "turmas": list(o.turmas), "cgms": list(o.cgms)})
+
+
+def _extras_pareceres_digitalizados() -> list[dict]:
+    from src.automacao import pareceres_digitalizados as pd
+    return [
+        {"tipo": "texto", "id": "campo-limite-parecer", "nome": "limite_mb", "label": "Comprimir arquivos maiores que (MB)",
+         "placeholder": "1,5 (limite do SERE) — 0 comprime todos"},
+        {"tipo": "caixa", "id": "campo-enviar-sere", "nome": "enviar_sere", "padrao": False, "label": "Enviar ao SERE depois de arquivar",
+         "descricao": "Envia o parecer de cada aluno para o item \"Parecer Descritivo <ano>-1\" da pasta virtual do SERE "
+                      "(vale para qualquer ano; se o item ainda não estiver no catálogo do sistema, é procurado no próprio SERE). "
+                      "Quem já foi enviado e não mudou é pulado."},
+        {"tipo": "select", "id": "campo-email-modo", "nome": "email_modo", "label": "E-mail ao responsável", "semVazio": True,
+         "padrao": "nao", "opcoes": [{"valor": k, "texto": v} for k, v in pd.MODOS_EMAIL.items()]},
+        {"tipo": "texto", "id": "campo-email-teste", "nome": "email_teste", "label": "Endereço de teste",
+         "placeholder": "em branco = o e-mail da própria escola",
+         "visivelSe": {"campo": "campo-email-modo", "valor": "teste"}},
+        {"tipo": "texto", "id": "campo-email-assunto", "nome": "assunto", "label": "Assunto do e-mail", "padrao": pd.ASSUNTO_PADRAO,
+         "placeholder": "Marcadores: " + ", ".join("$" + m for m in pd.MARCADORES),
+         "visivelSe": {"campo": "campo-email-modo", "valor": "teste|enviar"}},
+        {"tipo": "texto", "multilinha": True, "linhas": 6, "id": "campo-email-mensagem", "nome": "mensagem",
+         "label": "Mensagem do e-mail", "padrao": pd.MENSAGEM_PADRAO,
+         "placeholder": "Marcadores: " + ", ".join("$" + m for m in pd.MARCADORES),
+         "visivelSe": {"campo": "campo-email-modo", "valor": "teste|enviar"}},
+        _extra_simulacao(True, "Lê os QR e mostra onde cada arquivo seria salvo, o que iria ao SERE e quem receberia o e-mail (com a prévia). "
+                               "Não copia, não comprime, não apaga, não grava, não abre o SERE e não envia e-mail. Desmarque para executar."),
+    ]
 
 
 def _plano_turmas(o, p, tj, ctx) -> Plano:
@@ -727,10 +789,21 @@ registrar(Script("aluno", (_C, _TE, _E), _plano_aluno, cgm_obrigatorio=True, con
                                   "label": "Só quem ainda tem documento pendente",
                                   "descricao": "Pula os alunos que já estão com todos os documentos no SERE."}]))
 
+registrar(Script("gerar_chaves", (_T, _TE), _plano_gerar_chaves, confirmar=True, turmas_de=_turmas_da_rematricula,
+                 aviso_confirmacao="Gera no SERE a chave de acesso do responsável de cada aluno e guarda a chave e o CPF em "
+                                   "dados/<ano>/chave_responsavel.json, para a Rematrícula usar. Não rematricula ninguém.",
+                 ajuda_teste="Gera a chave de só 1 aluno por turma, para você conferir antes de rodar tudo.",
+                 extras=lambda: [{"tipo": "caixa", "id": "campo-regenerar", "nome": "regenerar",
+                                  "label": "Gerar de novo mesmo para quem já tem chave salva",
+                                  "descricao": "Por padrão pula quem já tem chave salva e quem já foi rematriculado."}]))
+
 registrar(Script("rematricula", (_T, _TE, _E), _plano_rematricula, confirmar=True, turmas_de=_turmas_da_rematricula,
                  aviso_confirmacao="Faz a rematrícula desses alunos no SERE.",
                  ajuda_teste="Faz a rematrícula de só 1 aluno por turma, para você conferir antes de rodar tudo. "
-                             "Atenção: não é simulação — esses alunos são rematriculados de verdade."))
+                             "Atenção: não é simulação — esses alunos são rematriculados de verdade.",
+                 extras=lambda: [{"tipo": "caixa", "id": "campo-ignorar-chaves", "nome": "ignorar_chaves_salvas",
+                                  "label": "Ignorar as chaves salvas (gerar todas na hora)",
+                                  "descricao": "Por padrão, quem tem chave salva (automação \"Gerar chaves\") entra direto na Área do Aluno."}]))
 
 registrar(Script("prematricula_completa", (_D,), _plano_prematricula,
                  ajuda_debug="Modo de análise: salva uma captura de tela de cada etapa em dados/<ano>/screenshots, "
@@ -773,6 +846,13 @@ registrar(Script("pareceres_transferidos", (_TE,), _plano_pareceres_transferidos
                      _extra_simulacao(True, "Lê os QR e mostra, para cada arquivo, quem é, onde seria salvo e se seria comprimido. "
                                             "Não copia, não comprime, não apaga, não grava e não abre o SERE. Desmarque para processar de verdade.")]))
 
+
+registrar(Script("pareceres_digitalizados", (_T, _C, _TE), _plano_pareceres_digitalizados, confirmar=True,
+                 validar_extras=_validar_pareceres_digitalizados, extras=_extras_pareceres_digitalizados,
+                 aviso_confirmacao="Lê o QR dos pareceres do Fundamental digitalizados (pasta PARECERES/_PROCESSAR), arquiva cada um na turma "
+                                   "do aluno e, se marcado, envia ao SERE e por e-mail ao responsável. Com \"Simulação\" marcada nada é "
+                                   "alterado nem enviado. O envio por e-mail vai para famílias de verdade.",
+                 ajuda_teste="Processa e envia só o primeiro parecer. Atenção: não é simulação — ele é processado de verdade."))
 
 registrar(Script("parecer_rco", (_TE,), _plano_parecer_rco, validar_extras=_validar_parecer_rco,
                  extras=_extras_parecer_rco,

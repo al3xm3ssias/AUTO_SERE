@@ -27,10 +27,10 @@ Regra de ouro: nenhum caminho é fixo no código. Tudo vem de `src/comum/paths.p
 6. Scripts que alteram o SERE têm `confirmar=True`: pedem confirmação com a prévia (`SIM` na CLI ou `--confirmo`),
    exceto no **modo de teste**.
 
-## Automações registradas (31 chaves)
+## Automações registradas (33 chaves)
 
-`analisa_sere`, `validar`, `documentos`, `limpeza`, `espec`, `aluno`, `rematricula`, `prematricula_completa`,
-`transferidos_fila`, `transferidos_gerar`, `transferidos`, `pareceres_transferidos`, `parecer_rco`, `parecer_fund`,
+`analisa_sere`, `validar`, `documentos`, `limpeza`, `espec`, `aluno`, `gerar_chaves`, `rematricula`, `prematricula_completa`,
+`transferidos_fila`, `transferidos_gerar`, `transferidos`, `pareceres_transferidos`, `pareceres_digitalizados`, `parecer_rco`, `parecer_fund`,
 `avisos`, `turmas`, `alunos`, `funcionarios`, `vinculos`, `sus`, `cep`, `termos`, `comprimir`, `compara_anos`,
 `gerar_pastas`, `analisa_pasta`, `mapear_pastas`, `cruzamento`, `mascara`, `coleta_emails`, `backup`.
 

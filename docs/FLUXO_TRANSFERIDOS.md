@@ -18,6 +18,7 @@ Tudo fica em `dados/<ano letivo>/TRANSFERENCIAS/` (`src/comum/pastas_transferenc
 | Gerar guia e histórico | Executa no SERE as ações marcadas para os alunos da fila (ver abaixo) | mostra alunos, ações, texto e pastas; não abre o SERE |
 | Enviar transferidos ao SERE | Envia guia, histórico e parecer das pastas de `TRANSFERENCIAS` | só varre as pastas |
 | Pareceres dos transferidos | Lê o QR, arquiva em `PARECERES`, comprime se passar do limite e envia | lê os QR e mostra o plano |
+| Pareceres digitalizados | Para **todos** os alunos do Fundamental: lê o QR novo (`AUTOSERE\|PF\|ano\|CGM`), arquiva na turma e, opcionalmente, envia ao SERE e por e-mail ao responsável | lê os QR e mostra o plano e a prévia do e-mail |
 
 A simulação já vem marcada nas telas que mexem no SERE ou nos arquivos.
 
