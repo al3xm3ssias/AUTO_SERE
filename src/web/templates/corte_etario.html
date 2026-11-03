@@ -1,0 +1,36 @@
+<section class="section ce-paleta" id="sec-corte-etario" data-title="Corte etário">
+
+  <div class="page-header">
+    <div class="page-header-icon amber"><span data-icon="ageCut"></span></div>
+    <div class="page-header-text">
+      <h1>Corte etário</h1>
+      <p id="ce-regra">Idade mínima por turma para matrícula, do Berçário ao 5º ano</p>
+    </div>
+    <div class="page-header-actions">
+      <button class="btn-sm" id="ce-exportar" type="button" title="Baixa o quadro em PDF (A4 paisagem)"><span data-icon="download"></span> Exportar PDF</button>
+    </div>
+  </div>
+
+  <div class="card ce-card">
+    <div class="card-header ce-toolbar">
+      <div class="ce-nav">
+        <button class="btn-sm" id="ce-anterior" type="button" aria-label="Ano letivo anterior"><span data-icon="chevronLeft"></span> Ano anterior</button>
+        <div class="ce-ano" aria-live="polite">
+          <strong id="ce-ano-titulo"></strong>
+          <small id="ce-ano-legenda"></small>
+        </div>
+        <button class="btn-sm" id="ce-proximo" type="button" aria-label="Próximo ano letivo">Próximo ano <span data-icon="chevronRight"></span></button>
+        <button class="btn-sm" id="ce-voltar" type="button" hidden></button>
+      </div>
+    </div>
+
+    <div class="card-body">
+      <div class="ce-rolagem">
+        <table class="ce-tabela" id="ce-tabela"></table>
+      </div>
+      <ul class="ce-legenda" id="ce-legenda" aria-label="Cores das turmas"></ul>
+      <p class="ce-nota" id="ce-nota"></p>
+    </div>
+  </div>
+
+</section>
