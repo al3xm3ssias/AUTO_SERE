@@ -176,3 +176,19 @@ def test_vinculos_envia_o_modo_e_o_nome_escolhidos(pagina, monkeypatch):
     pg.fill("#campo-mes-holerite", "09-2026")
     corpo = _executar_e_capturar(pg, "vinculos")
     assert corpo["modo"] == "homonimos" and corpo["so_nome"] == "Carla Dias" and corpo["mes"] == "09-2026"
+
+
+def test_pareceres_digitalizados_mostra_os_campos_de_e_mail_so_quando_ha_e_mail(pagina):
+    pg = pagina
+    _abrir(pg, "pareceres_digitalizados")
+    pg.wait_for_selector("#campo-email-modo")
+    assert pg.eval_on_selector("#campo-email-modo", "e => e.value") == "nao"                 # padrão: não manda e-mail
+    assert pg.is_checked("#campo-simulacao") and not pg.is_checked("#campo-enviar-sere")      # padrão seguro: simulação, sem SERE
+    estado = lambda: {c: _visivel(pg, c) for c in ("campo-email-teste", "campo-email-assunto", "campo-email-mensagem")}
+    assert estado() == {"campo-email-teste": False, "campo-email-assunto": False, "campo-email-mensagem": False}
+    pg.select_option("#campo-email-modo", "teste")
+    assert estado() == {"campo-email-teste": True, "campo-email-assunto": True, "campo-email-mensagem": True}
+    pg.select_option("#campo-email-modo", "enviar")
+    assert estado() == {"campo-email-teste": False, "campo-email-assunto": True, "campo-email-mensagem": True}
+    assert "Parecer descritivo de $ALUNO" in pg.eval_on_selector("#campo-email-assunto", "e => e.value")
+    assert "$RESPONSAVEL" in pg.eval_on_selector("#campo-email-mensagem", "e => e.value")

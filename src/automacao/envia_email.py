@@ -51,10 +51,13 @@ Uso:
 
 from __future__ import annotations
 
+import mimetypes
 import smtplib
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Optional
+from pathlib import Path
+from typing import Iterable, Optional
 
 from src.comum.credenciais import EMAIL_REMETENTE, EMAIL_SENHA_APP
 
@@ -68,6 +71,7 @@ def enviar_email(
     corpo: str,
     remetente: Optional[str] = None,
     senha_app: Optional[str] = None,
+    anexos: Optional[Iterable] = None,
 ) -> tuple[bool, Optional[str]]:
     """
     Envia um e-mail de texto puro via SMTP (Gmail, porta 587, STARTTLS).
@@ -77,6 +81,9 @@ def enviar_email(
     via credenciais/.env — ver .env.example). Aceitos como parâmetros
     explícitos para permitir enviar de uma conta diferente da configurada
     globalmente, se necessário.
+
+    `anexos`: caminhos de arquivos a anexar (ex.: o PDF do parecer). Um anexo que não existe falha o envio, com a
+    mensagem no retorno, em vez de mandar o e-mail sem ele.
 
     Retorna (sucesso: bool, erro: str | None) — nunca levanta exceção
     para falhas de conexão/autenticação/envio (mesmo comportamento do
@@ -91,6 +98,18 @@ def enviar_email(
     msg["To"] = destinatario
     msg["Subject"] = assunto
     msg.attach(MIMEText(corpo, "plain"))
+
+    for anexo in anexos or []:
+        caminho = Path(anexo)
+        try:
+            conteudo = caminho.read_bytes()
+        except OSError as e:
+            print(f"❌ Anexo não pôde ser lido: {caminho} ({e})")
+            return False, f"anexo não encontrado ou ilegível: {caminho.name} ({e})"
+        subtipo = (mimetypes.guess_type(caminho.name)[0] or "application/octet-stream").split("/")[-1]
+        parte = MIMEApplication(conteudo, _subtype=subtipo)
+        parte.add_header("Content-Disposition", "attachment", filename=caminho.name)
+        msg.attach(parte)
 
     try:
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)

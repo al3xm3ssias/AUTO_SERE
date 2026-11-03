@@ -7,7 +7,9 @@ e SHA-256 de cada arquivo) para poder conferir a integridade depois.
 
 O QUE ENTRA
   dados_ano/   dados/<ano atual>/   .json .xlsx .csv .txt (turmas, alunos, pré-matrícula...)
-  calendario/  dados/calendario/    calendário letivo (sem o cache de feriados)
+  calendario/  dados/calendario/    calendário letivo antigo, de antes de ser por ano (sem o cache de feriados; só existe
+                                    se a migração não rodou). O calendário de cada ano fica em dados/<ano>/calendario.json
+                                    e já entra em dados_ano/.
   config/      config/              config_usuario.json (escola, pastas...) e config.yaml
 
 O QUE NUNCA ENTRA
@@ -26,7 +28,7 @@ USO
                                                   repõe de verdade (faz um backup de segurança antes)
   python -m src.comum.backup --ano 2025           backup dos dados de OUTRO ano (sem trocar o ano em uso)
   python -m src.comum.backup --restaurar ARQ.zip --aplicar --so-dados
-                                                  repõe só os dados do ano (não mexe em config nem calendário)
+                                                  repõe só os dados do ano, inclusive o calendário dele (não mexe em config)
 
 ANOS (24/10/2026): cada backup é de UM ano (o manifesto guarda `ano`) e a restauração repõe os dados na pasta
 desse ano — nunca por cima do ano em uso, se forem diferentes. Cópia de segurança antes de restaurar também é

@@ -91,10 +91,16 @@
     });
     return [...anos];
   }
-  async function carregar() {
+  async function carregar(abrindo) {
     const d = await api("/dados");
     st.eventos = d.eventos;
     st.periodos = d.periodos;
+    // Ao abrir a tela com o programa voltado a outro ano letivo (ex.: 2025), mostra o calendário DESSE ano
+    // (os dados são por ano letivo); no ano em curso continua abrindo no mês atual.
+    if (abrindo && d.ano_letivo && +d.ano_letivo !== agora.getFullYear()) {
+      st.ano = +d.ano_letivo;
+      st.mes = 0;
+    }
     // 1) desenha já, só com o que é local (eventos, períodos e datas fixas)
     await Promise.all(anosNecessarios().map(garantirFixos));
     render();
@@ -426,7 +432,7 @@
     st.mes = agora.getMonth();
     st.vista = "mes";
     render();                              // grade já na tela, antes de qualquer resposta do servidor
-    carregar().catch((err) => {
+    carregar(true).catch((err) => {
       aviso(err.message);
       render();
     });

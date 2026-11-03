@@ -841,6 +841,7 @@ tbody td{padding:11px 14px;vertical-align:middle}
 .al-field-group{display:flex;flex-direction:column;gap:3px}
 .al-field-lbl{font-family:var(--mono);font-size:.6rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--txt3)}
 .al-field-val{font-size:.8rem;color:var(--txt);font-weight:500;word-break:break-word;line-height:1.4}
+.al-field-val.al-vazio{color:var(--txt3);font-weight:400}
 .al-field-val.mono{font-family:var(--mono);font-size:.78rem;color:var(--txt2)}
 .al-section-ttl{
   grid-column:1/-1;
@@ -849,6 +850,10 @@ tbody td{padding:11px 14px;vertical-align:middle}
   border-bottom:1px solid var(--border);padding-bottom:6px;margin-top:4px;
 }
 .al-detail-row td{padding:0}
+.aviso-coleta{margin:0 0 14px;padding:10px 14px;border:1px solid var(--amber);border-radius:10px;background:rgba(251,191,36,.08);color:var(--txt);font-size:.8rem;line-height:1.45}
+.aviso-coleta b{color:var(--amber)}
+.aviso-coleta .aviso-coleta-pend{margin-top:6px;color:var(--txt3);font-size:.72rem}
+.al-info{margin-top:10px;font-size:.75rem;color:var(--txt3);line-height:1.4}
 
 /* ══════════════════════════════════════════════════════════════════════
    FREQUÊNCIA

@@ -44,6 +44,7 @@ from flask import Blueprint, jsonify, request
 
 from src.comum import paths as _paths
 from src.comum.execucao_gui import ExecucaoEmBackground, StatusExecucao
+from src.comum import alunos_unificados
 from src.comum import configuracao as _config
 from src.comum import cep_consulta as _cep
 from src.comum import escola as _escola
@@ -125,12 +126,14 @@ def painel_resumo():
     pct_meninos = f"{(meninos / total_alunos * 100):.1f}%".replace(".", ",") if total_alunos else "—"
     pct_meninas = f"{(meninas / total_alunos * 100):.1f}%".replace(".", ",") if total_alunos else "—"
 
-    # Mesma regra da tela da Pré-matrícula: a tentativa antiga de quem mudou de turma não conta duas vezes.
+    # Mesma regra da fila da Pré-matrícula (_aluno_na_fila_prematricula): só quem ainda AGUARDA ser chamado;
+    # matriculados, cancelados e a tentativa antiga de quem mudou de turma não contam.
+    indice_cadastros = _indice_cadastros_prematricula(pre_matricula.get("cadastros")) if isinstance(pre_matricula, dict) else {}
     fila_prematricula = sum(
         1
         for alunos in pre_matricula.get("turmas_intencao", {}).values()
         for aluno in alunos
-        if not aluno.get("substituido_por_nova_tentativa")
+        if _aluno_na_fila_prematricula(aluno, indice_cadastros)
     ) if isinstance(pre_matricula, dict) else 0
 
     docs_pendentes = 0
@@ -329,18 +332,19 @@ def turmas_lista():
 @api_bp.route("/alunos/lista")
 def alunos_lista():
     """
-    Lê alunos.json (cadastro completo — gerado por
-    src.automacao.alunos.coletar_cadastro_completo_alunos: Nome, CGM, RG,
-    CPF, endereço, responsável, etc.) cruzado com turmas.json (situação e
-    turma mais atuais, já que alunos.json não é recoletado com a mesma
-    frequência). Mesma lógica de DATA.alunos + DATA.turmas_cgm_map do
-    protótipo index.html: por CGM, turmas.json vence para _turma/_situacao.
+    Visão conjunta dos alunos: une alunos.json (cadastro básico, coletado por src.automacao.alunos) e
+    alunos_completo.json (cadastro completo, de src.automacao.alunos_completo) pelo CGM, e cruza com
+    turmas.json (situação e turma mais atuais, já que os cadastros não são recoletados com a mesma
+    frequência). Mesma lógica de DATA.alunos + DATA.turmas_cgm_map do protótipo index.html: por CGM,
+    turmas.json vence para _turma/_situacao.
 
-    Devolve os alunos com TODOS os campos originais do cadastro (para o
-    detalhe expansível no front) mais _turma/_situacao já resolvidos.
+    Devolve os alunos com TODOS os campos originais do cadastro básico (para o detalhe expansível no front),
+    mais _turma/_situacao já resolvidos e o que vem do cadastro completo (ver src.comum.alunos_unificados:
+    _cadastro, _extras, _divergencias...). Um aluno que só tem cadastro completo também aparece.
     """
     alunos = _carregar_json("alunos.json", [])
     turmas = _carregar_json("turmas.json", {})
+    completo = alunos_unificados.indexar_completo(_carregar_json("alunos_completo.json", {}))
 
     # Um CGM pode ter MAIS DE UM registro em turmas.json (aluno transferido que
     # retornou: Transferido + Matriculado). Guarda todos e casa cada cadastro de
@@ -353,12 +357,7 @@ def alunos_lista():
                 continue
             registros_por_cgm.setdefault(cgm, []).append({**aluno, "_turma": nome_turma})
 
-    usados: set[int] = set()
-    alunos_resp = []
-    for aluno in alunos:
-        cgm = str(aluno.get("CGM", aluno.get("cgm", ""))).strip()
-        reg = casar_com_turmas(aluno, registros_por_cgm.get(cgm, []), usados)
-        aluno_completo = dict(aluno)
+    def _aplicar_turma(aluno_completo: dict, reg: Optional[dict]) -> None:
         if reg:
             aluno_completo["_situacao"] = reg.get("Situação", reg.get("Situacao", "—"))
             aluno_completo["_turma"] = reg["_turma"]
@@ -368,17 +367,53 @@ def alunos_lista():
         else:
             aluno_completo["_situacao"] = "—"
             aluno_completo["_turma"] = "—"
+
+    usados: set[int] = set()
+    cgms_basicos: set[str] = set()
+    alunos_resp = []
+    for aluno in alunos if isinstance(alunos, list) else []:
+        cgm = str(aluno.get("CGM", aluno.get("cgm", ""))).strip()
+        cgms_basicos.add(cgm)
+        reg = casar_com_turmas(aluno, registros_por_cgm.get(cgm, []), usados)
+        aluno_completo = dict(aluno)
+        _aplicar_turma(aluno_completo, reg)
+        alunos_unificados.unificar(aluno_completo, completo.get(cgm))
         alunos_resp.append(aluno_completo)
 
-    campos = list(alunos_resp[0].keys()) if alunos_resp else []
-    # _situacao/_turma são metadados de cruzamento, não campos de cadastro —
-    # não entram na lista de campos do cadastro (grupos de detalhe no front).
-    campos = [c for c in campos if not c.startswith("_")]
+    # Quem tem cadastro completo mas ainda não tem o básico (ex.: só rodou o modo completo).
+    so_completo = 0
+    for cgm, reg_completo in completo.items():
+        if cgm in cgms_basicos:
+            continue
+        aluno_novo = alunos_unificados.aluno_so_completo(cgm, reg_completo)
+        _aplicar_turma(aluno_novo, casar_com_turmas(aluno_novo, registros_por_cgm.get(cgm, []), usados))
+        alunos_resp.append(aluno_novo)
+        so_completo += 1
+
+    # _situacao/_turma/_cadastro... são metadados de cruzamento, não campos de cadastro — não entram na lista de
+    # campos do cadastro (grupos de detalhe no front). A lista é a união (na ordem em que aparecem), pois um aluno
+    # que só tem o cadastro completo pode trazer campos que o primeiro não tem.
+    campos: list[str] = []
+    vistos: set[str] = set()
+    for a in alunos_resp:
+        for c in a:
+            if not c.startswith("_") and c not in vistos:
+                vistos.add(c)
+                campos.append(c)
 
     return jsonify({
         "alunos": alunos_resp,
         "campos": campos,
         "total": len(alunos_resp),
+        "extras_catalogo": alunos_unificados.catalogo_extras(),   # campos do completo que a ficha mostra sempre (— se vazio)
+        "basico": {"gerado": (_dados_dir() / "alunos.json").exists()},
+        "completo": {
+            "gerado": (_dados_dir() / "alunos_completo.json").exists(),
+            "atualizado_em": _mtime_formatado("alunos_completo.json"),
+            "total": len(completo),
+            "so_completo": so_completo,
+            "com_divergencia": sum(1 for a in alunos_resp if a.get("_divergencias")),
+        },
     })
 
 
@@ -510,10 +545,54 @@ def documentos_analise():
     })
 
 
+def _indice_cadastros_prematricula(cadastros) -> dict:
+    """{cpf, tr_id ou chave do cadastro → cadastro}, para achar o cadastro de uma entrada da fila."""
+    indice: dict = {}
+    for cid, c in (cadastros.items() if isinstance(cadastros, dict) else []):
+        if isinstance(c, dict):
+            for chave in {str(cid), str(c.get("cpf") or ""), str(c.get("tr_id") or "")} - {""}:
+                indice.setdefault(chave, c)
+    return indice
+
+
+def _aluno_na_fila_prematricula(aluno, indice_cadastros: dict) -> bool:
+    """
+    True só para quem AINDA AGUARDA ser chamado.
+
+    pre_matricula.json é o histórico de todos que já passaram pela fila. O site só lista quem está
+    "aguardando"; quem é chamado (matriculado ou cancelado) some da lista do site mas continua no arquivo,
+    com presente_na_ultima_coleta=False e uma situação (a presumida, "Cancelado", até a etapa 4 confirmar a
+    real). Esses não são mais fila: a situação deles aparece na tela Cadastros.
+
+      - tentativa antiga de quem voltou noutra turma .......... fora (vale a nova)
+      - saiu da lista do site na última coleta ................. fora (foi chamado)
+      - já tem situação registrada (matriculado/cancelado) ..... fora
+      - arquivo antigo, sem a marca da última coleta ........... confere o cadastro: resolvido = fora
+    A lista viva do site decide; o cadastro só entra quando a marca não existe, porque ele pode ser a
+    tentativa antiga (BUGS_CONHECIDOS, BUG-PRE-001) de quem voltou a aguardar.
+    """
+    if not isinstance(aluno, dict) or aluno.get("substituido_por_nova_tentativa"):
+        return False
+    if aluno.get("presente_na_ultima_coleta") is False:
+        return False
+    if str(aluno.get("situacao") or "").strip():
+        return False
+    if "presente_na_ultima_coleta" not in aluno:
+        cadastro = next((indice_cadastros[k] for k in (str(aluno.get("cpf") or "").strip(), str(aluno.get("tr_id") or "").strip())
+                         if k and k in indice_cadastros), None)
+        if cadastro is not None:
+            escolhas = cadastro.get("escolas_escolhidas") if isinstance(cadastro.get("escolas_escolhidas"), dict) else {}
+            opcoes = [o for o in (escolhas.get("opcoes") or []) if isinstance(o, dict)]
+            if _situacao_prematricula(opcoes) != "pendente":
+                return False
+    return True
+
+
 def _fila_prematricula() -> list[dict]:
     """
     Lê pre_matricula.json (gerado por src.automacao.prematricula_coleta /
-    prematricula_cadastro) e devolve uma lista plana de alunos na fila.
+    prematricula_cadastro) e devolve uma lista plana de alunos NA FILA, isto é, que ainda aguardam ser
+    chamados (ver _aluno_na_fila_prematricula: matriculados e cancelados ficam de fora).
 
     Formato real do arquivo (ver src.automacao.prematricula_coleta):
         {
@@ -532,12 +611,13 @@ def _fila_prematricula() -> list[dict]:
 
     turmas_intencao = dados.get("turmas_intencao", {})
     cadastros = dados.get("cadastros", {})
+    indice_cadastros = _indice_cadastros_prematricula(cadastros)
 
     itens = []
     for turma, alunos in turmas_intencao.items():
         for aluno in alunos:
-            if aluno.get("substituido_por_nova_tentativa"):
-                continue          # tentativa antiga (aluno voltou noutra turma): não conta duas vezes
+            if not _aluno_na_fila_prematricula(aluno, indice_cadastros):
+                continue          # já chamado (matriculado/cancelado) ou tentativa antiga: não é mais fila
             cpf = (aluno.get("cpf") or "").strip()
             cadastro = cadastros.get(cpf, {}) if cpf else {}
             itens.append({
@@ -719,6 +799,26 @@ def _texto_matriculas(vinc: dict) -> str:
     return " | ".join(uma(v) for v in vs)
 
 
+def _aviso_coleta_completa_funcionarios() -> Optional[dict]:
+    """
+    Estado da última coleta COMPLETA de funcionários (funcionarios_completo_progresso.json, gravado por
+    src.automacao.servidores): devolve {aviso, coletados, total, pendentes, atualizado_em, motivo} se ela foi
+    interrompida (cancelada, erro ou o programa caiu no meio), ou None se terminou ou nunca rodou.
+    """
+    estado = _carregar_json("funcionarios_completo_progresso.json", {})
+    if not isinstance(estado, dict) or not estado or estado.get("completa") is not False:
+        return None
+    pendentes = [str(p) for p in (estado.get("pendentes") or [])][:50]
+    return {
+        "aviso": str(estado.get("aviso") or "A última coleta completa de funcionários não terminou."),
+        "coletados": estado.get("coletados"),
+        "total": estado.get("total"),
+        "pendentes": pendentes,
+        "atualizado_em": str(estado.get("atualizado_em") or ""),
+        "motivo": str(estado.get("motivo") or ""),
+    }
+
+
 @api_bp.route("/funcionarios/lista")
 def funcionarios_lista():
     """
@@ -836,7 +936,8 @@ def funcionarios_lista():
     ]
     return _resposta_lista_generica(colunas, [{k: r[k] for k in ("nome", "funcao", "email", "formacao", "turmas")}
                                               for r in registros],
-                                    extras={"funcionarios": registros, "cartoes": cartoes, "contagem": contagem})
+                                    extras={"funcionarios": registros, "cartoes": cartoes, "contagem": contagem,
+                                            "coleta_completo": _aviso_coleta_completa_funcionarios()})
 
 
 _DOCS_TRANSFERENCIA = (("guia", ("emitido_em", "assinado_secretario", "assinado_diretor")),
@@ -1169,6 +1270,7 @@ AUTOMACOES_DISPONIVEIS = [
     {"chave": "transferidos_gerar", "nome": "Gerar guia e histórico", "descricao": "Emite, assina e baixa do SERE o histórico escolar e a guia de transferência dos alunos da fila, salvando em TRANSFERENCIAS."},
     {"chave": "transferidos", "nome": "Enviar transferidos ao SERE", "descricao": "Envia à pasta virtual do SERE a guia, o histórico e o parecer dos transferidos que estão nas pastas de TRANSFERENCIAS."},
     {"chave": "pareceres_transferidos", "nome": "Pareceres dos transferidos", "descricao": "Lê o QR dos pareceres digitalizados, arquiva em PARECERES, comprime se passar do limite e envia ao SERE, numa rotina só."},
+    {"chave": "pareceres_digitalizados", "nome": "Pareceres digitalizados (Fundamental)", "descricao": "Lê o QR dos pareceres do Fundamental digitalizados (pasta PARECERES/_PROCESSAR), arquiva na turma do aluno, comprime se passar do limite e, se marcado, envia ao SERE e por e-mail ao responsável."},
     {"chave": "parecer_fund", "nome": "Pareceres fundamental", "descricao": "Gera o parecer de cada aluno do Fundamental a partir do modelo Word da turma (envie os modelos em Configurações → Modelos de parecer). Cada parecer leva um QR code no fim."},
     {"chave": "parecer_rco", "nome": "Pareceres infantil", "descricao": "Baixa do RCO os pareceres (PDF) dos alunos matriculados no Infantil IV e V. O RCO manda um código por e-mail: a tela pede para você digitar."},
     {"chave": "comprimir", "nome": "Comprimir documentos", "descricao": "Encolhe os PDFs e imagens (alunos, guias, históricos e pareceres) que passam do limite de 1,5 MB do SERE, guardando os originais."},

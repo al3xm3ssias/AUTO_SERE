@@ -1,5 +1,6 @@
 """
-Gera C:\\Auto_sere\\Auto_sere.zip com o conteúdo da pasta C:\\Auto_sere,
+Gera <pasta da instalação>\\<nome da pasta>.zip com o conteúdo da pasta onde este script está
+(a instalação do AUTO SERE, onde quer que ela esteja: C:\\AUTO_SERE, C:\\Auto_sere, outra pasta...),
 ignorando credenciais, dados, logs e pastas pesadas/regeneráveis.
 
 Uso:  python backup_auto_sere.py
@@ -9,9 +10,10 @@ import sys
 import zipfile
 from datetime import datetime
 
-PASTA = r"C:\Auto_sere"
-NOME = os.path.basename(PASTA)                      # "Auto_sere"
-ZIP_FINAL = os.path.join(PASTA, f"{NOME}.zip")      # C:\Auto_sere\Auto_sere.zip
+# Pasta da instalação = a pasta onde este arquivo está (não depende de um caminho fixo)
+PASTA = os.path.dirname(os.path.abspath(__file__))
+NOME = os.path.basename(PASTA)                      # ex.: "AUTO_SERE"
+ZIP_FINAL = os.path.join(PASTA, f"{NOME}.zip")      # ex.: <pasta da instalação>\AUTO_SERE.zip
 ZIP_TEMP = ZIP_FINAL + ".tmp"
 
 # Pastas ignoradas (comparação sem diferenciar maiúsculas/minúsculas)

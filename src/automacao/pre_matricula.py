@@ -50,6 +50,7 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
+from src.automacao.comunicado_matricula import avisar_apos_pre_matricula
 from src.comum import paths
 from src.comum.arquivos_json import (
     ArquivoJsonCorrompidoError,
@@ -1354,6 +1355,7 @@ async def processo_completo_via_login(
     pular_pendentes=False,
     navegador="chromium",
     headless=True,
+    avisar_whatsapp=True,
 ):
     """
     Etapas 1 -> 2 -> 4 -> 3 numa única sessão. `analise=True` salva
@@ -1389,6 +1391,9 @@ async def processo_completo_via_login(
 
     arquivo_contatos = etapa_contatos(dados_processados, dados_prematricula)
 
+    # Comunicado de matrícula por WhatsApp (provedor simulado por padrão; nunca quebra o processo).
+    avisar_apos_pre_matricula(avisar_whatsapp)
+
     print("\n" + "=" * 60)
     print("✅ PROCESSO COMPLETO FINALIZADO")
     if resumo_pendentes is not None:
@@ -1410,6 +1415,7 @@ async def completar_json_via_login(
     analise=False,
     navegador="chromium",
     headless=True,
+    avisar_whatsapp=True,
 ):
     """
     Antigo --completar_json: lê os relatórios .xlsx (padrão: o mais recente
@@ -1430,9 +1436,13 @@ async def completar_json_via_login(
     async with _Sessao(matricula, senha, analise, navegador, headless) as sessao:
         if not sessao.ok:
             return None
-        return await completar_json_a_partir_de_planilhas(
+        resultado = await completar_json_a_partir_de_planilhas(
             sessao.page, caminho_matriculados, caminho_intencoes, analise=analise
         )
+
+    if resultado is not None:
+        avisar_apos_pre_matricula(avisar_whatsapp)
+    return resultado
 
 
 async def verificar_pendentes_via_login(
@@ -1441,12 +1451,15 @@ async def verificar_pendentes_via_login(
     analise=False,
     navegador="chromium",
     headless=True,
+    avisar_whatsapp=True,
 ):
     """Antigo --somente-pendentes: roda só a Etapa 4. Devolve o resumo ou None."""
     async with _Sessao(matricula, senha, analise, navegador, headless) as sessao:
         if not sessao.ok:
             return None
         resumo = await etapa_verificar_pendentes(sessao.page, analise=analise)
+
+    avisar_apos_pre_matricula(avisar_whatsapp)
 
     print("\n" + "=" * 60)
     print("✅ --somente-pendentes FINALIZADO")

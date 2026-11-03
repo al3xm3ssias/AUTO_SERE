@@ -672,17 +672,27 @@ async function carregarTurmas() {
 const alunosState = { search: "", sort: { col: "nome", dir: 1 }, filter: "todos" };
 let _alunosCache = [];
 let _alunosCampos = [];
+let _alunosCompletoMeta = null;   // resumo do alunos_completo.json devolvido por /alunos/lista
+let _alunosBasicoGerado = true;   // alunos.json existe?
+let _alunosExtrasCatalogo = [];   // campos que só o cadastro completo traz: [{grupo, rotulo}]
 
-// Grupos de campos do cadastro completo (ver src.automacao.alunos.get_dados_aluno)
-// — nomes de campo exatamente como o SERE devolve.
+// Ficha do aluno: UMA tela com os dois cadastros. Cada grupo lista os campos do cadastro básico (alunos.json, nomes
+// exatamente como o SERE devolve; ver src.automacao.alunos.get_dados_aluno) e, logo depois, os do cadastro completo
+// (alunos_completo.json) que pertencem ao mesmo grupo (catálogo vindo de /alunos/lista, src.comum.alunos_unificados).
+// Todo campo aparece sempre; sem valor em nenhum dos dois cadastros, mostra "—".
 const AL_GROUPS = [
   { label: "Identificação", keys: ["Nome", "CGM", "RG", "CPF", "NIS Estudante", "Nacionalidade"] },
-  { label: "Nascimento", keys: ["Data Nascimento", "Sexo", "Cor", "Estado Civil", "Município Nascimento", "UF Nascimento"] },
+  { label: "Nascimento e origem", keys: ["Data Nascimento", "Sexo", "Cor", "Estado Civil", "Município Nascimento", "UF Nascimento"] },
+  { label: "Documentação", keys: ["Data Expedição RG", "Órgão Emissor", "UF RG"] },
+  { label: "Família e responsável", keys: ["Mãe", "Pai", "Responsável", "Parentesco", "CPF Responsável", "NIS Responsável"] },
+  { label: "Contato", keys: ["Celular Aluno", "Celular Responsável", "Telefone Residencial", "Telefone Comercial", "Email Aluno", "Email Responsável", "Email Google"] },
   { label: "Endereço", keys: ["Endereço", "Número", "Complemento", "Bairro", "CEP", "Cidade", "UF"] },
-  { label: "Responsável", keys: ["Mãe", "Pai", "Responsável", "Parentesco", "CPF Responsável", "NIS Responsável", "Celular Aluno", "Celular Responsável", "Telefone Residencial", "Telefone Comercial", "Email Aluno", "Email Responsável"] },
-  { label: "Escola", keys: ["Bolsa Família"] },
+  { label: "Programas sociais", keys: ["Bolsa Família"] },
+  { label: "Perfil socioeconômico", keys: [] },
+  { label: "Necessidades especiais", keys: [] },
+  { label: "Observação", keys: [] },
 ];
-const AL_SKIP_MAIN = new Set(["Email Google"]);
+const AL_VAZIO = "—";
 
 function _getField(aluno, ...chaves) {
   for (const k of chaves) {
@@ -701,44 +711,104 @@ function _situacaoBadge(situacao) {
   return badge(situacao || "—", "bg-muted");
 }
 
+// Selo de origem ao lado do rótulo: de onde veio o valor mostrado.
+function _tagOrigem(texto, cor) {
+  return ` <span style="color:var(--${cor}); font-size:.6rem">· ${texto}</span>`;
+}
+
+function _cadastroBadge(aluno) {
+  if (aluno._cadastro === "completo") return badge("Completo", "bg-cyan");
+  if (aluno._cadastro === "so_completo") return badge("Só completo", "bg-violet");
+  return badge("Básico", "bg-muted");
+}
+
+// Valor do cadastro básico por rótulo (sem diferenciar maiúsculas); "" se não houver.
+function _valorBasico(aluno, chave) {
+  const alvo = chave.toLowerCase();
+  const k = Object.keys(aluno).find((x) => !x.startsWith("_") && x.toLowerCase() === alvo);
+  const v = k === undefined ? "" : aluno[k];
+  const s = v === undefined || v === null ? "" : String(v).trim();
+  return s === AL_VAZIO ? "" : s;
+}
+
 function _buildDetailHTML(aluno) {
-  const assigned = new Set();
-  const turma = aluno._turma;
-  const situacao = aluno._situacao;
+  const preenchidos = new Set(aluno._preenchido_completo || []);
+  const divergentes = new Map((aluno._divergencias || []).map((d) => [d.rotulo, d]));
+  const extrasDoAluno = new Map((aluno._extras || []).map((e) => [e.rotulo, e.valor]));
+  const usados = new Set();
+
+  // Um campo da ficha: valor ou "—" quando nenhum dos cadastros tem.
+  const campoHtml = (rotulo, valor, tag, mono, aviso) => {
+    const vazio = !valor;
+    const val = vazio
+      ? `<span class="al-field-val al-vazio">${AL_VAZIO}</span>`
+      : `<span class="al-field-val${mono ? " mono" : ""}">${escaparHtml(valor)}</span>`;
+    return `<div class="al-field-group"${aviso || ""}><span class="al-field-lbl">${escaparHtml(rotulo)}${tag || ""}</span>${val}</div>`;
+  };
 
   const gruposHtml = AL_GROUPS.map((grupo) => {
-    const campos = _alunosCampos.filter((f) => grupo.keys.some((k) => f.toLowerCase() === k.toLowerCase()));
-    const itens = campos.filter((f) => {
-      const v = aluno[f];
-      return v !== undefined && v !== null && String(v).trim() && String(v).trim() !== "—";
+    let itens = "";
+    grupo.keys.forEach((chave) => {
+      const valor = _valorBasico(aluno, chave);
+      // chave real no cadastro (para não repetir em "Outros")
+      Object.keys(aluno).filter((x) => x.toLowerCase() === chave.toLowerCase()).forEach((x) => usados.add(x));
+      let tag = "";
+      let aviso = "";
+      if (valor && preenchidos.has(chave)) tag = _tagOrigem("completo", "cyan");
+      const div = divergentes.get(chave);
+      if (div) {
+        tag += _tagOrigem("⚠ difere do completo", "amber");
+        aviso = ` title="${escaparHtml(`Cadastro completo: ${div.completo}`)}"`;
+      }
+      itens += campoHtml(chave, valor, tag, false, aviso);
     });
-    itens.forEach((f) => assigned.add(f));
-
-    let extra = "";
-    if (grupo.label === "Escola") {
-      if (turma && turma !== "—") {
-        extra += `<div class="al-field-group"><span class="al-field-lbl">Turma <span style="color:var(--cyan); font-size:.6rem">· turmas.json</span></span><span class="al-field-val">${turma}</span></div>`;
-      }
-      if (situacao && situacao !== "—") {
-        const sitS = String(situacao).toLowerCase();
-        const cor = sitS.includes("matriculado") ? "var(--lime)" : sitS.includes("transf") ? "var(--rose)" : "var(--txt2)";
-        extra += `<div class="al-field-group"><span class="al-field-lbl">Situação <span style="color:var(--cyan); font-size:.6rem">· turmas.json</span></span><span class="al-field-val" style="color:${cor}; font-weight:700">${situacao}</span></div>`;
-      }
-    }
-    if (!itens.length && !extra) return "";
-    return `<div class="al-section-ttl">${grupo.label}</div>` +
-      itens.map((f) => `<div class="al-field-group"><span class="al-field-lbl">${f}</span><span class="al-field-val">${aluno[f]}</span></div>`).join("") + extra;
+    _alunosExtrasCatalogo.filter((e) => e.grupo === grupo.label).forEach((e) => {
+      const valor = extrasDoAluno.get(e.rotulo) || "";
+      itens += campoHtml(e.rotulo, valor, valor ? _tagOrigem("completo", "cyan") : "", false, "");
+    });
+    return itens ? `<div class="al-section-ttl">${escaparHtml(grupo.label)}</div>${itens}` : "";
   }).join("");
 
-  const resto = _alunosCampos.filter((f) =>
-    !assigned.has(f) && !AL_SKIP_MAIN.has(f) &&
-    aluno[f] !== undefined && aluno[f] !== null && String(aluno[f]).trim() && String(aluno[f]).trim() !== "—"
-  );
+  // Escola: turma e situação vêm de turmas.json
+  const turma = aluno._turma && aluno._turma !== AL_VAZIO ? aluno._turma : "";
+  const situacao = aluno._situacao && aluno._situacao !== AL_VAZIO ? aluno._situacao : "";
+  const sitS = String(situacao).toLowerCase();
+  const corSit = sitS.includes("matriculado") ? "var(--lime)" : sitS.includes("transf") ? "var(--rose)" : "var(--txt2)";
+  const escolaHtml = `<div class="al-section-ttl">Escola</div>` +
+    `<div class="al-field-group"><span class="al-field-lbl">Turma ${_tagOrigem("turmas.json", "cyan")}</span>${turma ? `<span class="al-field-val">${escaparHtml(turma)}</span>` : `<span class="al-field-val al-vazio">${AL_VAZIO}</span>`}</div>` +
+    `<div class="al-field-group"><span class="al-field-lbl">Situação ${_tagOrigem("turmas.json", "cyan")}</span>${situacao ? `<span class="al-field-val" style="color:${corSit}; font-weight:700">${escaparHtml(situacao)}</span>` : `<span class="al-field-val al-vazio">${AL_VAZIO}</span>`}</div>`;
+
+  // Campos do cadastro básico que não pertencem a nenhum grupo acima (só os preenchidos)
+  const resto = _alunosCampos.filter((f) => !usados.has(f) && _valorBasico(aluno, f));
   const restoHtml = resto.length
-    ? `<div class="al-section-ttl">Outros</div>` + resto.map((f) => `<div class="al-field-group"><span class="al-field-lbl">${f}</span><span class="al-field-val mono">${aluno[f]}</span></div>`).join("")
+    ? `<div class="al-section-ttl">Outros</div>` + resto.map((f) => campoHtml(f, _valorBasico(aluno, f), "", true, "")).join("")
     : "";
 
-  return gruposHtml + restoHtml;
+  // Valores diferentes nos dois cadastros: nenhum é sobrescrito; quem usa a tela confere.
+  const divs = aluno._divergencias || [];
+  const divHtml = divs.length
+    ? `<div class="al-section-ttl" style="color:var(--amber)">Diferenças entre o cadastro básico e o completo</div>` +
+      divs.map((d) => `<div class="al-field-group"><span class="al-field-lbl">${escaparHtml(d.rotulo)}</span><span class="al-field-val">Básico: ${escaparHtml(d.basico)}<br>Completo: ${escaparHtml(d.completo)}</span></div>`).join("")
+    : "";
+
+  // De onde veio cada parte da ficha (e o que falta)
+  const notas = [];
+  if (aluno._cadastro === "basico") {
+    notas.push(_alunosCompletoMeta && !_alunosCompletoMeta.gerado
+      ? "O cadastro completo ainda não foi coletado: os campos dele aparecem como —. Rode Automações → Alunos no modo Completo."
+      : "Este aluno ainda não foi coletado no modo Completo: os campos do cadastro completo aparecem como —.");
+  } else {
+    const quando = aluno._coleta_completo ? String(aluno._coleta_completo).replace("T", " ") : "data não registrada";
+    notas.push(`Cadastro completo coletado em ${quando}.`);
+    if (aluno._cadastro === "so_completo") {
+      notas.push(_alunosBasicoGerado
+        ? "Este aluno ainda não tem o cadastro básico (rode a automação Alunos no modo Básico): os campos dele aparecem como — quando o completo não os tem."
+        : "O cadastro básico (alunos.json) ainda não existe: os campos dele aparecem como — quando o completo não os tem.");
+    }
+  }
+  const origemHtml = `<div class="al-section-ttl">Origem dos dados</div><div class="al-field-group" style="grid-column:1/-1"><span class="al-field-val mono">${escaparHtml(notas.join(" "))}</span></div>`;
+
+  return gruposHtml + escolaHtml + restoHtml + divHtml + origemHtml;
 }
 
 function renderAlunosRows() {
@@ -748,9 +818,12 @@ function renderAlunosRows() {
     const sit = _getSituacao(a).toLowerCase();
     if (alunosState.filter === "matriculado" && !sit.includes("matriculado")) return false;
     if (alunosState.filter === "transferido" && !sit.includes("transf")) return false;
+    if (alunosState.filter === "completo" && a._cadastro === "basico") return false;
+    if (alunosState.filter === "basico" && a._cadastro !== "basico") return false;
     if (!q) return true;
     return _alunosCampos.some((f) => String(a[f] || "").toLowerCase().includes(q)) ||
-      _getTurma(a).toLowerCase().includes(q);
+      _getTurma(a).toLowerCase().includes(q) ||
+      (a._extras || []).some((e) => String(e.valor || "").toLowerCase().includes(q));
   });
 
   const { col, dir } = alunosState.sort;
@@ -759,6 +832,7 @@ function renderAlunosRows() {
     if (col === "nome") { va = _getField(a, "Nome"); vb = _getField(b, "Nome"); }
     else if (col === "cgm") { va = _getField(a, "CGM"); vb = _getField(b, "CGM"); }
     else if (col === "turma") { va = _getTurma(a); vb = _getTurma(b); }
+    else if (col === "cadastro") { va = String(a._cadastro || ""); vb = String(b._cadastro || ""); }
     else { va = _getSituacao(a); vb = _getSituacao(b); }
     return va.localeCompare(vb) * dir;
   });
@@ -788,9 +862,10 @@ function renderAlunosRows() {
       <td class="td-mono">${cgm}</td>
       <td class="td-mono">${turma}</td>
       <td>${_situacaoBadge(situacao)}</td>
+      <td>${_cadastroBadge(a)}${(a._divergencias || []).length ? " " + badge("⚠", "bg-amber") : ""}</td>
     </tr>
     <tr class="al-detail-row" id="${rowId}">
-      <td colspan="5"><div class="al-detail-inner">${_buildDetailHTML(a)}</div></td>
+      <td colspan="6"><div class="al-detail-inner">${_buildDetailHTML(a)}</div></td>
     </tr>`;
   }).join("");
 
@@ -805,6 +880,30 @@ function renderAlunosRows() {
   });
 }
 
+// Linha de resumo sob os filtros: quantos alunos já têm o cadastro completo (alunos_completo.json).
+function _renderAlunosInfo() {
+  const el = document.getElementById("alunos-info");
+  if (!el) return;
+  const m = _alunosCompletoMeta;
+  if (!m) { el.style.display = "none"; return; }
+  const total = _alunosCache.length;
+  const comCompleto = _alunosCache.filter((a) => a._cadastro !== "basico").length;
+  let txt;
+  if (!_alunosBasicoGerado) {
+    txt = "O cadastro básico (alunos.json) ainda não existe: os campos dele aparecem como — quando o cadastro completo não os tem. " +
+      (m.gerado ? `Cadastro completo coletado para ${comCompleto} aluno(s).` : "Rode Automações → Alunos para coletar.");
+  } else if (!m.gerado) {
+    txt = "Cadastro completo ainda não coletado: a tabela mostra só o cadastro básico. Rode Automações → Alunos no modo Completo para ver os demais campos.";
+  } else {
+    txt = `Cadastro completo coletado para ${comCompleto} de ${total} aluno(s)` +
+      (m.atualizado_em ? ` · arquivo atualizado em ${m.atualizado_em}` : "") +
+      (m.so_completo ? ` · ${m.so_completo} só com cadastro completo` : "") +
+      (m.com_divergencia ? ` · ${m.com_divergencia} com diferenças entre os cadastros (⚠)` : "") + ".";
+  }
+  el.textContent = txt;
+  el.style.display = "";
+}
+
 async function carregarAlunos() {
   const cnt = document.getElementById("alunos-cnt");
   cnt.textContent = "Carregando…";
@@ -813,10 +912,14 @@ async function carregarAlunos() {
     const data = await apiGet("/alunos/lista");
     _alunosCache = data.alunos || [];
     _alunosCampos = data.campos || [];
+    _alunosCompletoMeta = data.completo || null;
+    _alunosBasicoGerado = !(data.basico && data.basico.gerado === false);
+    _alunosExtrasCatalogo = data.extras_catalogo || [];
+    _renderAlunosInfo();
   } catch (e) {
     cnt.textContent = "—";
     document.getElementById("alunos-tbody").innerHTML =
-      `<tr><td colspan="5" style="text-align:center; color:var(--txt3); padding:24px;">Endpoint /alunos/lista ainda não conectado.</td></tr>`;
+      `<tr><td colspan="6" style="text-align:center; color:var(--txt3); padding:24px;">Endpoint /alunos/lista ainda não conectado.</td></tr>`;
     console.warn("Alunos: endpoint ainda não conectado", e);
     return;
   }
@@ -1217,6 +1320,19 @@ function renderFuncRows() {
   ligarExpansao(tbody, (i) => _detalheFuncionario(todos[i]));
 }
 
+// Aviso quando a última coleta COMPLETA de funcionários foi interrompida (cancelada, erro ou o programa caiu).
+function _renderAvisoColetaFuncionarios(info) {
+  const el = document.getElementById("func-aviso-coleta");
+  if (!el) return;
+  if (!info) { el.style.display = "none"; el.innerHTML = ""; return; }
+  const quando = info.atualizado_em ? ` <span style="color:var(--txt3)">(${escaparHtml(info.atualizado_em)})</span>` : "";
+  const pend = (info.pendentes || []).length
+    ? `<div class="aviso-coleta-pend">Sem atualização: ${escaparHtml(info.pendentes.slice(0, 15).join(", "))}${info.pendentes.length > 15 ? ` e mais ${info.pendentes.length - 15}` : ""}.</div>`
+    : "";
+  el.innerHTML = `<b>⚠ Coleta incompleta.</b> ${escaparHtml(info.aviso)}${quando}${pend}`;
+  el.style.display = "";
+}
+
 async function carregarFuncionarios() {
   const sec = document.getElementById("sec-funcionarios");
   ligarAcoesTela("funcionarios");
@@ -1231,6 +1347,7 @@ async function carregarFuncionarios() {
     return;
   }
   desenharExtrasTabela("funcionarios", _funcDados);
+  _renderAvisoColetaFuncionarios(_funcDados.coleta_completo);
   const c = _funcDados.contagem || {};
   const rotulos = { todos: "Todos", Docente: "Docentes", "Direção": "Direção", Pedagogos: "Pedagogos", Auxiliares: "Auxiliares", Outros: "Outros" };
   sec.querySelectorAll("[data-fg]").forEach((b) => {
@@ -1601,6 +1718,7 @@ const ICONES_AUTOMACAO = {
   transferidos: "transfer",
   parecer_fund: "certificate",
   parecer_rco: "certificate",
+  pareceres_digitalizados: "certificate",
   transferidos_fila: "transfer",
   transferidos_gerar: "transfer",
   pareceres_transferidos: "certificate",
@@ -1726,7 +1844,7 @@ function campoHTML(campo) {
     return `
       <div class="field"${cond}>
         <label>${campo.label}</label>
-        <textarea id="${campo.id}"${nome} rows="${campo.linhas || 9}" placeholder="${campo.placeholder || ""}"></textarea>
+        <textarea id="${campo.id}"${nome} rows="${campo.linhas || 9}" placeholder="${campo.placeholder || ""}">${String(campo.padrao || "").replace(/&/g, "&amp;").replace(/</g, "&lt;")}</textarea>
       </div>`;
   }
   if (campo.tipo === "texto") {
@@ -1800,7 +1918,7 @@ function renderizarCamposAntigos(chave, container) {
     btnPasta.addEventListener("click", () => abrirSeletorDePasta(btnPasta));
   }
 
-  container.querySelectorAll("select").forEach((s) => s.addEventListener("change", atualizarCamposDinamicos));
+  container.querySelectorAll("select, input[type=checkbox]").forEach((s) => s.addEventListener("change", atualizarCamposDinamicos));
   atualizarCamposDinamicos();
 }
 
@@ -1874,7 +1992,7 @@ function montarComponentesCompartilhados(container, chave, info) {
   container.innerHTML = partes.join("");
   const btnPasta = document.getElementById("btn-escolher-pasta");
   if (btnPasta) btnPasta.addEventListener("click", () => abrirSeletorDePasta(btnPasta));
-  container.querySelectorAll("select").forEach((sel) => sel.addEventListener("change", atualizarCamposDinamicos));
+  container.querySelectorAll("select, input[type=checkbox]").forEach((sel) => sel.addEventListener("change", atualizarCamposDinamicos));
   atualizarCamposDinamicos();
   container.querySelectorAll("[id^='comp-'], .field select, .field input[type=checkbox]").forEach((el) => {
     el.addEventListener(el.tagName === "TEXTAREA" ? "input" : "change", () => agendarPrevia());
@@ -1978,7 +2096,9 @@ function atualizarCamposDinamicos() {
   });
   document.querySelectorAll("#campos-automacao [data-visivel-se]").forEach((el) => {
     const [id, valor] = el.dataset.visivelSe.split("=");
-    el.style.display = valor.split("|").includes(document.getElementById(id)?.value) ? "" : "none";   // "a|b" = vale para a ou b
+    const alvo = document.getElementById(id);
+    const atual = alvo?.type === "checkbox" ? String(alvo.checked) : alvo?.value;     // caixa de marcar: "true"/"false"
+    el.style.display = valor.split("|").includes(atual) ? "" : "none";   // "a|b" = vale para a ou b
   });
 }
 

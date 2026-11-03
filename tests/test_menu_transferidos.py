@@ -109,32 +109,142 @@ def test_fila_executa_com_e_sem_simulacao(ctx):
 
 # ── gerar guia e histórico ───────────────────────────────────────────────
 
-def test_gerar_usa_as_8_etapas_por_padrao(ctx):
+def _nomes():
+    from src.automacao import processo_transferidos as pr
+    return pr._NOMES_ETAPAS
+
+
+def test_gerar_sem_marcas_no_pedido_vale_tudo_e_usa_o_texto_enviado(ctx):
     from src.automacao import processo_transferidos as pr
     c, planos = ctx
-    _post(c, "transferidos_gerar")
-    kw = _kwargs(planos)
-    assert kw == {"etapas": pr.GRUPOS_ETAPAS["todas"], "simulacao": False, "modo_teste": False}
+    _post(c, "transferidos_gerar", observacao="Texto X")
+    assert _kwargs(planos) == {"etapas": pr.GRUPOS_ETAPAS["todas"], "simulacao": False, "modo_teste": False,
+                               "observacao": "Texto X"}
     assert planos[0][1].tipo == "coroutine" and planos[0][1].funcao is pr.processar_transferencias
 
 
-@pytest.mark.parametrize("grupo", ["historico", "guia"])
-def test_gerar_so_historico_ou_so_guia(ctx, grupo):
-    from src.automacao import processo_transferidos as pr
+def _acoes(**marcadas):
+    base = {"gravar": False, "alterar": False, "emitir": False, "assinar": False, "imprimir": False}
+    return {**base, **marcadas}
+
+
+@pytest.mark.parametrize("acao,esperado", [
+    ("gravar",   [0]),
+    ("emitir",   [2, 5]),
+    ("assinar",  [3, 6]),
+    ("imprimir", [4, 7]),
+])
+def test_cada_acao_sozinha_executa_so_as_suas_etapas(ctx, acao, esperado):
     c, planos = ctx
-    _post(c, "transferidos_gerar", o_que_gerar=grupo, simulacao=True, modo_teste=True)
-    assert _kwargs(planos) == {"etapas": pr.GRUPOS_ETAPAS[grupo], "simulacao": True, "modo_teste": True}
+    assert _post(c, "transferidos_gerar", documentos="ambos", **_acoes(**{acao: True})).status_code == 200
+    kw = _kwargs(planos)
+    assert kw["etapas"] == [_nomes()[i] for i in esperado] and kw["observacao"] is None
+
+
+def test_alterar_sozinha_executa_so_a_etapa_de_alterar_com_o_texto(ctx):
+    c, planos = ctx
+    _post(c, "transferidos_gerar", observacao="  Aluno transferido.  ", **_acoes(alterar=True))
+    assert _kwargs(planos)["etapas"] == [_nomes()[1]] and _kwargs(planos)["observacao"] == "Aluno transferido."
+
+
+def test_emitir_e_assinar_respeitam_a_ordem_do_processo(ctx):
+    c, planos = ctx
+    _post(c, "transferidos_gerar", **_acoes(assinar=True, emitir=True))
+    assert _kwargs(planos)["etapas"] == [_nomes()[i] for i in (2, 3, 5, 6)]      # histórico e depois guia
+
+
+@pytest.mark.parametrize("docs,esperado", [("historico", [2, 3, 4]), ("guia", [5, 6, 7])])
+def test_documentos_restringe_emitir_assinar_imprimir(ctx, docs, esperado):
+    c, planos = ctx
+    _post(c, "transferidos_gerar", documentos=docs, **_acoes(emitir=True, assinar=True, imprimir=True))
+    assert _kwargs(planos)["etapas"] == [_nomes()[i] for i in esperado]
+
+
+def test_so_a_guia_ignora_gravar_e_alterar_sem_exigir_texto(ctx):
+    c, planos = ctx
+    r = _post(c, "transferidos_gerar", documentos="guia", observacao="", **_acoes(gravar=True, alterar=True, emitir=True))
+    assert r.status_code == 200 and _kwargs(planos)["etapas"] == [_nomes()[5]] and _kwargs(planos)["observacao"] is None
+
+
+def test_so_a_guia_so_com_gravar_e_alterar_nao_tem_o_que_fazer(ctx):
+    c, planos = ctx
+    r = _post(c, "transferidos_gerar", documentos="guia", observacao="x", **_acoes(gravar=True, alterar=True))
+    assert r.status_code == 400 and "Só a guia" in r.get_json()["mensagem"] and planos == []
+
+
+def test_nenhuma_acao_marcada_e_recusada(ctx):
+    c, planos = ctx
+    r = _post(c, "transferidos_gerar", **_acoes())
+    assert r.status_code == 400 and "pelo menos uma ação" in r.get_json()["mensagem"] and planos == []
+
+
+def test_alterar_exige_o_texto(ctx):
+    c, planos = ctx
+    r = _post(c, "transferidos_gerar", observacao="   ", **_acoes(alterar=True))
+    assert r.status_code == 400 and "texto da observação" in r.get_json()["mensagem"] and planos == []
+
+
+def test_o_texto_usado_fica_guardado_e_ja_vem_preenchido(ctx):
+    c, _ = ctx
+    assert _extras(c, "transferidos_gerar")["observacao"]["padrao"] == ""
+    _post(c, "transferidos_gerar", observacao="Transferido em 2026.", **_acoes(alterar=True))
+    assert configuracao.observacao_historico() == "Transferido em 2026."
+    assert _extras(c, "transferidos_gerar")["observacao"]["padrao"] == "Transferido em 2026."
+
+
+def test_sem_alterar_o_texto_nao_e_guardado(ctx):
+    c, _ = ctx
+    _post(c, "transferidos_gerar", observacao="não vai", **_acoes(emitir=True))
+    assert configuracao.observacao_historico() == ""
+
+
+def test_pedido_antigo_sem_campo_de_texto_usa_o_ultimo_texto(ctx):
+    c, planos = ctx
+    configuracao.definir_observacao_historico("Último texto")
+    _post(c, "transferidos_gerar")
+    assert _kwargs(planos)["observacao"] == "Último texto"
+
+
+@pytest.mark.parametrize("flags", [{"simulacao": True}, {"modo_teste": True}, {"simulacao": True, "modo_teste": True}])
+def test_gerar_repassa_simulacao_e_teste(ctx, flags):
+    c, planos = ctx
+    _post(c, "transferidos_gerar", **_acoes(emitir=True), **flags)
+    kw = _kwargs(planos)
+    assert kw["simulacao"] is flags.get("simulacao", False) and kw["modo_teste"] is flags.get("modo_teste", False)
+
+
+def test_gerar_rejeita_documentos_invalidos(ctx):
+    c, planos = ctx
+    r = _post(c, "transferidos_gerar", documentos="tudo-errado", **_acoes(emitir=True))
+    assert r.status_code == 400 and "Escolha os documentos" in r.get_json()["mensagem"] and planos == []
+
+
+def test_formulario_de_gerar_tem_as_5_acoes_na_ordem_e_marcadas(ctx):
+    c, _ = ctx
+    extras = c.get("/web/api/automacoes/transferidos_gerar/componentes").get_json()["extras"]
+    caixas = [e for e in extras if e["tipo"] == "caixa" and e["nome"] != "simulacao"]
+    assert [e["nome"] for e in caixas] == ["gravar", "alterar", "emitir", "assinar", "imprimir"]
+    assert [e["label"] for e in caixas] == ["Gravar", "Alterar", "Emitir", "Assinar", "Imprimir"]
+    assert all(e["padrao"] is True for e in caixas)
+    assert "Diretor" in next(e for e in caixas if e["nome"] == "assinar")["descricao"]
+
+
+def test_caixa_de_texto_so_aparece_com_alterar_marcado(ctx):
+    c, _ = ctx
+    texto = _extras(c, "transferidos_gerar")["observacao"]
+    assert texto["multilinha"] is True and texto["visivelSe"] == {"campo": "campo-acao-alterar", "valor": "true"}
+
+
+def test_js_mostra_campos_condicionais_tambem_por_caixa_de_marcar():
+    js = (RAIZ / "src/web/static/js/app.js").read_text(encoding="utf-8")
+    assert 'alvo?.type === "checkbox" ? String(alvo.checked)' in js
+    assert js.count('querySelectorAll("select, input[type=checkbox]")') == 2          # os dois lugares que montam o formulário
+    assert "campo.padrao" in js[js.index("<textarea id="):][:400]                       # texto multilinha vem preenchido
 
 
 def test_nao_existe_opcao_de_pular_retornados_na_tela(ctx):
     c, _ = ctx
     assert "pular_retornados" not in _extras(c, "transferidos_gerar")
-
-
-def test_gerar_rejeita_opcao_invalida(ctx):
-    c, planos = ctx
-    r = _post(c, "transferidos_gerar", o_que_gerar="tudo-errado")
-    assert r.status_code == 400 and "Escolha o que gerar" in r.get_json()["mensagem"] and planos == []
 
 
 # ── envio ao SERE ────────────────────────────────────────────────────────
@@ -173,14 +283,14 @@ def test_pareceres_rejeita_limite_invalido(ctx):
 @pytest.mark.parametrize("chave", NOVAS)
 def test_data_de_corte_digitada_fica_gravada(ctx, chave):
     c, _ = ctx
-    assert _post(c, chave, data_corte="01/09/2026").status_code == 200
+    assert _post(c, chave, data_corte="01/09/2026", observacao="texto").status_code == 200   # (o texto só vale em transferidos_gerar)
     assert configuracao.data_corte_transferidos().strftime("%d/%m/%Y") == "01/09/2026"
 
 
 def test_data_de_corte_em_branco_nao_muda_nada(ctx):
     c, _ = ctx
     configuracao.definir_data_corte_transferidos("01/09/2026")
-    _post(c, "transferidos_gerar", data_corte="")
+    _post(c, "transferidos_gerar", data_corte="", observacao="texto")
     assert configuracao.data_corte_transferidos().strftime("%d/%m/%Y") == "01/09/2026"
 
 

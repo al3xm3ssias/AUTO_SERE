@@ -1,3 +1,5 @@
+{# Tela ÚNICA de Alunos: tabela + ficha completa de cada aluno, unindo alunos.json (cadastro básico) e
+   alunos_completo.json (cadastro completo) pelo CGM. Dados: GET /web/api/alunos/lista (JS: carregarAlunos). #}
 <div class="card">
   <div class="card-header">
     <span class="card-title">Filtros</span>
@@ -8,11 +10,14 @@
       <button class="pill active" data-af="todos">Todos</button>
       <button class="pill" data-af="matriculado">Matriculados</button>
       <button class="pill" data-af="transferido">Transferidos</button>
+      <button class="pill" data-af="completo" title="Alunos que já têm o cadastro completo (alunos_completo.json)">Cadastro completo</button>
+      <button class="pill" data-af="basico" title="Alunos sem o cadastro completo coletado">Só básico</button>
       <div class="sbox-wrap">
         <span data-icon="search"></span>
         <input type="text" class="sbox" id="alunos-q" placeholder="Buscar nome, CGM, turma...">
       </div>
     </div>
+    <div class="al-info" id="alunos-info" style="display:none"></div>
   </div>
 </div>
 
@@ -27,6 +32,7 @@
             <th data-sort="cgm">CGM</th>
             <th data-sort="turma">Turma</th>
             <th data-sort="situacao">Situação</th>
+            <th data-sort="cadastro">Cadastro</th>
           </tr>
         </thead>
         <tbody id="alunos-tbody"></tbody>

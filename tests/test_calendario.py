@@ -22,8 +22,16 @@ PREFIXO = "/web/api/calendario"
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setattr(cal, "_pasta", lambda: tmp_path / "calendario")
+def ano_letivo(monkeypatch):
+    """Ano letivo em uso nos testes; `ano_letivo["ano"] = "2025"` simula voltar o ano em Configurações."""
+    estado = {"ano": "2026"}
+    monkeypatch.setattr(cal._paths, "ano_atual", lambda: estado["ano"])
+    return estado
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch, ano_letivo):
+    monkeypatch.setattr(cal._paths, "DADOS_DIR", tmp_path)       # dados/<ano>/calendario.json e dados/calendario/ (cache)
     app = Flask(__name__)
     app.register_blueprint(cal.calendario_bp, url_prefix=PREFIXO)
     return app.test_client()
@@ -32,7 +40,7 @@ def client(tmp_path, monkeypatch):
 def test_dados_vazios_na_primeira_vez(client):
     r = client.get(f"{PREFIXO}/dados")
     assert r.status_code == 200
-    assert r.get_json() == {"eventos": [], "periodos": []}
+    assert r.get_json() == {"eventos": [], "periodos": [], "ano_letivo": "2026"}
 
 
 def test_criar_e_excluir_evento(client):
@@ -159,3 +167,99 @@ def test_cinzas_muda_conforme_o_ano(client):
 
 def test_fixos_ano_invalido(client):
     assert client.get(f"{PREFIXO}/fixos/1800").status_code == 400
+
+
+# ------------------------------------------- um calendário por ano letivo (dados/<ano>/calendario.json)
+def _evento(client, nome, inicio, fim=None):
+    corpo = {"nome": nome, "tipo": "recesso", "inicio": inicio}
+    if fim:
+        corpo["fim"] = fim
+    r = client.post(f"{PREFIXO}/eventos", json=corpo)
+    assert r.status_code == 201
+    return r.get_json()
+
+
+def _nomes(client, chave="eventos"):
+    return sorted(x["nome"] for x in client.get(f"{PREFIXO}/dados").get_json()[chave])
+
+
+def test_o_calendario_e_gravado_na_pasta_do_ano_letivo(client, tmp_path, ano_letivo):
+    _evento(client, "Recesso 2026", "2026-10-13")
+    assert json.loads((tmp_path / "2026" / "calendario.json").read_text(encoding="utf-8"))["eventos"][0]["nome"] == "Recesso 2026"
+    assert not (tmp_path / "calendario" / "calendario.json").exists()          # não usa mais o arquivo único
+
+
+def test_voltar_o_ano_letivo_volta_o_calendario_daquele_ano(client, tmp_path, ano_letivo):
+    _evento(client, "Recesso 2026", "2026-10-13")
+    ano_letivo["ano"] = "2025"
+    assert _nomes(client) == []                                                # 2025 ainda não tem nada
+    assert client.get(f"{PREFIXO}/dados").get_json()["ano_letivo"] == "2025"
+    _evento(client, "Recesso 2025", "2025-10-14")                              # (a trava de somente consulta fica no app)
+    assert _nomes(client) == ["Recesso 2025"]
+    assert client.post(f"{PREFIXO}/periodos", json={"nome": "1º bim 2025", "inicio": "2025-02-03", "fim": "2025-04-17"}).status_code == 201
+    ano_letivo["ano"] = "2026"
+    assert _nomes(client) == ["Recesso 2026"] and _nomes(client, "periodos") == []
+    assert (tmp_path / "2025" / "calendario.json").exists() and (tmp_path / "2026" / "calendario.json").exists()
+
+
+def test_ferias_que_atravessam_a_virada_aparecem_nos_dois_anos(client, ano_letivo):
+    _evento(client, "Natal", "2026-12-21", "2027-01-04")                       # cadastrado no ano letivo 2026
+    ano_letivo["ano"] = "2027"
+    assert _nomes(client) == ["Natal"]                                         # janeiro de 2027 ainda mostra
+    ano_letivo["ano"] = "2026"
+    assert _nomes(client) == ["Natal"]
+
+
+def test_item_do_ano_vizinho_que_nao_toca_o_ano_nao_aparece(client, ano_letivo):
+    ano_letivo["ano"] = "2025"                                                 # cadastrados no ano letivo 2025
+    _evento(client, "Só em 2025", "2025-05-02")
+    _evento(client, "Vira o ano", "2025-12-22", "2026-01-05")
+    ano_letivo["ano"] = "2026"
+    assert _nomes(client) == ["Vira o ano"]
+
+
+def test_exclui_item_que_esta_no_arquivo_do_ano_vizinho(client, ano_letivo):
+    ev = _evento(client, "Vira o ano", "2026-12-22", "2027-01-05")
+    ano_letivo["ano"] = "2027"
+    assert client.delete(f"{PREFIXO}/eventos/{ev['id']}").status_code == 200
+    assert _nomes(client) == []
+    ano_letivo["ano"] = "2026"
+    assert _nomes(client) == []                                                # saiu do arquivo de 2026
+
+
+def test_arquivo_antigo_unico_e_dividido_por_ano_e_guardado(client, tmp_path, ano_letivo):
+    legado = tmp_path / "calendario"
+    legado.mkdir()
+    (legado / "calendario.json").write_text(json.dumps({
+        "eventos": [{"id": "a", "nome": "Recesso 25", "tipo": "recesso", "inicio": "2025-10-14", "fim": "2025-10-14"},
+                    {"id": "b", "nome": "Recesso 26", "tipo": "recesso", "inicio": "2026-10-13", "fim": "2026-10-13"}],
+        "periodos": [{"id": "c", "nome": "Férias", "tipo": "ferias", "inicio": "2025-12-19", "fim": "2026-02-03"}],
+    }), encoding="utf-8")
+    assert _nomes(client) == ["Recesso 26"]                                    # visão de 2026
+    assert _nomes(client, "periodos") == ["Férias"]                            # as férias de 19/12/2025 chegam a 2026
+    por_ano = {a: json.loads((tmp_path / a / "calendario.json").read_text(encoding="utf-8")) for a in ("2025", "2026")}
+    assert [e["id"] for e in por_ano["2025"]["eventos"]] == ["a"] and [p["id"] for p in por_ano["2025"]["periodos"]] == ["c"]
+    assert [e["id"] for e in por_ano["2026"]["eventos"]] == ["b"]
+    assert not (legado / "calendario.json").exists() and (legado / "calendario.json.antes-da-migracao").exists()
+    ano_letivo["ano"] = "2025"
+    assert _nomes(client) == ["Recesso 25"]                                    # e o de 2025 está lá
+    assert _nomes(client, "periodos") == ["Férias"]
+
+
+def test_migracao_nao_duplica_item_que_ja_esta_no_arquivo_do_ano(client, tmp_path):
+    (tmp_path / "2026").mkdir()
+    (tmp_path / "2026" / "calendario.json").write_text(json.dumps({"eventos": [
+        {"id": "b", "nome": "Recesso 26", "tipo": "recesso", "inicio": "2026-10-13", "fim": "2026-10-13"}], "periodos": []}), encoding="utf-8")
+    (tmp_path / "calendario").mkdir()
+    (tmp_path / "calendario" / "calendario.json").write_text(json.dumps({"eventos": [
+        {"id": "b", "nome": "Recesso 26", "tipo": "recesso", "inicio": "2026-10-13", "fim": "2026-10-13"}], "periodos": []}), encoding="utf-8")
+    assert _nomes(client) == ["Recesso 26"]
+
+
+def test_o_cache_de_feriados_continua_comum_a_todos_os_anos(client, tmp_path, ano_letivo):
+    cache = tmp_path / "calendario" / "feriados_cache"
+    cache.mkdir(parents=True)
+    (cache / "2026.json").write_text(json.dumps([{"date": "2026-01-01", "name": "Confraternização Universal"}]), encoding="utf-8")
+    assert client.get(f"{PREFIXO}/feriados/2026").status_code == 200
+    ano_letivo["ano"] = "2025"
+    assert client.get(f"{PREFIXO}/feriados/2026").status_code == 200           # mesmo cache, não depende do ano letivo

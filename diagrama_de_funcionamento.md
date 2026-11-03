@@ -9,7 +9,7 @@
 
 ## 1. Visão geral
 
-O AUTO_SERE é um conjunto de automações em Python (Playwright) que entram no portal SERE, coletam turmas, alunos e funcionários, organizam as pastas de digitalização e geram relatórios. Tudo é operado por uma interface web local em Flask (`python -m src.web.app` → `http://127.0.0.1:5000`).
+O AUTO_SERE é um conjunto de automações em Python (Playwright) que entram no portal SERE, coletam turmas, alunos e funcionários, organizam as pastas de digitalização e geram relatórios. Tudo é operado por uma interface web local em Flask (`python -m src.web.app` → `http://127.0.0.1:8000`).
 
 | Camada | Pasta | Papel |
 |---|---|---|
@@ -28,7 +28,7 @@ O AUTO_SERE é um conjunto de automações em Python (Playwright) que entram no 
 
 ```mermaid
 flowchart TB
-    U["Usuário<br/>navegador 127.0.0.1:5000"] -->|HTTP| W["Interface Web — Flask<br/>src/web · api/rotas.py"]
+    U["Usuário<br/>navegador 127.0.0.1:8000"] -->|HTTP| W["Interface Web — Flask<br/>src/web · api/rotas.py"]
     W -->|"POST /automacoes/&lt;chave&gt;/executar<br/>POST /wizard/&lt;passo&gt;/executar"| G["execucao_gui.py<br/>thread + asyncio + callback"]
     W -->|"GET /lista · /status · /painel/resumo"| D
     G --> A["Automações<br/>src/automacao"]
@@ -127,10 +127,12 @@ sequenceDiagram
 
 ## 6. Pontos de atenção encontrados na análise
 
+> Análise inicial: parte destes pontos já foi resolvida (por exemplo, o backup agora existe em `src/comum/backup.py`). O estado atual está em `PROXIMAS_ETAPAS.md`.
+
 1. **Backup não existe no código.** Em `rotas.py` a chave `backup` está em `AUTOMACOES_NAO_IMPLEMENTADAS` (junto de `parecer_fund`, `parecer_rco`, `comprimir`, `agendador`, `avisos`, `compara_anos`) e responde 501. Só a pasta `dados/backup/` é criada. Proposta mínima para o passo 7: copiar `dados/<ano>/` (e `config/config_usuario.json`) para `dados/backup/<AAAA-MM-DD_HHMM>/`, manter os N mais recentes e chamar o backup automaticamente ao fim dos passos 3, 5 e 6.
 2. **Dados reais de alunos no pacote.** `dados/2026/alunos.json` (~350 KB) e `turmas.json` estão dentro do zip. O `.gitignore` tem `dados/*.json`, que só cobre a raiz de `dados/`, não `dados/2026/`; como o `gerar_zip.sh` usa `git ls-files -co --exclude-standard`, esses arquivos entram no zip e podem ir para o Git. Sugestão: trocar por `dados/**/*.json` (e `dados/**/*.xlsx`) e remover os JSONs já versionados.
 3. **Módulos duplicados.** `src/automacao` e `src/comum` têm cópias de `sere_api`, `sere_limpeza`, `sere_normalizacao`, `sere_upload`, `sere_utils` (**com conteúdo diferente**) e de `executar_aluno/analisa/documento/espec/transferidos/validar` (idênticas). Vale escolher um lugar (`comum` parece o alvo) para não divergirem.
 4. **`funcionarios.py` × `servidores.py`.** Fazem coleta parecida e geram os mesmos arquivos; o wizard usa `servidores.py`. Confirmar se `funcionarios.py` é legado.
 5. **Navegador.** O README manda rodar `playwright install chromium`, mas `analisa_arquivos_sere.py` abre Firefox; `servidores`, `alunos_completo` e `rematricula` usam Chromium. Instale os dois ou padronize.
-6. **`criar_projeto.py`** é citado no README e no `tasks.json`, mas não está no zip nem no mapa.
+6. **`criar_projeto.py`** (bootstrap) não é mais necessário e foi removido do README e do `tasks.json`.
 7. **Passos do wizard ainda sem código:** `google_api` e `whatsapp` respondem 501.

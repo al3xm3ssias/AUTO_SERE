@@ -129,6 +129,7 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 

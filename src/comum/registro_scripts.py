@@ -234,29 +234,92 @@ def _plano_transferidos_fila(o, p, tj, ctx) -> Plano:
     return Plano("sync", executar_fila_transferidos, {"simulacao": bool(p.get("simulacao"))})
 
 
-_OPCOES_GERAR = [
-    {"valor": "todas", "texto": "Histórico e guia de transferência (as 8 etapas)",
-     "ajuda": "Grava as matrículas, emite, assina e baixa o histórico; depois emite, assina e baixa a guia."},
-    {"valor": "historico", "texto": "Só o histórico escolar (5 etapas)",
-     "ajuda": "Gravar matrículas → alterar/obs. → emitir → assinar → baixar o PDF."},
-    {"valor": "guia", "texto": "Só a guia de transferência (3 etapas)",
-     "ajuda": "Emitir → assinar → baixar o PDF."},
+_DOCUMENTOS_GERAR = [
+    {"valor": "ambos", "texto": "Histórico e guia de transferência",
+     "ajuda": "Emitir, Assinar e Imprimir valem para os dois documentos."},
+    {"valor": "historico", "texto": "Só o histórico escolar",
+     "ajuda": "Todas as ações marcadas, só para o histórico."},
+    {"valor": "guia", "texto": "Só a guia de transferência",
+     "ajuda": "Gravar e Alterar são do histórico e ficam de fora."},
 ]
+
+# (chave, rótulo, descrição) das 5 ações, na ordem da tela; cada uma é uma caixa que se marca separadamente
+_ACOES_GERAR = [
+    ("gravar", "Gravar", "Grava as matrículas no histórico (só histórico)."),
+    ("alterar", "Alterar", "Escreve no histórico o texto da observação, abaixo (só histórico)."),
+    ("emitir", "Emitir", "Gera o documento no SERE (histórico e/ou guia)."),
+    ("assinar", "Assinar",
+     "Assina como o usuário do SERE que está logado (Secretário) e confere se o Diretor já assinou. "
+     "O Diretor assina em outra sessão: rode \"Assinar\" de novo depois para registrar a assinatura dele."),
+    ("imprimir", "Imprimir", "Baixa o PDF para a pasta de TRANSFERENCIAS (histórico e/ou guia)."),
+]
+
+
+def _acoes_gerar_marcadas(p: dict) -> list[str]:
+    """Ações marcadas. Sem nenhuma das 5 chaves no pedido (CLI/API antiga), vale tudo."""
+    chaves = [c for c, _, _ in _ACOES_GERAR]
+    if not any(c in p for c in chaves):
+        return chaves
+    return [c for c in chaves if p.get(c)]
+
+
+def _observacao_gerar(p: dict) -> str:
+    """Texto do pedido; se o pedido não traz o campo, o último texto usado."""
+    if "observacao" in p:
+        return str(p.get("observacao") or "").strip()
+    from src.comum.configuracao import observacao_historico
+    return observacao_historico().strip()
+
+
+def _etapas_gerar(p: dict) -> list[str]:
+    from src.automacao import processo_transferidos as pr
+    return pr.etapas_por_acoes(_acoes_gerar_marcadas(p), p.get("documentos") or "ambos")
 
 
 def _validar_transferidos_gerar(p: dict) -> None:
     _validar_data_corte(p)
-    if (p.get("o_que_gerar") or "todas") not in {o["valor"] for o in _OPCOES_GERAR}:
-        raise ValueError("Escolha o que gerar: histórico e guia, só o histórico ou só a guia.")
+    if (p.get("documentos") or "ambos") not in {o["valor"] for o in _DOCUMENTOS_GERAR}:
+        raise ValueError("Escolha os documentos: histórico e guia, só o histórico ou só a guia.")
+    if not _acoes_gerar_marcadas(p):
+        raise ValueError("Marque pelo menos uma ação: Gravar, Alterar, Emitir, Assinar ou Imprimir.")
+    etapas = _etapas_gerar(p)
+    if not etapas:
+        raise ValueError("Com \"Só a guia\", Gravar e Alterar não se aplicam (são do histórico). "
+                         "Marque Emitir, Assinar ou Imprimir.")
+    from src.automacao.processo_transferidos import ETAPA_ALTERAR
+    if ETAPA_ALTERAR in etapas and not _observacao_gerar(p):
+        raise ValueError("Escreva o texto da observação para a ação Alterar, ou desmarque Alterar.")
 
 
 def _plano_transferidos_gerar(o, p, tj, ctx) -> Plano:
     from src.automacao import processo_transferidos as pr
     _aplicar_data_corte(p)
-    grupo = p.get("o_que_gerar") or "todas"
+    etapas = _etapas_gerar(p)
+    observacao = None
+    if pr.ETAPA_ALTERAR in etapas:
+        observacao = _observacao_gerar(p)
+        from src.comum.configuracao import definir_observacao_historico
+        definir_observacao_historico(observacao)                       # já vem preenchida na próxima vez
     return Plano("coroutine", pr.processar_transferencias, {
-        "etapas": pr.GRUPOS_ETAPAS[grupo], "simulacao": bool(p.get("simulacao")),
-        "modo_teste": o.modo_teste})
+        "etapas": etapas, "simulacao": bool(p.get("simulacao")),
+        "modo_teste": o.modo_teste, "observacao": observacao})
+
+
+def _extras_transferidos_gerar() -> list[dict]:
+    from src.comum.configuracao import observacao_historico
+    return [
+        {"tipo": "select", "id": "campo-documentos", "nome": "documentos", "label": "Documentos", "semVazio": True,
+         "padrao": "ambos", "opcoes": _DOCUMENTOS_GERAR},
+        *[{"tipo": "caixa", "id": f"campo-acao-{chave}", "nome": chave, "padrao": True,
+           "label": rotulo, "descricao": descricao} for chave, rotulo, descricao in _ACOES_GERAR],
+        {"tipo": "texto", "multilinha": True, "linhas": 4, "id": "campo-observacao", "nome": "observacao",
+         "label": "Texto da observação (ação Alterar)", "padrao": observacao_historico(),
+         "placeholder": "Texto que será gravado na observação de cada histórico",
+         "visivelSe": {"campo": "campo-acao-alterar", "valor": "true"}},
+        _extra_data_corte(),
+        _extra_simulacao(True, "Mostra quem seria processado, as ações e as pastas de destino. Não abre o SERE e não grava nada. "
+                               "Desmarque para executar de verdade."),
+    ]
 
 
 def _validar_pareceres_transferidos(p: dict) -> None:
@@ -270,6 +333,58 @@ def _plano_pareceres_transferidos(o, p, tj, ctx) -> Plano:
     return Plano("coroutine", executar_pareceres_transferidos, {
         "simulacao": bool(p.get("simulacao")), "enviar": bool(p.get("enviar", True)),
         "limite_mb": _ler_limite_mb(p), "modo_teste": o.modo_teste})
+
+
+def _validar_pareceres_digitalizados(p: dict) -> None:
+    from src.automacao import avisos as av
+    from src.automacao import pareceres_digitalizados as pd
+    _ler_limite_mb(p)
+    modo = p.get("email_modo") or "nao"
+    if modo not in pd.MODOS_EMAIL:
+        raise ValueError(f"Modo de e-mail inválido: '{modo}'.")
+    pd.conferir_marcadores(str(p.get("assunto") or pd.ASSUNTO_PADRAO), "Assunto")
+    pd.conferir_marcadores(str(p.get("mensagem") or pd.MENSAGEM_PADRAO), "Mensagem")
+    teste = str(p.get("email_teste") or "").strip()
+    if modo == "teste" and teste and not av.email_valido(teste):
+        raise ValueError(f"O endereço de teste '{teste}' não é um e-mail válido.")
+    if modo != "nao" and not p.get("simulacao") and not av._credenciais_email_ok():
+        raise ValueError("O e-mail da escola ainda não está configurado: preencha EMAIL_REMETENTE e EMAIL_SENHA_APP em credenciais/.env.")
+
+
+def _plano_pareceres_digitalizados(o, p, tj, ctx) -> Plano:
+    from src.automacao import pareceres_digitalizados as pd
+    return Plano("coroutine", pd.executar_pareceres_digitalizados, {
+        "simulacao": bool(p.get("simulacao")), "enviar_sere": bool(p.get("enviar_sere", False)),
+        "email_modo": p.get("email_modo") or "nao", "email_teste": str(p.get("email_teste") or "").strip(),
+        "assunto": str(p.get("assunto") or pd.ASSUNTO_PADRAO), "mensagem": str(p.get("mensagem") or pd.MENSAGEM_PADRAO),
+        "limite_mb": _ler_limite_mb(p), "modo_teste": o.modo_teste,
+        "turmas": list(o.turmas), "cgms": list(o.cgms)})
+
+
+def _extras_pareceres_digitalizados() -> list[dict]:
+    from src.automacao import pareceres_digitalizados as pd
+    return [
+        {"tipo": "texto", "id": "campo-limite-parecer", "nome": "limite_mb", "label": "Comprimir arquivos maiores que (MB)",
+         "placeholder": "1,5 (limite do SERE) — 0 comprime todos"},
+        {"tipo": "caixa", "id": "campo-enviar-sere", "nome": "enviar_sere", "padrao": False, "label": "Enviar ao SERE depois de arquivar",
+         "descricao": "Envia o parecer de cada aluno para o item \"Parecer Descritivo <ano>-1\" da pasta virtual do SERE "
+                      "(vale para qualquer ano; se o item ainda não estiver no catálogo do sistema, é procurado no próprio SERE). "
+                      "Quem já foi enviado e não mudou é pulado."},
+        {"tipo": "select", "id": "campo-email-modo", "nome": "email_modo", "label": "E-mail ao responsável", "semVazio": True,
+         "padrao": "nao", "opcoes": [{"valor": k, "texto": v} for k, v in pd.MODOS_EMAIL.items()]},
+        {"tipo": "texto", "id": "campo-email-teste", "nome": "email_teste", "label": "Endereço de teste",
+         "placeholder": "em branco = o e-mail da própria escola",
+         "visivelSe": {"campo": "campo-email-modo", "valor": "teste"}},
+        {"tipo": "texto", "id": "campo-email-assunto", "nome": "assunto", "label": "Assunto do e-mail", "padrao": pd.ASSUNTO_PADRAO,
+         "placeholder": "Marcadores: " + ", ".join("$" + m for m in pd.MARCADORES),
+         "visivelSe": {"campo": "campo-email-modo", "valor": "teste|enviar"}},
+        {"tipo": "texto", "multilinha": True, "linhas": 6, "id": "campo-email-mensagem", "nome": "mensagem",
+         "label": "Mensagem do e-mail", "padrao": pd.MENSAGEM_PADRAO,
+         "placeholder": "Marcadores: " + ", ".join("$" + m for m in pd.MARCADORES),
+         "visivelSe": {"campo": "campo-email-modo", "valor": "teste|enviar"}},
+        _extra_simulacao(True, "Lê os QR e mostra onde cada arquivo seria salvo, o que iria ao SERE e quem receberia o e-mail (com a prévia). "
+                               "Não copia, não comprime, não apaga, não grava, não abre o SERE e não envia e-mail. Desmarque para executar."),
+    ]
 
 
 def _plano_turmas(o, p, tj, ctx) -> Plano:
@@ -683,15 +798,10 @@ registrar(Script("transferidos_fila", (), _plano_transferidos_fila, validar_extr
 
 registrar(Script("transferidos_gerar", (_TE,), _plano_transferidos_gerar, confirmar=True,
                  validar_extras=_validar_transferidos_gerar,
-                 aviso_confirmacao="Emite, assina e baixa do SERE o histórico e a guia de transferência dos alunos da fila "
+                 aviso_confirmacao="Executa no SERE as ações marcadas (gravar, alterar, emitir, assinar, imprimir) para os alunos da fila "
                                    "(transferidos a partir da data de corte). Com \"Simulação\" marcada nada é feito.",
                  ajuda_teste="Processa só o primeiro aluno da fila. Atenção: não é simulação — ele é processado de verdade.",
-                 extras=lambda: [
-                     {"tipo": "select", "id": "campo-o-que-gerar", "nome": "o_que_gerar", "label": "O que gerar", "semVazio": True,
-                      "padrao": "todas", "opcoes": _OPCOES_GERAR},
-                     _extra_data_corte(),
-                     _extra_simulacao(True, "Mostra quem seria processado, as etapas e as pastas de destino. Não abre o SERE e não grava nada. "
-                                            "Desmarque para executar de verdade.")]))
+                 extras=_extras_transferidos_gerar))
 
 registrar(Script("transferidos", (_TE,), _plano_transferidos, confirmar=True, validar_extras=_validar_data_corte,
                  aviso_confirmacao="Envia ao SERE (pasta virtual) a guia, o histórico e o parecer dos transferidos que estão "
@@ -715,6 +825,13 @@ registrar(Script("pareceres_transferidos", (_TE,), _plano_pareceres_transferidos
                      _extra_simulacao(True, "Lê os QR e mostra, para cada arquivo, quem é, onde seria salvo e se seria comprimido. "
                                             "Não copia, não comprime, não apaga, não grava e não abre o SERE. Desmarque para processar de verdade.")]))
 
+
+registrar(Script("pareceres_digitalizados", (_T, _C, _TE), _plano_pareceres_digitalizados, confirmar=True,
+                 validar_extras=_validar_pareceres_digitalizados, extras=_extras_pareceres_digitalizados,
+                 aviso_confirmacao="Lê o QR dos pareceres do Fundamental digitalizados (pasta PARECERES/_PROCESSAR), arquiva cada um na turma "
+                                   "do aluno e, se marcado, envia ao SERE e por e-mail ao responsável. Com \"Simulação\" marcada nada é "
+                                   "alterado nem enviado. O envio por e-mail vai para famílias de verdade.",
+                 ajuda_teste="Processa e envia só o primeiro parecer. Atenção: não é simulação — ele é processado de verdade."))
 
 registrar(Script("parecer_rco", (_TE,), _plano_parecer_rco, validar_extras=_validar_parecer_rco,
                  extras=_extras_parecer_rco,
