@@ -183,6 +183,8 @@ def _plano_rematricula(o, p, tj, ctx) -> Plano:
     kwargs = {"modo_teste": o.modo_teste, "apenas_erros": o.erros, "turmas_alvo": list(o.turmas) or None}
     if p.get("ignorar_chaves_salvas"):
         kwargs["usar_chaves_salvas"] = False
+    if p.get("um_aluno"):
+        kwargs["um_aluno"] = True
     return Plano("coroutine", rematricular_via_login, kwargs)
 
 
@@ -801,7 +803,11 @@ registrar(Script("rematricula", (_T, _TE, _E), _plano_rematricula, confirmar=Tru
                  aviso_confirmacao="Faz a rematrícula desses alunos no SERE.",
                  ajuda_teste="Faz a rematrícula de só 1 aluno por turma, para você conferir antes de rodar tudo. "
                              "Atenção: não é simulação — esses alunos são rematriculados de verdade.",
-                 extras=lambda: [{"tipo": "caixa", "id": "campo-ignorar-chaves", "nome": "ignorar_chaves_salvas",
+                 extras=lambda: [{"tipo": "caixa", "id": "campo-um-aluno", "nome": "um_aluno",
+                                  "label": "Testar com 1 único aluno",
+                                  "descricao": "Rematricula só o primeiro aluno pendente (no total, não por turma) e para. "
+                                                 "Atenção: não é simulação — esse aluno é rematriculado de verdade."},
+                                 {"tipo": "caixa", "id": "campo-ignorar-chaves", "nome": "ignorar_chaves_salvas",
                                   "label": "Ignorar as chaves salvas (gerar todas na hora)",
                                   "descricao": "Por padrão, quem tem chave salva (automação \"Gerar chaves\") entra direto na Área do Aluno."}]))
 

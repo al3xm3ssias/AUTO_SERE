@@ -49,7 +49,7 @@ responsável, entra na **Área do Aluno** (site do Estado) com CPF + chave e con
 
 Arquivos em `dados/<ano>/`: `rematriculas_sucesso.json` (**nunca reprocessa**), `rematriculas_erro.json` (com nº de
 tentativas acumulado), `rematriculas_historico.json` (todas as tentativas de todas as execuções).
-Opções: modo teste (1 aluno por seção), `apenas_erros`. Tem **limite de tentativas** por turma (falha de login/navegação
+Opções: modo teste (1 aluno por seção), **"Testar com 1 único aluno"** (`um_aluno=True`: só o primeiro pendente no total, para logo depois de tentá-lo, sucesso ou erro; não é simulação), `apenas_erros`. Tem **limite de tentativas** por turma (falha de login/navegação
 não prende mais em laço). Fonte própria de turmas (`turmas_de=_turmas_da_rematricula`), com a normalização tolerante a
 acento/traço/NBSP.
 

@@ -664,6 +664,120 @@ def test_modo_teste_processa_um_aluno_pendente_por_secao(monkeypatch, dados_tmp)
     assert est["processados"] == ["2", "7"]
 
 
+def test_um_aluno_processa_so_um_no_total_e_nao_abre_as_outras_secoes(monkeypatch, dados_tmp):
+    _semear(dados_tmp, sucessos=[_reg(1, "2º Ano - A")])
+    _, est = _orquestrar(
+        monkeypatch, {"2º Ano": ["2º Ano - A", "2º Ano - B"], "3º Ano": ["3º Ano - A"]},
+        {"2º Ano - A": [aluno(1), aluno(2), aluno(3)], "2º Ano - B": [aluno(7)], "3º Ano - A": [aluno(9)]},
+    )
+    res = rodar(rem.rematricular_via_login(um_aluno=True, turmas_alvo=["2º Ano", "3º Ano"], login="l", senha="s"))
+    assert est["processados"] == ["2"]          # o 1 já estava em sucesso; só o 2 foi tentado
+    assert res["total_sucessos"] == 2           # o anterior + o de teste
+    assert est["secao_aberta"] == "2º Ano - A"  # nem selecionou a seção B nem a turma 3º Ano
+
+
+def test_um_aluno_com_falha_tambem_encerra(monkeypatch, dados_tmp):
+    _, est = _orquestrar(
+        monkeypatch, {"2º Ano": ["2º Ano - A", "2º Ano - B"]},
+        {"2º Ano - A": [aluno(1), aluno(2)], "2º Ano - B": [aluno(7)]},
+        resultados={"1": [(False, "falhou")]},
+    )
+    res = rodar(rem.rematricular_via_login(um_aluno=True, turmas_alvo=["2º Ano"], login="l", senha="s"))
+    assert est["processados"] == ["1"]
+    assert res["total_erros"] == 1 and res["total_sucessos"] == 0
+
+
+def test_um_aluno_pula_secao_sem_pendentes_e_pega_o_da_proxima(monkeypatch, dados_tmp):
+    _semear(dados_tmp, sucessos=[_reg(1, "2º Ano - A")])
+    _, est = _orquestrar(
+        monkeypatch, {"2º Ano": ["2º Ano - A", "2º Ano - B"]},
+        {"2º Ano - A": [aluno(1)], "2º Ano - B": [aluno(7), aluno(8)]},
+    )
+    rodar(rem.rematricular_via_login(um_aluno=True, turmas_alvo=["2º Ano"], login="l", senha="s"))
+    assert est["processados"] == ["7"]
+
+
+def test_um_aluno_com_apenas_erros_reprocessa_so_o_primeiro_com_erro(monkeypatch, dados_tmp):
+    _semear(dados_tmp, erros=[_reg(2, "2º Ano - A", tentativas=1), _reg(3, "2º Ano - A", tentativas=1)])
+    _, est = _orquestrar(monkeypatch, {"2º Ano": ["2º Ano - A"]}, {"2º Ano - A": [aluno(1), aluno(2), aluno(3)]})
+    rodar(rem.rematricular_via_login(um_aluno=True, apenas_erros=True, turmas_alvo=["2º Ano"], login="l", senha="s"))
+    assert est["processados"] == ["2"]
+
+
+def test_um_aluno_desligado_mantem_o_comportamento_de_producao(monkeypatch, dados_tmp):
+    _, est = _orquestrar(monkeypatch, {"2º Ano": ["2º Ano - A", "2º Ano - B"]},
+                         {"2º Ano - A": [aluno(1), aluno(2)], "2º Ano - B": [aluno(7)]})
+    rodar(rem.rematricular_via_login(turmas_alvo=["2º Ano"], login="l", senha="s"))
+    assert est["processados"] == ["1", "2", "7"]
+
+
+# ---- BUG-REM-001: confirmar_matricula só devolve True se a página provar a confirmação ----
+
+class _PaginaConfirmar:
+    """Página mínima para confirmar_matricula: o conteúdo muda conforme o clique final."""
+
+    def __init__(self, antes="<p>formulário</p>", depois="<p>formulário</p>", final_ok=True, content_falha_antes=0):
+        self.antes, self.depois, self.final_ok = antes, depois, final_ok
+        self.final_clicado, self.cliques, self.consultas_depois = False, [], 0
+        self._falhas_restantes = content_falha_antes
+
+    async def content(self):
+        if self.final_clicado:
+            self.consultas_depois += 1
+            if self._falhas_restantes > 0:
+                self._falhas_restantes -= 1
+                raise RuntimeError("Execution context was destroyed (navegação em curso)")
+            return self.depois
+        return self.antes
+
+    async def click(self, seletor, timeout=None):
+        self.cliques.append(seletor)
+        if "j_idt147" in seletor or seletor == "//button[span[contains(text(),'Confirmar')]]":
+            if not self.final_ok:
+                raise RuntimeError("botão final não encontrado")
+            self.final_clicado = True
+
+    async def query_selector_all(self, _sel):
+        return []
+
+    async def wait_for_timeout(self, _ms):
+        return None
+
+
+def test_confirmar_sucesso_so_quando_a_pagina_mostra_a_confirmacao():
+    pg = _PaginaConfirmar(depois="<h2>Matrícula realizada com sucesso</h2>")
+    assert rodar(rem.confirmar_matricula(pg)) is True and pg.final_clicado
+
+
+def test_confirmar_aceita_o_comprovante_como_prova():
+    pg = _PaginaConfirmar(depois="<a>Imprimir Comprovante</a>")
+    assert rodar(rem.confirmar_matricula(pg)) is True
+
+
+def test_confirmar_clique_sem_efeito_devolve_false_e_nao_fica_em_laco(monkeypatch):
+    monkeypatch.setattr(rem, "ESPERA_CONFIRMACAO_MS", 2000)
+    pg = _PaginaConfirmar(depois="<p>Erro de validação</p>")
+    assert rodar(rem.confirmar_matricula(pg)) is False
+    assert pg.final_clicado and pg.consultas_depois == 4  # 2000 // 500 consultas, depois desiste
+
+
+def test_confirmar_espera_a_confirmacao_aparecer_apos_navegacao(monkeypatch):
+    pg = _PaginaConfirmar(depois="<p>Matrícula realizada com sucesso</p>", content_falha_antes=2)
+    assert rodar(rem.confirmar_matricula(pg)) is True
+    assert pg.consultas_depois == 3  # 2 falhas de navegação + 1 leitura boa
+
+
+def test_confirmar_ja_matriculado_nao_clica_em_nada():
+    for texto in ("<p>MATRÍCULA REALIZADA COM SUCESSO</p>", "<a>imprimir comprovante</a>"):
+        pg = _PaginaConfirmar(antes=texto)
+        assert rodar(rem.confirmar_matricula(pg)) == "JA_MATRICULADO" and pg.cliques == []
+
+
+def test_confirmar_botao_final_inexistente_devolve_false():
+    pg = _PaginaConfirmar(final_ok=False)
+    assert rodar(rem.confirmar_matricula(pg)) is False and not pg.final_clicado
+
+
 def test_secao_sem_pendentes_e_turma_sem_secoes_nao_quebram(monkeypatch, dados_tmp):
     _semear(dados_tmp, sucessos=[_reg(1, "2º Ano - A")])
     _, est = _orquestrar(monkeypatch, {"2º Ano": ["2º Ano - A"]}, {"2º Ano - A": [aluno(1)]})

@@ -11,7 +11,7 @@ combinada, como confirmar e como corrigir.
 | BUG-PRE-001 | `pre_matricula.py` | A consulta por CPF talvez leia só o **primeiro** cadastro, que pode ser o antigo (cancelado) em vez da nova tentativa | **Suspeita, não confirmada** (site fora do ar) |
 | BUG-PRE-002 | `pre_matricula.py` | Aluno que volta em **outra turma** fica duplicado, com o registro antigo como cancelado | **Corrigido em 2026-10-07** (testado com dados simulados; ver a seção abaixo) |
 | BUG-PRE-003 | `web/api/rotas.py` | A fila da pré-matrícula do painel (widget, contador e lista) mostrava também quem **já foi chamado** (matriculado ou cancelado), como se ainda aguardasse | **Corrigido em 2026-10-30** (testado com dados simulados; ver a seção abaixo) |
-| BUG-REM-001 | `rematricula.py` | O clique final de "Confirmar" é tratado como sucesso sem conferir a página | **Risco identificado, não testado** |
+| BUG-REM-001 | `rematricula.py` | O clique final de "Confirmar" é tratado como sucesso sem conferir a página | **Corrigido em 2026-11-04** (a validar no site real) |
 
 ---
 
@@ -167,24 +167,28 @@ não consulta o registro substituído.
 
 ---
 
-## BUG-REM-001: sucesso da rematrícula não é conferido na página
+## BUG-REM-001: sucesso da rematrícula não era conferido na página
+
+> **Corrigido em 2026-11-04** (testado só com navegador simulado; falta validar no site real, ver abaixo).
 
 **Onde:** `src/automacao/rematricula.py`: `confirmar_matricula()`.
 
-**O que acontece.** Depois de clicar no botão final de "Confirmar", a função espera 2 s e
-devolve `True`, sem verificar se a página mostrou a confirmação. Se o clique não tiver
-efeito (erro de validação, página travada), o aluno é gravado em
-`rematriculas_sucesso.json` e **nunca mais é reprocessado**.
+**O que acontecia.** Depois de clicar no botão final de "Confirmar", a função esperava 2 s e
+devolvia `True`, sem verificar se a página mostrou a confirmação. Se o clique não tivesse
+efeito (erro de validação, página travada), o aluno era gravado em
+`rematriculas_sucesso.json` e **nunca mais era reprocessado**.
 
-**Por que ainda não foi corrigido.** Não foi possível testar no site real. A função já
-procura os textos `MATRÍCULA REALIZADA COM SUCESSO` e `IMPRIMIR COMPROVANTE` no início
-(para o caso "já matriculado"), então esses textos provavelmente aparecem também depois de
-uma confirmação bem-sucedida, mas isso precisa ser confirmado.
+**Correção.** Depois do clique final, `_aguardar_matricula_realizada()` consulta a página a
+cada 0,5 s por até 15 s (`ESPERA_CONFIRMACAO_MS`) procurando `MATRÍCULA REALIZADA COM SUCESSO`
+ou `IMPRIMIR COMPROVANTE` (os mesmos textos que já indicam "já matriculado"). Se nenhum
+aparecer, devolve `False` ("Erro ao confirmar matrícula") e o aluno vai para
+`rematriculas_erro.json`. Erros de leitura durante a navegação são ignorados e tentados de novo.
 
-**Correção proposta:** depois do clique final, esperar um dos dois textos. Se não aparecer,
-devolver `False` ("Erro ao confirmar matrícula"). O risco é falso negativo (sucesso real
-marcado como erro). Ele se corrige sozinho, porque na próxima execução o aluno cai no caso
-`JA_MATRICULADO` e vira sucesso.
+**Risco que sobra: falso negativo.** Se o site confirmar mas mostrar outro texto, o aluno é
+marcado como erro. Ele se corrige sozinho: na próxima execução o aluno cai no caso
+`JA_MATRICULADO` e vira sucesso. **A validar:** rodar o teste com 1 aluno e conferir se a
+página realmente mostra um desses dois textos logo depois do clique final; se não mostrar,
+ajustar `TEXTOS_MATRICULA_REALIZADA`.
 
 ---
 

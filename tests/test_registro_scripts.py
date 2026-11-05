@@ -494,7 +494,11 @@ def test_gerar_chaves_e_opcao_de_ignorar_chaves_salvas_na_rematricula():
     assert r.planejar(Opcoes(), {}, {}, {}).kwargs == {"modo_teste": False, "apenas_erros": False, "turmas_alvo": None}
     p = r.planejar(Opcoes(), {"ignorar_chaves_salvas": True}, {}, {})
     assert p.funcao is rematricular_via_login and p.kwargs["usar_chaves_salvas"] is False
-    assert [e["nome"] for e in r.extras()] == ["ignorar_chaves_salvas"]
+    assert [e["nome"] for e in r.extras()] == ["um_aluno", "ignorar_chaves_salvas"]
+    # "Testar com 1 único aluno": só entra nos argumentos quando marcado
+    assert "um_aluno" not in r.planejar(Opcoes(), {}, {}, {}).kwargs
+    p = r.planejar(Opcoes(), {"um_aluno": True}, {}, {})
+    assert p.funcao is rematricular_via_login and p.kwargs["um_aluno"] is True
 
 
 def test_gerar_chaves_executa_pela_rota(tmp_path, monkeypatch):

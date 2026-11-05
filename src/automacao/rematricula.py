@@ -576,17 +576,42 @@ async def acessar_matricula_online(page, nome_aluno):
         return False
 
 
+# Textos que a página mostra quando a matrícula está realizada (a mesma checagem vale antes de confirmar,
+# para o caso "já matriculado", e depois do clique final, para provar que a confirmação funcionou).
+TEXTOS_MATRICULA_REALIZADA = ("MATRÍCULA REALIZADA COM SUCESSO", "IMPRIMIR COMPROVANTE")
+ESPERA_CONFIRMACAO_MS = 15000   # quanto esperar a página mostrar a confirmação depois do clique final
+INTERVALO_CONFIRMACAO_MS = 500
+
+
+def _tem_texto_de_matricula_realizada(html):
+    texto = (html or "").upper()
+    return next((t for t in TEXTOS_MATRICULA_REALIZADA if t in texto), None)
+
+
+async def _aguardar_matricula_realizada(page):
+    """Espera (até ESPERA_CONFIRMACAO_MS) a página mostrar que a matrícula foi realizada. Devolve o texto achado ou None."""
+    for _ in range(max(1, ESPERA_CONFIRMACAO_MS // INTERVALO_CONFIRMACAO_MS)):
+        try:
+            achado = _tem_texto_de_matricula_realizada(await page.content())
+        except Exception:  # página em transição (navegação em curso): tenta de novo
+            achado = None
+        if achado:
+            return achado
+        await page.wait_for_timeout(INTERVALO_CONFIRMACAO_MS)
+    return None
+
+
 async def confirmar_matricula(page):
-    """Devolve "JA_MATRICULADO", True (confirmada agora) ou False (falhou)."""
+    """Devolve "JA_MATRICULADO", True (confirmada agora, com a página provando) ou False (falhou)."""
     try:
         try:
-            texto = (await page.content()).upper()
+            achado = _tem_texto_de_matricula_realizada(await page.content())
 
-            if "MATRÍCULA REALIZADA COM SUCESSO" in texto:
+            if achado == TEXTOS_MATRICULA_REALIZADA[0]:
                 print("🎉 Matrícula já realizada anteriormente – pulando aluno.")
                 return "JA_MATRICULADO"
 
-            if "IMPRIMIR COMPROVANTE" in texto:
+            if achado:
                 print("🎉 Comprovante disponível – matrícula já realizada.")
                 return "JA_MATRICULADO"
 
@@ -638,9 +663,15 @@ async def confirmar_matricula(page):
                 print(f"❌ Erro ao clicar no botão final de Confirmar: {e}")
                 return False
 
-        await page.wait_for_timeout(2000)
+        achado = await _aguardar_matricula_realizada(page)
+        if not achado:
+            print(
+                f"❌ Cliquei em Confirmar, mas a página não mostrou a confirmação em {ESPERA_CONFIRMACAO_MS // 1000}s "
+                "— não vou marcar como rematriculado."
+            )
+            return False
 
-        print("🎉 Matrícula processada COMPLETAMENTE!")
+        print("🎉 Matrícula processada COMPLETAMENTE! (confirmação vista na página)")
         return True
 
     except Exception as e:
@@ -903,6 +934,7 @@ async def rematricular_via_login(
     navegador="chromium",
     headless=False,
     usar_chaves_salvas=True,
+    um_aluno=False,
 ):
     """
     Roda a rematrícula. Devolve um resumo:
@@ -912,6 +944,12 @@ async def rematricular_via_login(
     turmas_alvo: lista de nomes-base (padrão TURMAS_ALVO); cada nome pode
     corresponder a várias seções (ex.: "2º Ano" -> "2º Ano - A", "2º Ano - B").
     headless=False por padrão (o original abre o navegador visível).
+
+    um_aluno: teste com UM ÚNICO aluno no total (ao contrário de modo_teste, que faz 1 por seção). Pega o
+    primeiro aluno pendente da primeira seção que tiver algum e para assim que ele for tentado (sucesso ou
+    erro), sem abrir as demais seções. Não é simulação: esse aluno é rematriculado de verdade. Vale também
+    com apenas_erros (reprocessa só o primeiro com erro). Se o aluno não chegar a ser tentado (seção
+    abandonada por falha de login/navegação), segue para a próxima seção até conseguir tentar um.
 
     usar_chaves_salvas: usa as chaves de dados/<ano>/chave_responsavel.json (gerar_chaves_via_login) para
     quem tiver; quem não tiver, ou cuja chave for recusada, gera na hora como sempre. Arquivo de chaves
@@ -925,7 +963,9 @@ async def rematricular_via_login(
         senha = senha_padrao if senha is None else senha
 
     print("\n" + "=" * 70)
-    if apenas_erros:
+    if um_aluno:
+        print("🧪 MODO TESTE - 1 ÚNICO aluno no total")
+    elif apenas_erros:
         print("🔄 MODO REPROCESSAMENTO - Apenas alunos com erro")
     elif modo_teste:
         print("🧪 MODO TESTE - 1 aluno por turma")
@@ -956,7 +996,11 @@ async def rematricular_via_login(
         browser = await getattr(p, navegador).launch(headless=headless)
 
         try:
+            encerrar = False  # um_aluno: já tentou o aluno de teste, não abre mais nada
+
             for turma_nome in turmas_alvo:
+                if encerrar:
+                    break
                 print(f"\n{'='*70}")
                 print(f"📚 PROCESSANDO TURMA (base): {turma_nome}")
                 print(f"{'='*70}")
@@ -973,6 +1017,8 @@ async def rematricular_via_login(
                     continue
 
                 for secao_texto in secoes:
+                    if encerrar:
+                        break
                     print(f"\n--- Iniciando seção: {secao_texto} ---")
 
                     page_secao = await _abrir_por_turmas(browser, login, senha)
@@ -1002,14 +1048,22 @@ async def rematricular_via_login(
                         if modo_teste:
                             alunos_para_processar = alunos_para_processar[:1]
 
+                    if um_aluno:
+                        alunos_para_processar = alunos_para_processar[:1]
+
                     if not alunos_para_processar:
                         print(f"✅ Todos os alunos de '{secao_texto}' já foram processados!")
                         continue
 
+                    tentativas_antes = len(historico)
                     await processar_turma(
                         browser, secao_texto, alunos_para_processar,
                         sucessos, erros, historico, login, senha, chaves=chaves,
                     )
+
+                    if um_aluno and len(historico) > tentativas_antes:
+                        print("\n🧪 Aluno de teste tentado — encerrando (modo 1 aluno).")
+                        encerrar = True
 
         finally:
             await browser.close()
