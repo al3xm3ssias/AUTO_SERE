@@ -84,3 +84,11 @@ Pontos de atenção:
 | BUG-REM-001 | Risco identificado: o clique final de "Confirmar" é tratado como sucesso **sem conferir a página** |
 
 `BUGS_CONHECIDOS.md` parou em 2026-10-30.
+
+## Sessão única no SERE
+
+A rematrícula e o "Gerar chaves" usam **uma única página logada** no SERE durante toda a execução
+(`SessaoSere` em `rematricula.py`). Ela lista as seções, abre a turma, lê os alunos e processa cada um a
+partir da mesma tela, como o `alunos.py`; entre seções volta pelo botão "Voltar" ou pelo menu. O SERE só
+aceita uma sessão por usuário, por isso não se abre página nova com login a cada etapa. Só se loga de novo
+se a sessão cair ou depois de um erro crítico. A Área do Aluno continua em páginas próprias (outro site).

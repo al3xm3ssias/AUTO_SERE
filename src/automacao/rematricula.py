@@ -285,6 +285,85 @@ async def _abrir_por_turmas(browser, login, senha):
     return page
 
 
+async def _na_tela_de_login(page) -> bool:
+    """True se a página está na tela de login do SERE (a sessão caiu)."""
+    try:
+        return await page.query_selector("#CHAVE") is not None
+    except Exception:
+        return False
+
+
+async def _tem_links_de_turma(page) -> bool:
+    try:
+        return await page.query_selector("a[href*='AoClicarTurma']") is not None
+    except Exception:
+        return False
+
+
+async def _clicar_voltar(page) -> bool:
+    """Botão 'Voltar' do SERE (o mesmo que o alunos.py usa para sair da turma). False se não houver."""
+    try:
+        voltar = await page.query_selector("//input[@value='Voltar']")
+        if not voltar:
+            return False
+        await voltar.click()
+        await page.wait_for_timeout(1500)
+        return True
+    except Exception:
+        return False
+
+
+class SessaoSere:
+    """
+    UMA página logada no SERE, reaproveitada na execução inteira: listar as seções, abrir a turma, ler
+    os alunos e processar cada um, continuando da tela em que a página está (como o alunos.py).
+
+    O SERE só aceita uma sessão por usuário. Antes, cada etapa abria uma página nova com login próprio
+    (3 logins por seção): a janela fechava e reabria sozinha, no meio do trabalho. Agora só se loga de
+    novo se a sessão cair de verdade ou depois de um erro crítico (reiniciar).
+    """
+
+    def __init__(self, browser, login, senha):
+        self.browser, self.login, self.senha = browser, login, senha
+        self.page = None
+
+    async def _ir_para_lista_de_turmas(self) -> bool:
+        if self.page is None:
+            self.page = await _abrir_por_turmas(self.browser, self.login, self.senha)
+            return self.page is not None
+
+        if await _na_tela_de_login(self.page):
+            print("🔑 A sessão do SERE caiu — entrando de novo, nesta mesma página...")
+            if not await fazer_login_sere(self.page, self.login, self.senha):
+                return False
+            return await navegar_para_por_turmas(self.page)
+
+        if await _tem_links_de_turma(self.page):
+            return True  # já está na lista de turmas
+
+        if await _clicar_voltar(self.page) and await _tem_links_de_turma(self.page):
+            return True
+
+        return await navegar_para_por_turmas(self.page)
+
+    async def ir_para_lista_de_turmas(self) -> bool:
+        """Deixa a página na lista de turmas ('Por Turma'). Se falhar, descarta a página: a próxima tentativa abre uma limpa."""
+        ok = await self._ir_para_lista_de_turmas()
+        if not ok:
+            await self.fechar()
+        return ok
+
+    async def fechar(self):
+        page, self.page = self.page, None
+        if page is not None:
+            try:
+                await page.close()
+            except Exception:
+                pass
+
+    reiniciar = fechar  # erro crítico: descarta a página; a próxima etapa abre outra, logada do zero
+
+
 async def listar_secao_turmas(page, nome_turma):
     """
     Labels das seções relacionadas a nome_turma (ex.: "2º Ano - A", "2º Ano - B").
@@ -697,18 +776,38 @@ async def _abrir_ficha_gerar_chave(page_sere, aluno):
     Devolve (chave, cpf, erro). Com erro None a ficha continua aberta (quem chamou
     volta para a lista com voltar_para_turma). ErroReiniciarNavegador propaga.
     """
+    if await _na_tela_de_login(page_sere):
+        raise ErroReiniciarNavegador("A sessão do SERE caiu (tela de login)")
+
     await page_sere.wait_for_selector("a[href*='AoClicarAluno']", timeout=20000)
     links_alunos = await page_sere.query_selector_all("a[href*='AoClicarAluno']")
 
-    aluno_encontrado = False
+    # Como no alunos.py: o mesmo CGM pode aparecer em duas linhas (Transferido + Matriculado, aluno que
+    # voltou). Clica na linha em que ele está Matriculado; sem essa informação, no primeiro link do CGM.
+    candidatos = []
     for link in links_alunos:
-        cgm = (await link.inner_text()).strip()
-        if cgm == aluno["cgm"]:
-            print("🔗 Acessando perfil do aluno...")
-            await link.click()
-            await page_sere.wait_for_timeout(2000)
-            aluno_encontrado = True
+        if (await link.inner_text()).strip() == aluno["cgm"]:
+            candidatos.append(link)
+
+    alvo = None
+    for link in candidatos:
+        try:
+            situacao = await link.evaluate(
+                "el => { const t = el.closest('tr')?.querySelectorAll('td')[6]; return t ? t.textContent.trim() : ''; }"
+            )
+        except Exception:
+            situacao = ""
+        if situacao == "Matriculado":
+            alvo = link
             break
+    if alvo is None and candidatos:
+        alvo = candidatos[0]
+
+    aluno_encontrado = alvo is not None
+    if aluno_encontrado:
+        print("🔗 Acessando perfil do aluno...")
+        await alvo.click()
+        await page_sere.wait_for_timeout(2000)
 
     if not aluno_encontrado:
         erro_detalhado = "Aluno não encontrado na lista"
@@ -828,101 +927,108 @@ async def processar_aluno(page_sere, browser, aluno, chaves=None):
         return False, erro_detalhado
 
 
-async def processar_turma(browser, turma_nome, alunos_para_processar, sucessos, erros, historico, login, senha, chaves=None):
+async def processar_alunos_da_secao(sessao, secao, alunos, tratar, ao_concluir, ao_desistir, ja_na_secao=False):
     """
-    Processa uma turma/seção completa com recuperação automática.
+    Percorre os alunos de uma seção na página da `sessao`, com recuperação automática. Usado pela
+    rematrícula e pelo "Gerar chaves" (mesma sessão, mesma recuperação).
 
-    Devolve True se todos os alunos foram tratados, False se a seção foi
-    abandonada (turma não encontrada ou falhas de sessão repetidas). Quem
-    ficou sem tratar não é registrado em nenhuma lista e será retomado na
-    próxima execução (não consta em sucessos).
+    tratar(page, aluno) -> resultado (pode levantar ErroReiniciarNavegador); ao_concluir(aluno, resultado)
+    é chamado a cada aluno tratado; ao_desistir(aluno, erro) depois de MAX_TENTATIVAS_NAVEGADOR erros
+    críticos seguidos no mesmo aluno. ja_na_secao=True: a página já está na lista de alunos da seção
+    (continua dali, sem logar nem selecionar a turma de novo).
+
+    Devolve True se todos os alunos foram tratados, False se a seção foi abandonada (turma não encontrada
+    ou falhas de sessão repetidas). Quem ficou sem tratar não é registrado e será retomado na próxima execução.
     """
-    indice_atual = 0
+    indice = 0
     tentativa_navegador = 0   # reinícios seguidos para o MESMO aluno
     falhas_sessao = 0         # falhas seguidas de login/navegação/exceção
+    reposicionar = not ja_na_secao
 
-    while indice_atual < len(alunos_para_processar):
-        page_turma = None
-
+    while indice < len(alunos):
         try:
-            page_turma = await _abrir_por_turmas(browser, login, senha)
+            if reposicionar:
+                if not await sessao.ir_para_lista_de_turmas():
+                    falhas_sessao += 1
+                    if falhas_sessao >= MAX_FALHAS_SESSAO:
+                        print(f"❌ {falhas_sessao} falhas seguidas de login/navegação. Abandonando '{secao}'.")
+                        return False
+                    print(f"❌ Falha no login/navegação (tentativa {falhas_sessao}/{MAX_FALHAS_SESSAO}), tentando novamente...")
+                    await asyncio.sleep(3)
+                    continue
 
-            if page_turma is None:
-                falhas_sessao += 1
-                if falhas_sessao >= MAX_FALHAS_SESSAO:
-                    print(f"❌ {falhas_sessao} falhas seguidas de login/navegação. Abandonando '{turma_nome}'.")
+                if not await selecionar_turma(sessao.page, secao):
+                    print(f"❌ Não foi possível selecionar a seção '{secao}'")
                     return False
-                print(f"❌ Falha no login/navegação (tentativa {falhas_sessao}/{MAX_FALHAS_SESSAO}), tentando novamente...")
-                await asyncio.sleep(3)
+                reposicionar = False
+
+            aluno = alunos[indice]
+            print(f"\n[{indice + 1}/{len(alunos)}]", end=" ")
+
+            try:
+                resultado = await tratar(sessao.page, aluno)
+            except ErroReiniciarNavegador as e:
+                print(f"\n🔄 ERRO CRÍTICO DETECTADO: {e}")
+                print("🔄 Reiniciando a sessão do SERE a partir do aluno atual...")
+
+                tentativa_navegador += 1
+                if tentativa_navegador >= MAX_TENTATIVAS_NAVEGADOR:
+                    print(f"❌ Máximo de tentativas ({MAX_TENTATIVAS_NAVEGADOR}) atingido para este aluno")
+                    print(f"⏭️  Pulando aluno: {aluno['Nome']}")
+                    ao_desistir(aluno, e)
+                    indice += 1
+                    tentativa_navegador = 0
+
+                await sessao.reiniciar()
+                reposicionar = True
+                await asyncio.sleep(5)
                 continue
 
-            if not await selecionar_turma(page_turma, turma_nome):
-                print(f"❌ Não foi possível selecionar turma '{turma_nome}'")
-                return False
+            ao_concluir(aluno, resultado)
+            indice += 1
+            tentativa_navegador = 0
+            falhas_sessao = 0
 
-            while indice_atual < len(alunos_para_processar):
-                aluno = alunos_para_processar[indice_atual]
-
-                print(f"\n[{indice_atual + 1}/{len(alunos_para_processar)}]", end=" ")
-
-                try:
-                    sucesso, erro_msg = await processar_aluno(page_turma, browser, aluno, chaves=chaves)
-
-                    registrar_resultado(sucessos, erros, historico, aluno, turma_nome, sucesso, erro_msg)
-                    salvar_resultados(sucessos, erros, historico)
-
-                    indice_atual += 1
-                    tentativa_navegador = 0
-                    falhas_sessao = 0
-
-                    if indice_atual < len(alunos_para_processar):
-                        await asyncio.sleep(2)
-
-                except ErroReiniciarNavegador as e:
-                    print(f"\n🔄 ERRO CRÍTICO DETECTADO: {e}")
-                    print("🔄 Fechando navegador e reiniciando do aluno atual...")
-
-                    tentativa_navegador += 1
-
-                    if tentativa_navegador >= MAX_TENTATIVAS_NAVEGADOR:
-                        print(f"❌ Máximo de tentativas ({MAX_TENTATIVAS_NAVEGADOR}) atingido para este aluno")
-                        print(f"⏭️  Pulando aluno: {aluno['Nome']}")
-
-                        registrar_resultado(
-                            sucessos, erros, historico, aluno, turma_nome, False,
-                            erro_msg=f"Erro crítico após {MAX_TENTATIVAS_NAVEGADOR} tentativas: {e}",
-                            incremento_tentativas=MAX_TENTATIVAS_NAVEGADOR,
-                        )
-                        salvar_resultados(sucessos, erros, historico)
-
-                        indice_atual += 1
-                        tentativa_navegador = 0
-
-                    await page_turma.close()
-                    page_turma = None
-
-                    await asyncio.sleep(5)
-                    break  # reinicia a sessão a partir do aluno atual
-
-            if indice_atual >= len(alunos_para_processar):
-                return True
+            if indice < len(alunos):
+                await asyncio.sleep(2)
 
         except Exception as e:
-            print(f"❌ Erro inesperado ao processar turma: {e}")
+            print(f"❌ Erro inesperado ao processar a seção: {e}")
             falhas_sessao += 1
             if falhas_sessao >= MAX_FALHAS_SESSAO:
-                print(f"❌ {falhas_sessao} falhas seguidas. Abandonando '{turma_nome}'.")
+                print(f"❌ {falhas_sessao} falhas seguidas. Abandonando '{secao}'.")
                 return False
+            reposicionar = True  # não se sabe em que tela a página ficou: volta pela lista de turmas
             await asyncio.sleep(5)
 
-        finally:
-            if page_turma:
-                try:
-                    await page_turma.close()
-                except Exception:
-                    pass
-
     return True
+
+
+async def processar_turma(sessao, turma_nome, alunos_para_processar, sucessos, erros, historico, chaves=None, ja_na_secao=False):
+    """
+    Rematricula os alunos de uma seção na página da `sessao` (ver processar_alunos_da_secao).
+    Cada resultado é registrado e salvo na hora. Quem ficou sem tratar não vai para nenhuma lista.
+    """
+
+    def _concluir(aluno, resultado):
+        sucesso, erro_msg = resultado
+        registrar_resultado(sucessos, erros, historico, aluno, turma_nome, sucesso, erro_msg)
+        salvar_resultados(sucessos, erros, historico)
+
+    def _desistir(aluno, e):
+        registrar_resultado(
+            sucessos, erros, historico, aluno, turma_nome, False,
+            erro_msg=f"Erro crítico após {MAX_TENTATIVAS_NAVEGADOR} tentativas: {e}",
+            incremento_tentativas=MAX_TENTATIVAS_NAVEGADOR,
+        )
+        salvar_resultados(sucessos, erros, historico)
+
+    async def _tratar(page, aluno):
+        return await processar_aluno(page, sessao.browser, aluno, chaves=chaves)
+
+    return await processar_alunos_da_secao(
+        sessao, turma_nome, alunos_para_processar, _tratar, _concluir, _desistir, ja_na_secao=ja_na_secao
+    )
 
 
 async def rematricular_via_login(
@@ -994,6 +1100,7 @@ async def rematricular_via_login(
 
     async with async_playwright() as p:
         browser = await getattr(p, navegador).launch(headless=headless)
+        sessao = SessaoSere(browser, login, senha)  # UMA página logada no SERE para a execução inteira
 
         try:
             encerrar = False  # um_aluno: já tentou o aluno de teste, não abre mais nada
@@ -1005,12 +1112,10 @@ async def rematricular_via_login(
                 print(f"📚 PROCESSANDO TURMA (base): {turma_nome}")
                 print(f"{'='*70}")
 
-                page_temp = await _abrir_por_turmas(browser, login, senha)
-                if page_temp is None:
+                if not await sessao.ir_para_lista_de_turmas():
                     continue
 
-                secoes = await listar_secao_turmas(page_temp, turma_nome)
-                await page_temp.close()
+                secoes = await listar_secao_turmas(sessao.page, turma_nome)
 
                 if not secoes:
                     print(f"\n⚠️ Nenhuma seção encontrada para '{turma_nome}'")
@@ -1021,17 +1126,14 @@ async def rematricular_via_login(
                         break
                     print(f"\n--- Iniciando seção: {secao_texto} ---")
 
-                    page_secao = await _abrir_por_turmas(browser, login, senha)
-                    if page_secao is None:
+                    if not await sessao.ir_para_lista_de_turmas():
                         continue
 
-                    if not await selecionar_turma(page_secao, secao_texto):
+                    if not await selecionar_turma(sessao.page, secao_texto):
                         print(f"\n⚠️ Seção '{secao_texto}' não encontrada ao tentar selecionar")
-                        await page_secao.close()
                         continue
 
-                    alunos = await obter_alunos_matriculados(page_secao)
-                    await page_secao.close()
+                    alunos = await obter_alunos_matriculados(sessao.page)
 
                     if not alunos:
                         print(f"\n⚠️ Nenhum aluno matriculado em '{secao_texto}'")
@@ -1056,9 +1158,10 @@ async def rematricular_via_login(
                         continue
 
                     tentativas_antes = len(historico)
+                    # a página já está na lista de alunos da seção: continua dali, sem logar de novo
                     await processar_turma(
-                        browser, secao_texto, alunos_para_processar,
-                        sucessos, erros, historico, login, senha, chaves=chaves,
+                        sessao, secao_texto, alunos_para_processar,
+                        sucessos, erros, historico, chaves=chaves, ja_na_secao=True,
                     )
 
                     if um_aluno and len(historico) > tentativas_antes:
@@ -1066,6 +1169,7 @@ async def rematricular_via_login(
                         encerrar = True
 
         finally:
+            await sessao.fechar()
             await browser.close()
 
     salvar_resultados(sucessos, erros, historico)

@@ -160,16 +160,21 @@ def _secao(monkeypatch, *, abrir=None, selecionar=True, efeitos=None):
             raise efeito
         return efeito
 
+    async def _navegar(_p):
+        return True
+
     monkeypatch.setattr(rem, "_abrir_por_turmas", _abrir)
+    monkeypatch.setattr(rem, "navegar_para_por_turmas", _navegar)
     monkeypatch.setattr(rem, "selecionar_turma", _selecionar)
     monkeypatch.setattr(cr, "_gerar_chave_do_aluno", _gerar)
     return estado
 
 
-def _rodar_secao(alunos, chaves=None):
+def _rodar_secao(alunos, chaves=None, ja_na_secao=False):
     resumo = {"geradas": 0, "falhas": []}
     chaves = [] if chaves is None else chaves
-    r = rodar(cr._processar_secao(object(), "2º Ano - A", alunos, chaves, "l", "s", resumo))
+    sessao = rem.SessaoSere(object(), "l", "s")
+    r = rodar(cr._processar_secao(sessao, "2º Ano - A", alunos, chaves, resumo, ja_na_secao=ja_na_secao))
     return r, chaves, resumo
 
 
@@ -255,10 +260,14 @@ def _orquestrar(monkeypatch, secoes, alunos_por_secao, falhar=()):
     nav = _Nav()
     ctx = _Ctx(nav)
     monkeypatch.setattr(cr, "async_playwright", lambda: ctx)
-    est = {"aberta": None, "geradas": [], "ctx": ctx}
+    est = {"aberta": None, "geradas": [], "ctx": ctx, "aberturas": 0}
 
     async def _abrir(_b, _l, _s):
+        est["aberturas"] += 1
         return PaginaFake()
+
+    async def _navegar(_p):
+        return True
 
     async def _listar(_p, turma):
         return secoes.get(turma, [])
@@ -270,7 +279,8 @@ def _orquestrar(monkeypatch, secoes, alunos_por_secao, falhar=()):
     async def _obter(_p):
         return alunos_por_secao.get(est["aberta"], [])
 
-    async def _secao(_b, secao, alunos, chaves, _l, _s, resumo):
+    async def _secao(_sessao, secao, alunos, chaves, resumo, ja_na_secao=False):
+        est["ja_na_secao"] = ja_na_secao
         for a in alunos:
             est["geradas"].append(a["cgm"])
             if a["cgm"] in falhar:
@@ -282,6 +292,7 @@ def _orquestrar(monkeypatch, secoes, alunos_por_secao, falhar=()):
         return True
 
     monkeypatch.setattr(rem, "_abrir_por_turmas", _abrir)
+    monkeypatch.setattr(rem, "navegar_para_por_turmas", _navegar)
     monkeypatch.setattr(rem, "listar_secao_turmas", _listar)
     monkeypatch.setattr(rem, "selecionar_turma", _selecionar)
     monkeypatch.setattr(rem, "obter_alunos_matriculados", _obter)
@@ -375,3 +386,19 @@ def test_credenciais_padrao_e_navegador_headless_configuraveis(monkeypatch):
     assert logins == [("login_sere", "senha_sere")] and est["ctx"].pw.chromium.headless is False   # padrão: visível
     rodar(cr.gerar_chaves_via_login(turmas_alvo=["X"], login="l", senha="s", headless=True))
     assert est["ctx"].pw.chromium.headless is True
+
+
+def test_gerar_chaves_usa_uma_unica_sessao_e_continua_da_secao_aberta(monkeypatch, dados_tmp):
+    nav, est = _orquestrar(
+        monkeypatch, {"2º Ano": ["2º Ano - A", "2º Ano - B"], "3º Ano": ["3º Ano - A"]},
+        {"2º Ano - A": [aluno(1)], "2º Ano - B": [aluno(2)], "3º Ano - A": [aluno(3)]},
+    )
+    _gerar(turmas_alvo=["2º Ano", "3º Ano"])
+    assert est["aberturas"] == 1 and est["geradas"] == ["1", "2", "3"]   # um login só, 3 seções
+    assert est["ja_na_secao"] is True                                    # já na lista de alunos: sem logar nem selecionar de novo
+
+
+def test_secao_ja_na_secao_nao_loga_nem_seleciona_de_novo(monkeypatch, dados_tmp):
+    est = _secao(monkeypatch)
+    r, chaves, resumo = _rodar_secao([aluno(1), aluno(2)], ja_na_secao=True)
+    assert r is True and resumo["geradas"] == 2 and est["aberturas"] == 0

@@ -4,7 +4,7 @@ Registro de problemas **identificados e ainda não corrigidos** nos scripts port
 Cada item diz o que acontece, onde está no código, qual é a regra de negócio
 combinada, como confirmar e como corrigir.
 
-Última atualização: 2026-10-30.
+Última atualização: 2026-11-05.
 
 | ID | Script | Resumo | Estado |
 |---|---|---|---|
@@ -12,6 +12,7 @@ combinada, como confirmar e como corrigir.
 | BUG-PRE-002 | `pre_matricula.py` | Aluno que volta em **outra turma** fica duplicado, com o registro antigo como cancelado | **Corrigido em 2026-10-07** (testado com dados simulados; ver a seção abaixo) |
 | BUG-PRE-003 | `web/api/rotas.py` | A fila da pré-matrícula do painel (widget, contador e lista) mostrava também quem **já foi chamado** (matriculado ou cancelado), como se ainda aguardasse | **Corrigido em 2026-10-30** (testado com dados simulados; ver a seção abaixo) |
 | BUG-REM-001 | `rematricula.py` | O clique final de "Confirmar" é tratado como sucesso sem conferir a página | **Corrigido em 2026-11-04** (a validar no site real) |
+| BUG-REM-002 | `rematricula.py`, `chaves_responsavel.py` | Login repetido no SERE (3 por seção): a janela fechava e reabria sozinha no meio do trabalho, derrubando a sessão | **Corrigido em 2026-11-05** (testado só com navegador simulado; a validar no site real) |
 
 ---
 
@@ -164,6 +165,35 @@ aparece em mais de um registro**. O problema ainda não ocorreu, mas vai ocorrer
 **Testes a escrever:** mesmo CPF na turma A (ausente) e B (presente) → A marcado como
 substituído, B intacto, ambos presentes no arquivo; contatos usam a turma B; a Etapa 4
 não consulta o registro substituído.
+
+---
+
+## BUG-REM-002: logins repetidos derrubavam a sessão do SERE
+
+> **Corrigido em 2026-11-05** (testado só com navegador simulado; falta validar no site real).
+
+**Onde:** `src/automacao/rematricula.py` (`rematricular_via_login`, `processar_turma`) e
+`src/automacao/chaves_responsavel.py` (`gerar_chaves_via_login`, `_processar_secao`).
+
+**O que acontecia.** Para cada seção o código abria **três** páginas, cada uma com login próprio
+(listar as seções, ler os alunos, processar os alunos). O SERE só aceita uma sessão por usuário e a
+janela fechava e reabria sozinha logo depois de a turma ser encontrada, parecendo um "logoff sem
+motivo", quando daria para continuar da tela em que já estava.
+
+**Correção.** Uma única página logada (`SessaoSere`) para a execução inteira, no mesmo modelo do
+`alunos.py`: lista as seções, abre a turma, lê os alunos e processa cada um **a partir dessa mesma
+tela**; entre uma seção e outra volta para a lista de turmas pelo botão "Voltar" (ou pelo menu).
+Só se loga de novo se a sessão cair de verdade (a página mostra a tela de login: reloga na mesma
+página) ou depois de um erro crítico (descarta a página e abre outra). Falhas de login/navegação
+seguem limitadas por `MAX_FALHAS_SESSAO` e erros críticos por `MAX_TENTATIVAS_NAVEGADOR`.
+A rematrícula e o "Gerar chaves" usam o mesmo motor (`processar_alunos_da_secao`).
+
+**Junto, no localizar o aluno.** Como no `alunos.py`, o mesmo CGM pode aparecer em duas linhas
+(Transferido + Matriculado, aluno que voltou): o clique agora vai na linha **Matriculado**, e não
+mais no primeiro link com aquele CGM.
+
+**A validar:** rodar o teste com 1 aluno e conferir no navegador que a janela não fecha e reabre
+entre achar a turma e processar o aluno.
 
 ---
 

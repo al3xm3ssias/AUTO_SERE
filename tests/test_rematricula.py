@@ -434,18 +434,25 @@ def _turma(monkeypatch, *, abrir=None, selecionar=True, resultados=None):
             raise efeito
         return efeito
 
+    async def _navegar(_p):
+        estado["navegacoes"] += 1
+        return True
+
+    estado["navegacoes"] = 0
     monkeypatch.setattr(rem, "_abrir_por_turmas", _abrir)
+    monkeypatch.setattr(rem, "navegar_para_por_turmas", _navegar)
     monkeypatch.setattr(rem, "selecionar_turma", _selecionar)
     monkeypatch.setattr(rem, "processar_aluno", _processar)
     return estado
 
 
-def _rodar_turma(alunos, sucessos=None, erros=None, historico=None):
+def _rodar_turma(alunos, sucessos=None, erros=None, historico=None, ja_na_secao=False):
     sucessos = [] if sucessos is None else sucessos
     erros = [] if erros is None else erros
     historico = [] if historico is None else historico
+    sessao = rem.SessaoSere(NavegadorFake(), "l", "s")
     r = rodar(asyncio.wait_for(
-        rem.processar_turma(NavegadorFake(), "2º Ano - A", alunos, sucessos, erros, historico, "l", "s"), 5
+        rem.processar_turma(sessao, "2º Ano - A", alunos, sucessos, erros, historico, ja_na_secao=ja_na_secao), 5
     ))
     return r, sucessos, erros, historico
 
@@ -586,7 +593,13 @@ def _orquestrar(monkeypatch, secoes, alunos_por_secao, resultados=None, abrir_ok
     async def _obter(_p):
         return alunos_por_secao.get(estado["secao_aberta"], [])
 
+    async def _navegar(_p):
+        estado["navegacoes"] += 1
+        return True
+
+    estado["navegacoes"] = 0
     monkeypatch.setattr(rem, "_abrir_por_turmas", _abrir)
+    monkeypatch.setattr(rem, "navegar_para_por_turmas", _navegar)
     monkeypatch.setattr(rem, "listar_secao_turmas", _listar)
     monkeypatch.setattr(rem, "selecionar_turma", _selecionar)
     monkeypatch.setattr(rem, "obter_alunos_matriculados", _obter)
@@ -776,6 +789,176 @@ def test_confirmar_ja_matriculado_nao_clica_em_nada():
 def test_confirmar_botao_final_inexistente_devolve_false():
     pg = _PaginaConfirmar(final_ok=False)
     assert rodar(rem.confirmar_matricula(pg)) is False and not pg.final_clicado
+
+
+# ---- UMA sessão no SERE: sem login repetido, continuando da tela atual ----
+
+def test_varias_turmas_e_secoes_usam_uma_unica_sessao_do_sere(monkeypatch, dados_tmp):
+    """Bug: 3 logins por seção — a janela fechava e reabria sozinha, e o SERE derrubava a sessão."""
+    _, est = _orquestrar(
+        monkeypatch, {"2º Ano": ["2º Ano - A", "2º Ano - B"], "3º Ano": ["3º Ano - A"]},
+        {"2º Ano - A": [aluno(1)], "2º Ano - B": [aluno(2)], "3º Ano - A": [aluno(3)]},
+    )
+    res = rodar(rem.rematricular_via_login(turmas_alvo=["2º Ano", "3º Ano"], login="l", senha="s"))
+    assert est["logins"] == [("l", "s")]                      # um único login na execução inteira
+    assert est["processados"] == ["1", "2", "3"] and res["total_sucessos"] == 3
+    assert est["navegacoes"] >= 2                              # entre turmas/seções volta pelo menu, na mesma página
+
+
+def test_a_pagina_so_fecha_no_fim_da_execucao(monkeypatch, dados_tmp):
+    paginas = []
+
+    async def abrir(_b, _l, _s):
+        paginas.append(PaginaFake())
+        return paginas[-1]
+
+    _, est = _orquestrar(monkeypatch, {"2º Ano": ["2º Ano - A", "2º Ano - B"]},
+                         {"2º Ano - A": [aluno(1)], "2º Ano - B": [aluno(2)]})
+    monkeypatch.setattr(rem, "_abrir_por_turmas", abrir)
+    rodar(rem.rematricular_via_login(turmas_alvo=["2º Ano"], login="l", senha="s"))
+    assert len(paginas) == 1 and paginas[0].fechada
+
+
+def test_ja_na_secao_continua_da_tela_atual_sem_logar_nem_selecionar_de_novo(monkeypatch):
+    est = _turma(monkeypatch)
+    r, suc, _e, _h = _rodar_turma([aluno(1), aluno(2)], ja_na_secao=True)
+    assert r is True and [s["cgm"] for s in suc] == ["1", "2"]
+    assert est["aberturas"] == 0 and est["navegacoes"] == 0
+
+
+def test_erro_critico_com_ja_na_secao_reinicia_a_sessao_e_reposiciona(monkeypatch):
+    est = _turma(monkeypatch, resultados={"1": [rem.ErroReiniciarNavegador("caiu")]})
+    r, suc, err, _h = _rodar_turma([aluno(1), aluno(2)], ja_na_secao=True)
+    assert r is True and err == [] and [s["cgm"] for s in suc] == ["1", "2"]
+    assert est["chamadas"] == ["1", "1", "2"] and est["aberturas"] == 1   # só o reinício logou de novo
+
+
+# ---- SessaoSere: como a página volta para a lista de turmas ----
+
+class _ElFake:
+    def __init__(self, pagina, nome):
+        self.pagina, self.nome = pagina, nome
+
+    async def click(self):
+        self.pagina.cliques.append(self.nome)
+        if self.nome == "voltar":
+            self.pagina.na_lista = True
+
+
+class _PaginaSessao(PaginaFake):
+    """Página de SERE simulada: tela de login, lista de turmas e botão Voltar configuráveis."""
+
+    def __init__(self, login=False, na_lista=False, voltar=False):
+        super().__init__()
+        self.login, self.na_lista, self.tem_voltar, self.cliques = login, na_lista, voltar, []
+
+    async def query_selector(self, seletor):
+        if seletor == "#CHAVE":
+            return _ElFake(self, "chave") if self.login else None
+        if "AoClicarTurma" in seletor:
+            return _ElFake(self, "turma") if self.na_lista else None
+        if "Voltar" in seletor:
+            return _ElFake(self, "voltar") if self.tem_voltar else None
+        return None
+
+
+def _sessao_com(monkeypatch, pagina, navegar=True):
+    chamadas = {"abrir": 0, "login": 0, "navegar": 0}
+
+    async def _abrir(_b, _l, _s):
+        chamadas["abrir"] += 1
+        return _PaginaSessao(na_lista=True)
+
+    async def _login(page, _l, _s):
+        chamadas["login"] += 1
+        page.login = False
+        return True
+
+    async def _navegar(_p):
+        chamadas["navegar"] += 1
+        return navegar
+
+    monkeypatch.setattr(rem, "_abrir_por_turmas", _abrir)
+    monkeypatch.setattr(rem, "fazer_login_sere", _login)
+    monkeypatch.setattr(rem, "navegar_para_por_turmas", _navegar)
+    sessao = rem.SessaoSere(NavegadorFake(), "l", "s")
+    sessao.page = pagina
+    return sessao, chamadas
+
+
+def test_sessao_sem_pagina_abre_uma_logada(monkeypatch):
+    sessao, c = _sessao_com(monkeypatch, None)
+    assert rodar(sessao.ir_para_lista_de_turmas()) is True and sessao.page is not None
+    assert c == {"abrir": 1, "login": 0, "navegar": 0}
+
+
+def test_sessao_ja_na_lista_de_turmas_nao_faz_nada(monkeypatch):
+    sessao, c = _sessao_com(monkeypatch, _PaginaSessao(na_lista=True))
+    assert rodar(sessao.ir_para_lista_de_turmas()) is True
+    assert c == {"abrir": 0, "login": 0, "navegar": 0}
+
+
+def test_sessao_usa_o_botao_voltar_antes_do_menu(monkeypatch):
+    pg = _PaginaSessao(voltar=True)
+    sessao, c = _sessao_com(monkeypatch, pg)
+    assert rodar(sessao.ir_para_lista_de_turmas()) is True
+    assert pg.cliques == ["voltar"] and c == {"abrir": 0, "login": 0, "navegar": 0}
+
+
+def test_sessao_sem_voltar_vai_pelo_menu_na_mesma_pagina(monkeypatch):
+    pg = _PaginaSessao()
+    sessao, c = _sessao_com(monkeypatch, pg)
+    assert rodar(sessao.ir_para_lista_de_turmas()) is True and sessao.page is pg
+    assert c == {"abrir": 0, "login": 0, "navegar": 1}
+
+
+def test_sessao_que_caiu_loga_de_novo_na_mesma_pagina(monkeypatch):
+    pg = _PaginaSessao(login=True)
+    sessao, c = _sessao_com(monkeypatch, pg)
+    assert rodar(sessao.ir_para_lista_de_turmas()) is True and sessao.page is pg and not pg.fechada
+    assert c == {"abrir": 0, "login": 1, "navegar": 1}
+
+
+def test_falha_ao_navegar_descarta_a_pagina_para_a_proxima_tentativa_abrir_uma_limpa(monkeypatch):
+    pg = _PaginaSessao()
+    sessao, c = _sessao_com(monkeypatch, pg, navegar=False)
+    assert rodar(sessao.ir_para_lista_de_turmas()) is False
+    assert sessao.page is None and pg.fechada
+    assert rodar(sessao.ir_para_lista_de_turmas()) is True and c["abrir"] == 1
+
+
+# ---- localizar o aluno na lista (como o alunos.py) ----
+
+class _LinkLinha(LinkFake):
+    """Link de CGM numa linha da tabela; `situacao` é a coluna Situação dessa linha."""
+
+    def __init__(self, cgm, situacao):
+        super().__init__(cgm)
+        self.situacao = situacao
+
+    async def evaluate(self, _js):
+        return self.situacao
+
+
+def test_mesmo_cgm_em_duas_linhas_clica_na_linha_matriculado(monkeypatch):
+    """Aluno que voltou: Transferido + Matriculado com o mesmo CGM — o clique tem de ir na linha Matriculado."""
+    _passos(monkeypatch)
+    velha, atual, outro = _LinkLinha("10", "Transferido"), _LinkLinha("10", "Matriculado"), _LinkLinha("11", "Matriculado")
+    chave, cpf, erro = rodar(rem._abrir_ficha_gerar_chave(PaginaFake([velha, atual, outro]), aluno(10)))
+    assert erro is None and (velha.clicado, atual.clicado, outro.clicado) == (False, True, False)
+
+
+def test_cgm_sem_informacao_de_situacao_clica_no_primeiro_link_do_cgm(monkeypatch):
+    _passos(monkeypatch)
+    links = [LinkFake("9"), LinkFake("10"), LinkFake("10")]
+    rodar(rem._abrir_ficha_gerar_chave(PaginaFake(links), aluno(10)))
+    assert [l.clicado for l in links] == [False, True, False]
+
+
+def test_sessao_caida_na_hora_de_abrir_a_ficha_pede_reinicio(monkeypatch):
+    _passos(monkeypatch)
+    with pytest.raises(rem.ErroReiniciarNavegador, match="sessão do SERE caiu"):
+        rodar(rem._abrir_ficha_gerar_chave(_PaginaSessao(login=True), aluno(10)))
 
 
 def test_secao_sem_pendentes_e_turma_sem_secoes_nao_quebram(monkeypatch, dados_tmp):

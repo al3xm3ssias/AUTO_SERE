@@ -47,7 +47,7 @@ LIMITE_CORPO_WEBHOOK = 30 * 1024 * 1024
 _ultimo_teste = 0.0
 _trava_teste = threading.Lock()
 
-LIMITE_TEXTO_MENSAGEM = 1000
+LIMITE_TEXTO_MENSAGEM = 4000       # o comunicado de matrícula tem ~2.000 caracteres
 INTERVALO_MIN_ENVIO_S = 2.0
 _ultimo_envio = 0.0
 _trava_envio = threading.Lock()
@@ -174,14 +174,17 @@ def teste():
 
 # ───────────────────── mensagem a um responsável (painel) ─────────────────────
 def _modelo_texto_prematricula(item: dict) -> str:
-    try:
-        from src.comum import escola as _escola
-        nome_escola = _escola.nome()
-    except Exception:
-        nome_escola = "nossa escola"
-    return (f"Olá! Aqui é da {nome_escola}. Sobre a pré-matrícula de {item.get('nome', '')} "
-            f"({item.get('turma', '')}): surgiu uma vaga e gostaríamos de falar com você. "
-            f"Pode nos responder esta mensagem?")
+    """
+    Texto do botão "Mandar mensagem" da fila: o MESMO "Comunicado de Matrícula" do modelo HTML (prazo = hoje + 8 dias,
+    documentos, horários, link do grupo da turma), montado por comunicado_matricula.montar_mensagem. Os ajustes
+    (escriturário, dias de prazo, links) e o texto (config/comunicado_matricula.txt) são os mesmos do envio automático.
+    ValueError se config_usuario.json ou o texto personalizado estiverem errados.
+    """
+    from datetime import date
+
+    from src.automacao import comunicado_matricula as _comunicado
+    return _comunicado.montar_mensagem([str(item.get("nome") or "")], date.today(),
+                                       turmas=[str(item.get("turma") or "")], tipo="matriculado")
 
 
 @whatsapp_bp.route("/modelo-prematricula")
@@ -195,8 +198,12 @@ def modelo_prematricula():
         return _erro("Aluno não está mais na fila da pré-matrícula.", 404)
     telefone = item.get("telefone_responsavel")
     telefone = "" if not telefone or telefone == "—" else str(telefone)
+    try:
+        texto = _modelo_texto_prematricula(item)
+    except ValueError as exc:
+        return _erro(str(exc))
     return jsonify({"ok": True, "nome": item.get("nome", ""), "turma": item.get("turma", ""),
-                    "telefone": telefone, "texto": _modelo_texto_prematricula(item)})
+                    "telefone": telefone, "texto": texto})
 
 
 @whatsapp_bp.route("/enviar", methods=["POST"])

@@ -136,94 +136,35 @@ async def _gerar_chave_do_aluno(page_sere, aluno):
     return chave, cpf, erro
 
 
-async def _processar_secao(browser, secao, alunos, chaves, login, senha, resumo) -> bool:
+async def _processar_secao(sessao, secao, alunos, chaves, resumo, ja_na_secao=False) -> bool:
     """
-    Gera a chave de cada aluno da seção, com a mesma recuperação da rematrícula (reinicia a sessão em erro
-    crítico; desiste do aluno após MAX_TENTATIVAS_NAVEGADOR e da seção após MAX_FALHAS_SESSAO falhas de sessão).
-    Grava o arquivo a cada chave gerada. Devolve False se a seção foi abandonada.
+    Gera a chave de cada aluno da seção na página da `sessao` (a mesma da rematrícula: um login só,
+    continuando da tela atual), com a mesma recuperação (rem.processar_alunos_da_secao): reinicia a
+    sessão em erro crítico; desiste do aluno após MAX_TENTATIVAS_NAVEGADOR e da seção após
+    MAX_FALHAS_SESSAO falhas de sessão. Grava o arquivo a cada chave gerada. Devolve False se a seção foi abandonada.
     """
     from src.automacao import rematricula as rem
 
-    indice = 0
-    tentativa_navegador = 0
-    falhas_sessao = 0
+    def _concluir(aluno, resultado):
+        chave, cpf, erro = resultado
+        if erro is None:
+            registrar_chave(chaves, aluno, secao, chave, cpf)
+            salvar_chaves(chaves)
+            resumo["geradas"] += 1
+            print(f"✅ {aluno['Nome']} - CHAVE SALVA")
+        else:
+            resumo["falhas"].append({"cgm": aluno["cgm"], "nome": aluno["Nome"], "turma": secao, "erro": erro})
+            print(f"⚠️ {aluno['Nome']} - {erro}")
 
-    while indice < len(alunos):
-        page = None
-        try:
-            page = await rem._abrir_por_turmas(browser, login, senha)
-            if page is None:
-                falhas_sessao += 1
-                if falhas_sessao >= rem.MAX_FALHAS_SESSAO:
-                    print(f"❌ {falhas_sessao} falhas seguidas de login/navegação. Abandonando '{secao}'.")
-                    return False
-                print(f"❌ Falha no login/navegação (tentativa {falhas_sessao}/{rem.MAX_FALHAS_SESSAO}), tentando novamente...")
-                await asyncio.sleep(3)
-                continue
+    def _desistir(aluno, e):
+        resumo["falhas"].append({
+            "cgm": aluno["cgm"], "nome": aluno["Nome"], "turma": secao,
+            "erro": f"Erro crítico após {rem.MAX_TENTATIVAS_NAVEGADOR} tentativas: {e}",
+        })
 
-            if not await rem.selecionar_turma(page, secao):
-                print(f"❌ Não foi possível selecionar a seção '{secao}'")
-                return False
-
-            while indice < len(alunos):
-                aluno = alunos[indice]
-                print(f"\n[{indice + 1}/{len(alunos)}]", end=" ")
-
-                try:
-                    chave, cpf, erro = await _gerar_chave_do_aluno(page, aluno)
-                    if erro is None:
-                        registrar_chave(chaves, aluno, secao, chave, cpf)
-                        salvar_chaves(chaves)
-                        resumo["geradas"] += 1
-                        print(f"✅ {aluno['Nome']} - CHAVE SALVA")
-                    else:
-                        resumo["falhas"].append({"cgm": aluno["cgm"], "nome": aluno["Nome"], "turma": secao, "erro": erro})
-                        print(f"⚠️ {aluno['Nome']} - {erro}")
-
-                    indice += 1
-                    tentativa_navegador = 0
-                    falhas_sessao = 0
-                    if indice < len(alunos):
-                        await asyncio.sleep(2)
-
-                except rem.ErroReiniciarNavegador as e:
-                    print(f"\n🔄 ERRO CRÍTICO DETECTADO: {e}")
-                    print("🔄 Fechando navegador e reiniciando do aluno atual...")
-                    tentativa_navegador += 1
-
-                    if tentativa_navegador >= rem.MAX_TENTATIVAS_NAVEGADOR:
-                        print(f"❌ Máximo de tentativas ({rem.MAX_TENTATIVAS_NAVEGADOR}) atingido. Pulando: {aluno['Nome']}")
-                        resumo["falhas"].append({
-                            "cgm": aluno["cgm"], "nome": aluno["Nome"], "turma": secao,
-                            "erro": f"Erro crítico após {rem.MAX_TENTATIVAS_NAVEGADOR} tentativas: {e}",
-                        })
-                        indice += 1
-                        tentativa_navegador = 0
-
-                    await page.close()
-                    page = None
-                    await asyncio.sleep(5)
-                    break  # reinicia a sessão a partir do aluno atual
-
-            if indice >= len(alunos):
-                return True
-
-        except Exception as e:
-            print(f"❌ Erro inesperado ao processar a seção: {e}")
-            falhas_sessao += 1
-            if falhas_sessao >= rem.MAX_FALHAS_SESSAO:
-                print(f"❌ {falhas_sessao} falhas seguidas. Abandonando '{secao}'.")
-                return False
-            await asyncio.sleep(5)
-
-        finally:
-            if page:
-                try:
-                    await page.close()
-                except Exception:
-                    pass
-
-    return True
+    return await rem.processar_alunos_da_secao(
+        sessao, secao, alunos, _gerar_chave_do_aluno, _concluir, _desistir, ja_na_secao=ja_na_secao
+    )
 
 
 async def gerar_chaves_via_login(
@@ -272,16 +213,15 @@ async def gerar_chaves_via_login(
 
     async with async_playwright() as p:
         browser = await getattr(p, navegador).launch(headless=headless)
+        sessao = rem.SessaoSere(browser, login, senha)  # UMA página logada no SERE para a execução inteira
 
         try:
             for turma_nome in turmas_alvo:
                 print(f"\n{'=' * 70}\n📚 PROCESSANDO TURMA (base): {turma_nome}\n{'=' * 70}")
 
-                page_temp = await rem._abrir_por_turmas(browser, login, senha)
-                if page_temp is None:
+                if not await sessao.ir_para_lista_de_turmas():
                     continue
-                secoes = await rem.listar_secao_turmas(page_temp, turma_nome)
-                await page_temp.close()
+                secoes = await rem.listar_secao_turmas(sessao.page, turma_nome)
 
                 if not secoes:
                     print(f"\n⚠️ Nenhuma seção encontrada para '{turma_nome}'")
@@ -290,15 +230,12 @@ async def gerar_chaves_via_login(
                 for secao in secoes:
                     print(f"\n--- Iniciando seção: {secao} ---")
 
-                    page_secao = await rem._abrir_por_turmas(browser, login, senha)
-                    if page_secao is None:
+                    if not await sessao.ir_para_lista_de_turmas():
                         continue
-                    if not await rem.selecionar_turma(page_secao, secao):
+                    if not await rem.selecionar_turma(sessao.page, secao):
                         print(f"\n⚠️ Seção '{secao}' não encontrada ao tentar selecionar")
-                        await page_secao.close()
                         continue
-                    alunos = await rem.obter_alunos_matriculados(page_secao)
-                    await page_secao.close()
+                    alunos = await rem.obter_alunos_matriculados(sessao.page)
 
                     if not alunos:
                         print(f"\n⚠️ Nenhum aluno matriculado em '{secao}'")
@@ -316,9 +253,11 @@ async def gerar_chaves_via_login(
                         print(f"✅ Todos os alunos de '{secao}' já têm chave (ou já foram rematriculados)!")
                         continue
 
-                    await _processar_secao(browser, secao, pendentes, chaves, login, senha, resumo)
+                    # a página já está na lista de alunos da seção: continua dali, sem logar de novo
+                    await _processar_secao(sessao, secao, pendentes, chaves, resumo, ja_na_secao=True)
 
         finally:
+            await sessao.fechar()
             await browser.close()
 
     salvar_chaves(chaves)

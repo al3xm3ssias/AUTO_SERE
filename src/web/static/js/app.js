@@ -3177,7 +3177,7 @@ async function abrirMensagemPrematricula(id) {
       <div class="field"><label>WhatsApp do responsável</label>
         <input type="text" id="mdl-msg-numero" value="${escaparHtml(modelo.telefone)}" autocomplete="off"></div>
       <div class="field"><label>Mensagem</label>
-        <textarea id="mdl-msg-texto" rows="6" maxlength="1000"
+        <textarea id="mdl-msg-texto" rows="16" maxlength="4000"
           style="width:100%;background:var(--input-bg);color:var(--txt);border:1px solid var(--border);border-radius:8px;padding:10px;font:inherit;resize:vertical">${escaparHtml(modelo.texto)}</textarea></div>
       ${real ? `<label class="checklist-item" style="margin-bottom:10px"><input type="checkbox" id="mdl-msg-confirmo"> Confirmo o envio de uma mensagem de verdade</label>`
              : `<p style="color:var(--txt3);font-size:.78rem;margin-bottom:10px">Modo simulado: nada será enviado de verdade.</p>`}
