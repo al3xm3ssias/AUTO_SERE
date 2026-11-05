@@ -238,6 +238,33 @@ function initSidebar() {
     toggleAuto.classList.toggle("open");
     subAuto.classList.toggle("open");
   });
+
+  // Subgrupos dentro de "Automações" (Transferidos, Pareceres, Documentos...)
+  document.querySelectorAll(".nav-subgroup-toggle").forEach((t) => {
+    t.addEventListener("click", () => alternarSubgrupo(t.dataset.subgroup));
+  });
+}
+
+/** Abre/fecha um subgrupo de automações. Ao abrir, fecha os outros
+ * para o menu não crescer demais. */
+function alternarSubgrupo(chave, abrir) {
+  const toggle = document.querySelector(`.nav-subgroup-toggle[data-subgroup="${chave}"]`);
+  const itens = document.querySelector(`.nav-subgroup-items[data-subgroup-items="${chave}"]`);
+  if (!toggle || !itens) return;
+  const vaiAbrir = abrir === undefined ? !itens.classList.contains("open") : abrir;
+  if (vaiAbrir) {
+    document.querySelectorAll(".nav-subgroup-toggle.open").forEach((t) => t.classList.remove("open"));
+    document.querySelectorAll(".nav-subgroup-items.open").forEach((i) => i.classList.remove("open"));
+  }
+  toggle.classList.toggle("open", vaiAbrir);
+  itens.classList.toggle("open", vaiAbrir);
+}
+
+/** Abre o subgrupo que contém a automação indicada (data-auto). */
+function abrirSubgrupoDaAutomacao(chaveAuto) {
+  const item = document.querySelector(`.nav-subitem[data-auto="${chaveAuto}"]`);
+  const grupo = item?.closest(".nav-subgroup-items");
+  if (grupo) alternarSubgrupo(grupo.dataset.subgroupItems, true);
 }
 
 /* ---------- Navegação entre telas ---------- */
@@ -1797,6 +1824,7 @@ function abrirAutomacao(chave, nome) {
   document.getElementById("topbar-title").textContent = nome || chave;
   renderizarCamposAutomacao(chave);
   abrirAcordeonAutomacoes();
+  abrirSubgrupoDaAutomacao(chave);
   ligarControlesExecucao();
   _execResetar();
   carregarFlagsAutomacao(chave);

@@ -282,13 +282,22 @@ body::before{
   max-height:0;overflow:hidden;
   transition:max-height .25s ease;
 }
-.nav-subitems.open{max-height:2400px}   /* ~27 itens de automação; com 1200px o fim da lista seria cortado */
+.nav-subitems.open{max-height:4000px}   /* grupo "Automações" com os subgrupos dentro */
 .nav-subitem{padding-left:34px}
 .nav-subitem .nav-item-icon{width:17px;height:17px;font-size:.8rem}
 
+/* Subgrupos dentro de "Automações" */
+.nav-subgroup-toggle{padding:8px 18px 8px 30px;font-size:.8rem}
+.nav-subgroup-toggle .nav-item-icon{width:17px;height:17px;font-size:.8rem}
+.nav-subgroup-toggle.open{color:var(--sidebar-txt)}
+.nav-subgroup-items.open{max-height:900px}
+.nav-subitem2{padding-left:52px;font-size:.8rem}
+
 .sidebar.collapsed .nav-group-toggle-label .nav-item-label,
 .sidebar.collapsed .nav-group-chev{opacity:0;width:0;min-width:0;overflow:hidden}
-.sidebar.collapsed .nav-subitems{max-height:0 !important}
+.sidebar.collapsed .nav-subitems,
+.sidebar.collapsed .nav-subgroup-items{max-height:0 !important}
+.sidebar.collapsed .nav-subgroup-toggle{display:none}
 .sidebar.collapsed .nav-group-toggle{justify-content:center;padding:10px;border-left:none}
 .sidebar.collapsed .nav-group-toggle-label{flex:none;gap:0}
 
