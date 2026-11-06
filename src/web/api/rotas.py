@@ -1266,6 +1266,7 @@ AUTOMACOES_DISPONIVEIS = [
     {"chave": "cruzamento", "nome": "Cruzamento de docs", "descricao": "Cruza informações e valida documentações (SERE x pasta local)."},
     {"chave": "cep", "nome": "CEP", "descricao": "Consulta, valida e completa endereços via CEP; calcula distância aluno-escola."},
     {"chave": "sus", "nome": "Encaminhamentos do SUS", "descricao": "Consulta no SISREG (pelo CPF) os encaminhamentos dos alunos escolhidos; os demais alunos mantêm o resultado anterior."},
+    {"chave": "sheets", "nome": "Planilha no Google Sheets", "descricao": "Cria ou atualiza no Google Sheets a planilha das turmas (uma aba por turma), a partir do turmas.json: grava só o que mudou. Também confere o acesso à planilha."},
     {"chave": "transferidos_fila", "nome": "Fila de transferidos", "descricao": "Lista, a partir do turmas.json, todos os transferidos e marca quem entra no processo pela data de corte (fila_transferidos.json). É refeita sozinha cada vez que as turmas são coletadas."},
     {"chave": "transferidos_gerar", "nome": "Gerar guia e histórico", "descricao": "Emite, assina e baixa do SERE o histórico escolar e a guia de transferência dos alunos da fila, salvando em TRANSFERENCIAS."},
     {"chave": "transferidos", "nome": "Enviar transferidos ao SERE", "descricao": "Envia à pasta virtual do SERE a guia, o histórico e o parecer dos transferidos que estão nas pastas de TRANSFERENCIAS."},
@@ -2501,6 +2502,12 @@ def _whatsapp_conectado() -> bool:
     return whatsapp_conectado_de_verdade()
 
 
+def _google_api_configurada() -> bool:
+    """Há arquivo de credenciais do Google (GOOGLE_API_CREDENTIALS ou credenciais/google_credentials.json)."""
+    from src.comum import google_auth
+    return google_auth.credenciais_configuradas()
+
+
 @api_bp.route("/wizard/status")
 def wizard_status():
     """
@@ -2520,7 +2527,7 @@ def wizard_status():
         "gerar_pastas": _config.pasta_digitalizacao_configurada(),
         "funcionarios": funcionarios_ok,
         "alunos": alunos_ok,
-        "google_api": bool(os.getenv("GOOGLE_API_CREDENTIALS")),
+        "google_api": _google_api_configurada(),
         "whatsapp": _whatsapp_conectado(),
     })
 
@@ -2598,10 +2605,16 @@ def wizard_executar_passo(passo):
             return jsonify({"status": "ok" if r["ok"] else "erro", "mensagem": r["mensagem"]}), (200 if r["ok"] else 400)
 
         elif passo == "google_api":
-            return jsonify({
-                "status": "erro",
-                "mensagem": f"Passo '{passo}' ainda não foi implementado no código-fonte.",
-            }), 501
+            # Autoriza o acesso ao Google (abre o navegador na 1ª vez, se for OAuth). O arquivo de credenciais é
+            # baixado do Google Cloud e fica em credenciais/ (docs/GOOGLE_SHEETS.md); não passa pela tela.
+            from src.comum import google_auth as _google_auth
+            if not _google_auth.credenciais_configuradas():
+                mensagem = (f"Arquivo de credenciais do Google não encontrado ({_google_auth.caminho_credenciais().name}). "
+                            "Baixe-o no Google Cloud e salve em credenciais/ (veja docs/GOOGLE_SHEETS.md).")
+                _evento_wizard("google_api", mensagem, "aviso")
+                return jsonify({"status": "erro", "mensagem": mensagem}), 400
+            from src.comum.google_sheets import testar_autenticacao
+            _rodar_funcao_sincrona_em_thread("wizard_google_api", testar_autenticacao)
 
         else:
             return jsonify({"erro": f"Passo '{passo}' não reconhecido"}), 404

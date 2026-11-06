@@ -21,6 +21,9 @@ rapidfuzz>=3.0.0
 gspread>=6.0.0
 google-auth>=2.23.0
 google-auth-oauthlib>=1.1.0
+# Google Sheets (src/comum/google_sheets.py e google_auth.py): biblioteca oficial da API + transporte HTTP
+google-api-python-client>=2.120.0
+google-auth-httplib2>=0.2.0
 
 # (removidos em 2026-10: streamlit, pyautogui, pytesseract - nenhum arquivo do projeto importa)
 

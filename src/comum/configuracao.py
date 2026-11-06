@@ -62,6 +62,7 @@ _PADRAO: dict[str, Any] = {
     "flags_automacoes": {},
     "data_corte_transferidos": None,      # "dd/mm/aaaa"; None = 22/06 do ano letivo (ver data_corte_transferidos)
     "observacao_historico": None,         # último texto usado na etapa "Alterar" do histórico de transferidos
+    "google_sheets": None,                # {"planilha_id": "...", "mapa_abas": {turma: aba}} (ver google_sheets_config)
 }
 
 
@@ -368,6 +369,31 @@ def observacao_historico() -> str:
 def definir_observacao_historico(texto) -> None:
     configuracao = carregar_configuracao()
     configuracao["observacao_historico"] = str(texto or "").strip() or None
+    _salvar_configuracao(configuracao)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Google Sheets (planilha das turmas)
+# ─────────────────────────────────────────────────────────────────────────
+# Só o que NÃO é segredo fica aqui: o ID da última planilha usada e, se o usuário quiser, um mapa
+# {nome da turma no turmas.json: nome da aba na planilha} que complementa/substitui o padrão da escola
+# (src/automacao/sincroniza_sheets.py). Credenciais e token ficam em credenciais/ (ver src/comum/google_auth.py).
+
+def google_sheets_config() -> dict:
+    bruto = carregar_configuracao().get("google_sheets")
+    return dict(bruto) if isinstance(bruto, dict) else {}
+
+
+def planilha_google_id() -> str:
+    """ID da planilha usada por último (já vem preenchida na tela); vazio = nenhuma."""
+    return str(google_sheets_config().get("planilha_id") or "")
+
+
+def definir_planilha_google(planilha_id: str) -> None:
+    configuracao = carregar_configuracao()
+    atual = dict(configuracao.get("google_sheets") or {})
+    atual["planilha_id"] = str(planilha_id or "").strip()
+    configuracao["google_sheets"] = atual
     _salvar_configuracao(configuracao)
 
 

@@ -13,6 +13,9 @@ runtime/
 # ==== Credenciais e segredos (NUNCA versionar) ====
 credenciais/credenciais.py
 credenciais/*.env
+# Google (Sheets): chave OAuth/conta de serviço e token de acesso (equivalem a senha)
+credenciais/google_*.json
+credenciais/*token*.json
 # Perfil do navegador do WhatsApp (contém a SESSÃO logada: equivale a senha)
 credenciais/whatsapp_sessao/
 .env

@@ -567,6 +567,73 @@ def _plano_termos(o, p, tj, ctx) -> Plano:
     return Plano("sync", gerar_termo, {"tema": str(p["tema"]).strip(), "nome_escola": escola.nome() or None})
 
 
+# ── Google Sheets: criar / atualizar a planilha das turmas ────────────────────────────────────────────
+
+_OPERACOES_SHEETS = [
+    {"valor": "atualizar", "texto": "Atualizar uma planilha existente",
+     "ajuda": "Compara o turmas.json com cada aba da planilha (pelo CGM) e grava SÓ as células que mudaram; alunos novos entram "
+              "no fim da aba. CPF, SUS, Idade e Escola de origem existentes nunca são tocados."},
+    {"valor": "criar", "texto": "Criar uma planilha nova",
+     "ajuda": "Cria a planilha (uma aba por turma, com cabeçalhos), preenche com os alunos e guarda o link para as próximas vezes."},
+    {"valor": "verificar", "texto": "Só verificar o acesso",
+     "ajuda": "Confere se a planilha existe, se a conta tem permissão e quais abas ela tem. Não grava nada."},
+]
+
+
+def _extras_sheets() -> list[dict]:
+    from src.comum.configuracao import planilha_google_id
+    return [
+        {"tipo": "select", "id": "campo-operacao-sheets", "nome": "operacao", "label": "Operação", "semVazio": True,
+         "padrao": "atualizar", "opcoes": _OPERACOES_SHEETS},
+        {"tipo": "texto", "id": "campo-planilha-sheets", "nome": "planilha", "label": "Link ou ID da planilha",
+         "padrao": planilha_google_id(), "placeholder": "https://docs.google.com/spreadsheets/d/…",
+         "visivelSe": {"campo": "campo-operacao-sheets", "valor": "atualizar|verificar"}},
+        {"tipo": "texto", "id": "campo-nome-sheets", "nome": "nome_planilha", "label": "Nome da nova planilha",
+         "placeholder": "Turmas 2026", "visivelSe": {"campo": "campo-operacao-sheets", "valor": "criar"}},
+        _extra_simulacao(True, "Lê a planilha e mostra o que seria adicionado e atualizado, sem gravar (nem criar) nada. "
+                               "Não vale para \"Só verificar\". Desmarque para gravar de verdade."),
+    ]
+
+
+def _validar_sheets(p: dict) -> None:
+    from src.automacao.sincroniza_sheets import OPERACOES
+    from src.comum import configuracao, google_sheets as gs
+    operacao = str(p.get("operacao") or "atualizar")
+    if operacao not in OPERACOES:
+        raise ValueError(f"Operação '{operacao}' desconhecida: use {', '.join(OPERACOES)}.")
+    if operacao == "criar":
+        if not str(p.get("nome_planilha") or "").strip():
+            raise ValueError("Informe o nome da nova planilha.")
+        return
+    alvo = str(p.get("planilha") or "").strip() or configuracao.planilha_google_id()
+    if not alvo:
+        raise ValueError("Informe o link ou o ID da planilha.")
+    gs.extrair_id_planilha(alvo)                                          # SheetsValidacaoErro (é ValueError) com a explicação
+
+
+def _previa_sheets(p: dict) -> str:
+    from src.automacao.sincroniza_sheets import descrever_sincronizacao
+    from src.comum import paths
+    from src.comum.arquivos_json import carregar_json
+    from src.comum.opcoes_execucao import resolver_turmas
+    turmas = carregar_json(paths.dados_ano_atual() / "turmas.json", {})
+    if not turmas:
+        raise ValueError("Ainda não existe turmas.json: execute primeiro a automação 'Turmas'.")
+    alvo = resolver_turmas(p.get("turmas") or [], turmas.keys())
+    return descrever_sincronizacao(turmas, alvo)
+
+
+def _plano_sheets(o, p, tj, ctx) -> Plano:
+    from src.automacao.sincroniza_sheets import descrever_sincronizacao, executar_planilha_google
+    _validar_sheets(p)
+    operacao = str(p.get("operacao") or "atualizar")
+    alvo = list(o.turmas) or list(tj)
+    return Plano("sync", executar_planilha_google, {
+        "operacao": operacao, "planilha": str(p.get("planilha") or "").strip(), "nome": str(p.get("nome_planilha") or "").strip(),
+        "turmas": tj, "turmas_selecionadas": alvo, "simulacao": bool(p.get("simulacao"))},
+        f"[OPÇÕES] Google Sheets — {operacao}: {descrever_sincronizacao(tj, alvo)}")
+
+
 def _plano_sync(modulo: str, funcao: str) -> Callable:
     """Plano de uma automação que só roda uma função sem parâmetros."""
     def planejar(o, p, tj, ctx) -> Plano:
@@ -881,6 +948,10 @@ registrar(Script("alunos", (), _plano_alunos, extras=_extras_alunos))
 registrar(Script("funcionarios", (), _plano_funcionarios, extras=_extras_funcionarios))
 registrar(Script("vinculos", (), _plano_vinculos, validar_extras=_validar_vinculos, extras=_extras_vinculos))
 registrar(Script("sus", (_T, _S), _plano_sus))
+registrar(Script("sheets", (_T,), _plano_sheets, confirmar=True, validar_extras=_validar_sheets, extras=_extras_sheets,
+                 previa=_previa_sheets,
+                 aviso_confirmacao="Cria ou altera uma planilha do Google Sheets (só as células que mudaram; nada é apagado nem "
+                                   "regravado por inteiro). Com \"Simulação\" marcada nada é gravado."))
 registrar(Script("cep", (), _plano_cep, validar_extras=_ler_raio,
                  extras=lambda: [{"tipo": "texto", "id": "campo-raio", "nome": "raio_km", "label": "Raio de atendimento (km)",
                                   "placeholder": "2 (padrão do sistema)"}]))
