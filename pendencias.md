@@ -2,7 +2,7 @@
 
 Lista curta do que ainda falta. O detalhe e o histórico estão em [`PROXIMAS_ETAPAS.md`](PROXIMAS_ETAPAS.md) (os números, como 3b e 11q, são os mesmos) e os bugs em [`BUGS_CONHECIDOS.md`](BUGS_CONHECIDOS.md).
 
-Atualizado em 2026-11-02. Legenda: `[ ]` pendente · `[!]` depende de ambiente real ou de decisão · `[x]` decidido/feito.
+Atualizado em 2026-11-07 (itens de 07/11 só nos pareceres; o resto segue como em 02/11). Legenda: `[ ]` pendente · `[!]` depende de ambiente real ou de decisão · `[x]` decidido/feito.
 
 ---
 
@@ -71,8 +71,12 @@ Uso real, definido em 2026-11-02: (1) escrever **para a escola de origem**, na h
 - [ ] **Tabela "Transferidos" não mostra o total da escola**: ela lê só `transferidos.json`, que só tem quem entra no processo (transferido a partir da data de corte e que não voltou). Quem saiu antes do corte e quem voltou está em `fila_transferidos.json`, que a tabela não usa. Ideia: juntar as duas e mostrar uma coluna "Situação no processo"
 - [ ] **Mapeamento de turmas do QR (só QR antigo)**: quando a turma escrita no QR não bate com a do `turmas.json`, é preciso editar `mapeamento_turmas_qr` em `config/config_usuario.json` à mão; falta uma tela em Configurações. Com o QR novo (CGM) não é necessário
 
-### Pareceres digitalizados (Fundamental) — feito em 2026-11-02
-- [ ] Quando o primeiro parecer de um ano novo (ex.: 2027) for enviado ao SERE, anotar o idtipo que o sistema descobriu e acrescentá-lo em `SERE_SLOTS` (`src/comum/sere_normalizacao.py`) para não depender mais da busca. O sistema já funciona sem isso: o nome é `Parecer Descritivo <ano>-1` para qualquer ano
+### Pareceres digitalizados (Fundamental)
+- [x] **idtipo de ano novo** (2026-11-07): o sistema acha o item `Parecer Descritivo <ano>-1` no SERE na 1ª vez e guarda o idtipo em `dados/sere_slots_descobertos.json`; não precisa mais editar `SERE_SLOTS`. O catálogo do sistema tem prioridade sobre o guardado
+- [x] **QR com o ano letivo e criptografado** (2026-11-07): `AUTOSERE|PF2|…` leva ano, chamada, nome, turma e CGM (AES-GCM, chave em `credenciais/chave_qr.key`). O ano do QR é conferido com o ano letivo em uso
+- [x] **Parecer para imprimir em PDF** (2026-11-07): `parecer_fund` gera PDF em `PARECERES/_PARA_IMPRIMIR/<turma>/` (LibreOffice); Word e "ambos" continuam como opção
+- [!] **Validar no computador da escola**: LibreOffice no Windows gerando o PDF com o modelo real; imprimir, digitalizar e ler o QR criptografado de verdade (o QR tem mais módulos: se a leitura falhar com o scan, aumentar `LADO_QR_SEGURO_PX` em `parecer_fund.py`)
+- [!] **Guardar cópia de `credenciais/chave_qr.key`** (sem ela os QR já impressos não abrem). Decidir onde fica o backup da chave
 
 ---
 

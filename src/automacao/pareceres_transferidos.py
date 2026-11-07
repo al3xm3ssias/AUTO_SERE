@@ -5,7 +5,7 @@ Une o antigo processa-parecer.py (ler o QR e identificar o aluno) e o comprimir_
 ao limite do SERE) com o envio ao SERE (sere_2026.modo_transferidos):
 
     TRANSFERENCIAS/PROCESSAMENTO DE PARECERES/*.pdf|jpg|png…   (digitalizados, com o QR do parecer)
-        1. lê o QR e acha o aluno no turmas.json (QR novo AUTOSERE|PF|ano|CGM, do parecer_fund, ou o antigo com nome + turma)
+        1. lê o QR e acha o aluno no turmas.json (QR atual criptografado AUTOSERE|PF2|…, o de texto aberto AUTOSERE|PF|ano|CGM, ou o antigo com nome + turma)
         2. copia para  TRANSFERENCIAS/PARECERES/<turma>/NN-NOME.ext
         3. se passa do limite do SERE, comprime (o original fica em ORIGINAIS_ANTES_DA_COMPRESSAO)
         4. marca parecer.digitalizado_em em transferidos.json
@@ -360,14 +360,20 @@ def identificar_por_cgm(turmas_data: dict, cgm: str, preferir_transferido: bool 
 def identificar_pelo_texto_do_qr(texto: str, turmas_data: dict, ano: str,
                                  preferir_transferido: bool = True) -> tuple[Optional[Identificacao], str]:
     """
-    Do texto lido no QR até o aluno. Aceita os dois formatos que existem:
-      * novo, gerado pelo parecer_fund:  AUTOSERE|PF|<ano>|<CGM>   (confere o ano e acha o aluno pelo CGM)
-      * antigo, do processa-parecer.py:  {"nome": "...", "turma": "..."}
+    Do texto lido no QR até o aluno. Aceita os formatos que existem:
+      * atual, gerado pelo parecer_fund:  AUTOSERE|PF2|<criptografado> (ano, chamada, nome, turma e CGM; confere o ano
+        e acha o aluno pelo CGM; precisa da chave em credenciais/chave_qr.key)
+      * anterior, em texto aberto:        AUTOSERE|PF|<ano>|<CGM>
+      * antigo, do processa-parecer.py:   {"nome": "...", "turma": "..."}
     Devolve (Identificacao, "") ou (None, motivo).
     """
     from src.automacao import parecer_fund as pf
+    from src.comum.qr_seguro import QrIlegivel
 
-    payload = pf.ler_payload_qr(texto)
+    try:
+        payload = pf.ler_payload_qr(texto)
+    except QrIlegivel as exc:
+        return None, str(exc)
     if payload:
         if payload["ano"] != str(ano):
             return None, f"parecer de {payload['ano']}, mas o ano letivo em uso é {ano}"

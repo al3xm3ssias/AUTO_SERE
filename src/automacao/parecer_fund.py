@@ -25,13 +25,19 @@ Marcadores que o modelo pode ter (substituídos mesmo que o Word tenha quebrado 
     $CGM      CGM do aluno           $CHAMADA  número da chamada
 O modelo precisa ter, no mínimo, $ALUNO (sem ele todos os pareceres sairiam iguais).
 
-QR code no FIM do arquivo (150 x 150 px) — para um script futuro decodificá-lo e enviar o parecer às
-escolas pelo SERE e por e-mail. O texto do QR é:
+QR code no FIM do arquivo, para pareceres_digitalizados/pareceres_transferidos lerem depois de impresso, preenchido e
+digitalizado. O QR leva ano letivo, nº da chamada, nome, turma e CGM, CRIPTOGRAFADOS (a câmera do celular mostra só
+um texto embaralhado):
 
-    AUTOSERE|PF|<ano>|<CGM>          ex.: AUTOSERE|PF|2026|1234567890
+    AUTOSERE|PF2|<texto criptografado>        (ver src/comum/qr_seguro.py; a chave fica em credenciais/chave_qr.key)
 
-(PF = parecer do fundamental). Use montar_payload_qr()/ler_payload_qr() para gerar/ler esse texto: o script
-futuro só precisa dessas duas funções + um leitor de QR, e tem o CGM para achar aluno, turma e contatos.
+Os pareceres antigos, com QR em texto aberto  AUTOSERE|PF|<ano>|<CGM>, continuam sendo lidos (ler_payload_qr lê os dois).
+
+Formato de saída (opção `formato`; padrão em config_usuario.json → "parecer_fund_formato", senão "pdf"):
+    pdf     só o PDF, pronto para imprimir, em <base>/<ano>/PARECERES/_PARA_IMPRIMIR/<turma>/  (converte com o LibreOffice;
+            fica fora da pasta da turma para não se misturar com o parecer digitalizado, que ganha o mesmo nome lá)
+    docx    só o Word, na pasta da turma (como antes)
+    ambos   os dois
 
 Segurança do trabalho já feito: um parecer que JÁ EXISTE (o professor pode já ter preenchido) NÃO é
 sobrescrito, a não ser que se peça "substituir".
@@ -42,6 +48,7 @@ import io
 import json
 import os
 import re
+import tempfile
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -51,7 +58,7 @@ from docx import Document
 from docx.oxml.ns import qn
 from docx.shared import Emu, Pt
 
-from src.comum import escola, paths
+from src.comum import conversao_pdf, escola, paths, qr_seguro
 from src.comum.execucao_gui import verificar_cancelamento
 from src.comum.logger import get_logger
 
@@ -59,9 +66,14 @@ log = get_logger(__file__)
 
 NOME_CONTROLE = "controle_modelos.json"
 LADO_QR_PX = 150
+LADO_QR_SEGURO_PX = 200                              # o QR criptografado tem mais dados: mais módulos, precisa de mais espaço
 PREFIXO_QR = "AUTOSERE"
 TIPO_QR = "PF"
 LIMITE_MODELO_MB = 15
+PASTA_PARA_IMPRIMIR = "_PARA_IMPRIMIR"
+FORMATOS = {"pdf": "PDF (pronto para imprimir)", "docx": "Word (.docx)", "ambos": "PDF e Word"}
+FORMATO_PADRAO = "pdf"
+LOTE_PDF = 25                                        # quantos .docx vão por vez ao LibreOffice (abrir leva alguns segundos)
 _EMU_POR_PX = 9525                                  # 96 dpi: 1 px = 9525 EMU
 
 _RE_TOKEN = re.compile(r"\$(ESCOLA|ALUNO|TURMA|ANO|CGM|CHAMADA)(?![A-Za-z0-9_])")
@@ -84,8 +96,31 @@ def pasta_pareceres(ano: Optional[str] = None) -> Path:
     return pasta_base() / str(ano or paths.ano_atual()) / "PARECERES"
 
 
+def pasta_para_imprimir(ano: Optional[str] = None) -> Path:
+    return pasta_pareceres(ano) / PASTA_PARA_IMPRIMIR
+
+
 def arquivo_controle() -> Path:
     return pasta_modelos() / NOME_CONTROLE
+
+
+def formato_padrao() -> str:
+    """O formato configurado em config_usuario.json (\"parecer_fund_formato\"); sem configuração (ou inválido), PDF."""
+    try:
+        from src.comum.configuracao import carregar_configuracao
+        valor = str(carregar_configuracao().get("parecer_fund_formato") or "").strip().lower()
+    except Exception:                                    # noqa: BLE001 — configuração ilegível não impede de gerar
+        valor = ""
+    return valor if valor in FORMATOS else FORMATO_PADRAO
+
+
+def normalizar_formato(formato: Optional[str]) -> str:
+    valor = str(formato or "").strip().lower()
+    if not valor:
+        return formato_padrao()
+    if valor not in FORMATOS:
+        raise ValueError(f"Formato de parecer inválido: '{formato}'. Use: {', '.join(FORMATOS)}.")
+    return valor
 
 
 def _slug(texto) -> str:
@@ -194,21 +229,40 @@ def montar_payload_qr(ano, cgm) -> str:
     return f"{PREFIXO_QR}|{TIPO_QR}|{ano}|{cgm}"
 
 
+def montar_payload_qr_seguro(ano, cgm, chamada=None, nome="", turma="") -> str:
+    """Texto CRIPTOGRAFADO do QR: ano letivo, nº da chamada, nome, turma e CGM (AUTOSERE|PF2|…). Cria a chave na 1ª vez."""
+    return qr_seguro.montar(ano, chamada, nome, turma, cgm)
+
+
 def ler_payload_qr(texto: str) -> Optional[dict]:
-    """Inverso de montar_payload_qr: {"ano", "cgm"}, ou None se o texto não é de um parecer do Fundamental."""
+    """
+    Lê o texto de um QR de parecer do Fundamental, nos dois formatos:
+      * criptografado (AUTOSERE|PF2|…): {"ano","cgm","chamada","nome","turma"}; se não abre (sem a chave, QR alterado ou
+        lido pela metade) levanta qr_seguro.QrIlegivel com o motivo;
+      * antigo, em texto aberto (AUTOSERE|PF|ano|CGM): {"ano","cgm"}.
+    None se o texto não é de um parecer do Fundamental.
+    """
+    novo = qr_seguro.ler(texto)
+    if novo is not None:
+        return novo
     m = re.fullmatch(rf"{PREFIXO_QR}\|{TIPO_QR}\|(\d{{4}})\|(\w+)", str(texto or "").strip())
     return {"ano": m.group(1), "cgm": m.group(2)} if m else None
 
 
-def gerar_qr_png(payload: str, lado: int = LADO_QR_PX) -> bytes:
-    """PNG quadrado de `lado` x `lado` px (150), preto no branco, correção de erro M."""
+def gerar_qr_png(payload: str, lado: int = LADO_QR_PX, redimensionar: bool = True) -> bytes:
+    """
+    PNG quadrado de `lado` x `lado` px (150), preto no branco, correção de erro M. Com `redimensionar=False` devolve o
+    PNG no tamanho natural (10 px por módulo, bordas perfeitas) e quem usa a imagem define o tamanho na página: é o que
+    o QR criptografado faz, porque com muitos módulos um redimensionamento não inteiro deixaria os quadradinhos desiguais.
+    """
     import qrcode
     from PIL import Image
-    qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=1)
+    qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=2 if not redimensionar else 1)
     qr.add_data(payload)
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white").convert("L")
-    img = img.resize((lado, lado), Image.NEAREST)               # bordas nítidas: melhor para leitor de QR
+    if redimensionar:
+        img = img.resize((lado, lado), Image.NEAREST)           # bordas nítidas: melhor para leitor de QR
     saida = io.BytesIO()
     img.save(saida, format="PNG")
     return saida.getvalue()
@@ -291,8 +345,8 @@ def _remover_paragrafos_vazios_do_fim(doc) -> None:
         corpo.remove(ultimo)
 
 
-def preencher_modelo(modelo: bytes, valores: dict, qr_png: Optional[bytes]) -> bytes:
-    """Devolve o .docx preenchido (marcadores trocados, QR de 150 px no fim)."""
+def preencher_modelo(modelo: bytes, valores: dict, qr_png: Optional[bytes], lado_px: int = LADO_QR_PX) -> bytes:
+    """Devolve o .docx preenchido (marcadores trocados, QR de `lado_px` px — 150 por padrão — no fim)."""
     doc = Document(io.BytesIO(modelo))
     raizes = [doc.element.body]
     vistos = set()
@@ -307,7 +361,7 @@ def preencher_modelo(modelo: bytes, valores: dict, qr_png: Optional[bytes]) -> b
 
     if qr_png:
         _remover_paragrafos_vazios_do_fim(doc)
-        lado = Emu(LADO_QR_PX * _EMU_POR_PX)
+        lado = Emu(lado_px * _EMU_POR_PX)
         doc.add_picture(io.BytesIO(qr_png), width=lado, height=lado)
         doc.paragraphs[-1].paragraph_format.space_before = Pt(10)      # um respiro entre a última linha e o QR
     saida = io.BytesIO()
@@ -366,46 +420,112 @@ def nome_da_escola_para_o_modelo() -> str:
     return _nome_curto_escola(nome) or nome.upper()
 
 
-def gerar_pareceres_fundamental(alunos: list[dict], substituir: bool = False, ano: Optional[str] = None) -> dict:
+def _converter_lote(fila: list, saida_tmp: Path, falhas: list, log=print) -> int:
     """
-    Gera um parecer (.docx) por aluno em <base>/<ano>/PARECERES/<turma>/, usando o modelo ligado à turma.
-    `alunos`: [{"cgm","nome","turma","n_chamada"}]. Parecer que já existe é mantido, a menos que `substituir`.
-    Devolve {"total","gerados","ja_existiam","falhas":[{"cgm","nome","motivo"}],"pasta"}.
+    Converte para PDF os .docx da `fila` [(posição, aluno, docx temporário, destino do PDF)] e grava cada PDF no destino.
+    Quem não saiu vira falha. Devolve quantos PDFs foram gravados.
+    """
+    if not fila:
+        return 0
+    try:
+        resultado = conversao_pdf.docx_para_pdf([f[2] for f in fila], saida_tmp)
+    except conversao_pdf.ConversaoPdfErro as exc:
+        resultado = {}
+        motivo_geral = str(exc)[:200]
+    else:
+        motivo_geral = "o LibreOffice não gerou o PDF"
+    gravados = 0
+    for _, a, docx_tmp, destino in fila:
+        pdf = resultado.get(docx_tmp)
+        if pdf is None:
+            falhas.append({"cgm": str(a["cgm"]), "nome": a["nome"], "motivo": motivo_geral})
+            log(f"[ERRO] {a['nome']} (CGM {a['cgm']}): {motivo_geral}")
+            continue
+        _gravar_atomico(destino, pdf.read_bytes())
+        gravados += 1
+    fila.clear()
+    return gravados
+
+
+def gerar_pareceres_fundamental(alunos: list[dict], substituir: bool = False, ano: Optional[str] = None,
+                                formato: Optional[str] = None) -> dict:
+    """
+    Gera o parecer de cada aluno usando o modelo ligado à turma. `formato`: "pdf" (padrão; vai para
+    <base>/<ano>/PARECERES/_PARA_IMPRIMIR/<turma>/), "docx" (<base>/<ano>/PARECERES/<turma>/) ou "ambos".
+    `alunos`: [{"cgm","nome","turma","n_chamada"}]. Parecer que já existe é mantido, a menos que `substituir`
+    (cada formato é conferido à parte). O QR leva ano, chamada, nome, turma e CGM criptografados.
+    Devolve {"total","gerados","ja_existiam","falhas":[{"cgm","nome","motivo"}],"pasta","formato"}.
     """
     if not alunos:
         raise ValueError("Nenhum aluno para gerar o parecer.")
+    formato = normalizar_formato(formato)
+    quer_docx, quer_pdf = formato in ("docx", "ambos"), formato in ("pdf", "ambos")
+    if quer_pdf:
+        try:
+            conversao_pdf.exigir_soffice()
+        except conversao_pdf.ConversaoPdfErro as exc:
+            raise ValueError(str(exc)) from exc
     ano = str(ano or paths.ano_atual())
     nome_escola = nome_da_escola_para_o_modelo()
     controle = carregar_controle()
     raiz = pasta_pareceres(ano)
-    print(f"Pareceres serão salvos em: {raiz}")
+    raiz_pdf = pasta_para_imprimir(ano)
+    print(f"Pareceres ({FORMATOS[formato]}) serão salvos em: {raiz_pdf if formato == 'pdf' else raiz}")
 
     modelos: dict[Path, bytes] = {}
     gerados, existentes, falhas = 0, 0, []
     total = len(alunos)
-    for i, a in enumerate(alunos, 1):
-        verificar_cancelamento()
-        cgm, nome, turma = str(a["cgm"]), a["nome"], a["turma"]
-        try:
-            modelo = modelo_da_turma(turma, controle)
-            if modelo is None:
-                raise ValueError(f"a turma {turma} não tem modelo de parecer")
-            destino = caminho_do_parecer(raiz / (_slug(turma) or "SEM_TURMA"), nome, cgm, a.get("n_chamada"))
-            if destino.exists() and not substituir:
-                existentes += 1
-                print(f"[{i}/{total}] {destino.name} já existe — mantido.")
-                continue
-            if modelo not in modelos:
-                modelos[modelo] = modelo.read_bytes()
-            valores = {"ESCOLA": nome_escola, "ALUNO": nome, "TURMA": turma, "ANO": ano, "CGM": cgm,
-                       "CHAMADA": "" if a.get("n_chamada") in (None, "") else a["n_chamada"]}
-            conteudo = preencher_modelo(modelos[modelo], valores, gerar_qr_png(montar_payload_qr(ano, cgm)))
-            _gravar_atomico(destino, conteudo)
-            gerados += 1
-            print(f"[{i}/{total}] {turma} — {destino.name}")
-        except Exception as exc:                                # noqa: BLE001 — um aluno com problema não para os demais
-            print(f"[{i}/{total}] [ERRO] {nome} (CGM {cgm}): {exc}")
-            falhas.append({"cgm": cgm, "nome": nome, "motivo": str(exc)[:200]})
+    fila_pdf: list = []
+    with tempfile.TemporaryDirectory(prefix="autosere_parecer_") as tmp_txt:
+        tmp = Path(tmp_txt)
+        (tmp / "pdf").mkdir()
+
+        def descarregar_fila() -> int:
+            """Converte o que está na fila. Só conta como "gerado" o aluno que não teve o Word gravado (esse já foi contado)."""
+            if not fila_pdf:
+                return 0
+            verificar_cancelamento()
+            print(f"Convertendo {len(fila_pdf)} parecer(es) para PDF…")
+            gravados = _converter_lote(fila_pdf, tmp / "pdf", falhas)
+            return 0 if quer_docx else gravados
+
+        for i, a in enumerate(alunos, 1):
+            verificar_cancelamento()
+            cgm, nome, turma = str(a["cgm"]), a["nome"], a["turma"]
+            try:
+                modelo = modelo_da_turma(turma, controle)
+                if modelo is None:
+                    raise ValueError(f"a turma {turma} não tem modelo de parecer")
+                pasta = _slug(turma) or "SEM_TURMA"
+                destino_docx = caminho_do_parecer(raiz / pasta, nome, cgm, a.get("n_chamada"))
+                destino_pdf = raiz_pdf / pasta / destino_docx.with_suffix(".pdf").name
+                fazer_docx = quer_docx and (substituir or not destino_docx.exists())
+                fazer_pdf = quer_pdf and (substituir or not destino_pdf.exists())
+                if not fazer_docx and not fazer_pdf:
+                    existentes += 1
+                    print(f"[{i}/{total}] {(destino_docx if quer_docx else destino_pdf).name} já existe — mantido.")
+                    continue
+                if modelo not in modelos:
+                    modelos[modelo] = modelo.read_bytes()
+                valores = {"ESCOLA": nome_escola, "ALUNO": nome, "TURMA": turma, "ANO": ano, "CGM": cgm,
+                           "CHAMADA": "" if a.get("n_chamada") in (None, "") else a["n_chamada"]}
+                qr = gerar_qr_png(montar_payload_qr_seguro(ano, cgm, a.get("n_chamada"), nome, turma), redimensionar=False)
+                conteudo = preencher_modelo(modelos[modelo], valores, qr, lado_px=LADO_QR_SEGURO_PX)
+                if fazer_docx:
+                    _gravar_atomico(destino_docx, conteudo)
+                    gerados += 1
+                if fazer_pdf:
+                    docx_tmp = tmp / f"{i:05d}.docx"
+                    docx_tmp.write_bytes(conteudo)
+                    fila_pdf.append((i, a, docx_tmp, destino_pdf))
+                print(f"[{i}/{total}] {turma} — {destino_docx.stem}")
+            except Exception as exc:                            # noqa: BLE001 — um aluno com problema não para os demais
+                print(f"[{i}/{total}] [ERRO] {nome} (CGM {cgm}): {exc}")
+                falhas.append({"cgm": cgm, "nome": nome, "motivo": str(exc)[:200]})
+            if len(fila_pdf) >= LOTE_PDF:
+                gerados += descarregar_fila()
+        gerados += descarregar_fila()
 
     print(f"\nConcluído: {gerados} parecer(es) gerado(s), {existentes} já existia(m), {len(falhas)} com problema.")
-    return {"total": total, "gerados": gerados, "ja_existiam": existentes, "falhas": falhas, "pasta": str(raiz)}
+    return {"total": total, "gerados": gerados, "ja_existiam": existentes, "falhas": falhas,
+            "pasta": str(raiz_pdf if formato == "pdf" else raiz), "formato": formato}

@@ -1,7 +1,8 @@
 """
 pareceres_digitalizados.py — pareceres do Fundamental digitalizados: ler o QR, arquivar, enviar ao SERE e por e-mail
 ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
-O parecer gerado por `parecer_fund` leva no fim um QR com  AUTOSERE|PF|<ano>|<CGM>. Depois de impresso, preenchido,
+O parecer gerado por `parecer_fund` leva no fim um QR criptografado (AUTOSERE|PF2|…) com ano letivo, nº da chamada, nome,
+turma e CGM (os antigos, AUTOSERE|PF|<ano>|<CGM>, também são lidos). Depois de impresso, preenchido,
 assinado e digitalizado, esta rotina fecha o ciclo (a leitura do QR é a mesma de pareceres_transferidos.py):
 
     dados/<ano>/PARECERES/_PROCESSAR/*.pdf|jpg|png…            (digitalizados, um parecer por arquivo)
@@ -11,7 +12,8 @@ assinado e digitalizado, esta rotina fecha o ciclo (a leitura do QR é a mesma d
         4. anota em dados/<ano>/pareceres_digitalizados.json e tira o arquivo de _PROCESSAR
            (só depois de 2–4 darem certo)
     5. (opcional) envia ao SERE (pasta virtual, item "Parecer Descritivo <ano>-1"; o idtipo vem do catálogo do sistema e,
-       para um ano que ainda não está lá, é descoberto no próprio SERE) o que ainda não foi enviado
+       para um ano que ainda não está lá, é descoberto no próprio SERE na 1ª vez e guardado em
+       dados/sere_slots_descobertos.json, sem precisar mexer no código) o que ainda não foi enviado
     6. (opcional) manda por e-mail ao responsável, com o PDF em anexo, o que ainda não foi mandado
 
 O que já foi enviado fica registrado no controle e não se repete (SERE e e-mail). Se um parecer é digitalizado de novo,
@@ -95,17 +97,45 @@ def nome_do_slot_do_parecer(ano) -> str:
     return f"Parecer Descritivo {ano}-1"
 
 
+NOME_SLOTS_DESCOBERTOS = "sere_slots_descobertos.json"
+
+
+def arquivo_slots_descobertos() -> Path:
+    return _paths.DADOS_DIR / NOME_SLOTS_DESCOBERTOS
+
+
+def carregar_slots_descobertos() -> dict:
+    """{nome do item: {"idtipo", "descoberto_em"}} dos itens que o sistema já achou no SERE. {} se ainda não há."""
+    try:
+        dados = carregar_json(arquivo_slots_descobertos(), dict, dict)
+    except Exception:                                       # noqa: BLE001 — arquivo ilegível: volta a procurar no SERE
+        return {}
+    return {k: v for k, v in dados.items() if isinstance(v, dict) and str(v.get("idtipo", "")).strip()}
+
+
+def guardar_slot_descoberto(nome_slot: str, idtipo: str) -> None:
+    """Anota o idtipo achado no SERE para não procurar de novo (nem em outra execução, nem no ano seguinte ao reabrir)."""
+    dados = carregar_slots_descobertos()
+    dados[nome_slot] = {"idtipo": str(idtipo), "descoberto_em": datetime.now().isoformat(timespec="seconds")}
+    caminho = arquivo_slots_descobertos()
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    salvar_json_atomico(caminho, dados)
+
+
 def slot_sere_do_parecer(ano) -> tuple[Optional[str], str]:
     """
-    (idtipo, nome do item). O idtipo vem do catálogo do sistema (SERE_SLOTS: hoje 2025-1 e 2026-1); para um ano que ainda
-    não está lá vem None, e `enviar_ao_sere` descobre o idtipo no próprio SERE, procurando esse nome na pasta virtual.
+    (idtipo, nome do item). O idtipo vem do catálogo do sistema (SERE_SLOTS: hoje 2025-1 e 2026-1) ou, para um ano que
+    ainda não está lá, do que o sistema já descobriu no SERE em outra execução (sere_slots_descobertos.json). Se não
+    há em nenhum dos dois, vem None, e `enviar_ao_sere` descobre o idtipo no próprio SERE, procurando esse nome na
+    pasta virtual, e guarda.
     """
     from src.comum.sere_normalizacao import SERE_SLOTS
     nome = nome_do_slot_do_parecer(ano)
     for idtipo, info in SERE_SLOTS.items():
         if info.get("nome") == nome:
             return str(idtipo), nome
-    return None, nome
+    achado = carregar_slots_descobertos().get(nome)
+    return (str(achado["idtipo"]), nome) if achado else (None, nome)
 
 
 async def descobrir_idtipo_no_sere(page, cgm: str, nome_slot: str) -> Optional[str]:
@@ -348,7 +378,7 @@ async def enviar_ao_sere(tarefas: list, controle: dict, ano: str, resumo: Resumo
 
     idtipo, nome_slot = slot_sere_do_parecer(ano)
     if idtipo is None:
-        log(f"\nℹ️  '{nome_slot}' não está no catálogo do sistema (SERE_SLOTS): o idtipo será procurado no SERE, na pasta virtual do primeiro aluno.")
+        log(f"\nℹ️  '{nome_slot}' ainda não é conhecido pelo sistema: o idtipo será procurado no SERE, na pasta virtual do primeiro aluno, e guardado.")
     async with sessao() as page:
         for i, (cgm, reg, arquivo) in enumerate(tarefas, 1):
             log(f"\n  [{i:02d}/{len(tarefas)}] {reg.get('nome')} (CGM {cgm}) — {reg.get('turma')}\n           Arquivo: {arquivo.name}")
@@ -364,10 +394,14 @@ async def enviar_ao_sere(tarefas: list, controle: dict, ano: str, resumo: Resumo
                     if idtipo is None:
                         resumo.sere_erros.append((cgm, f"o SERE não mostra o item '{nome_slot}' na pasta virtual deste aluno"))
                         log(f"     ❌ O item '{nome_slot}' não aparece (ou aparece mais de uma vez) na pasta virtual. "
-                            f"Confira o nome do item no SERE; se ele for outro, acrescente-o em SERE_SLOTS (src/comum/sere_normalizacao.py).")
+                            f"Confira no SERE se o item do ano existe e se o nome é exatamente esse.")
                         continue
-                    log(f"     ✅ Item '{nome_slot}' encontrado no SERE: idtipo {idtipo}. "
-                        f"(Para não depender da busca, acrescente-o em SERE_SLOTS, em src/comum/sere_normalizacao.py.)")
+                    try:
+                        guardar_slot_descoberto(nome_slot, idtipo)
+                        guardado = f"Guardado em {NOME_SLOTS_DESCOBERTOS}: não será procurado de novo."
+                    except OSError as exc:                  # noqa: BLE001 — só deixa de lembrar; o envio continua
+                        guardado = f"(não foi possível guardar o idtipo: {exc})"
+                    log(f"     ✅ Item '{nome_slot}' encontrado no SERE: idtipo {idtipo}. {guardado}")
                 hash_upload, existentes = await s.obter_slots_api(page, cgm)
                 ja_no_sere = idtipo in existentes
                 nome_no_sere = (await s.obter_nomes_slots_api(page, cgm)).get(idtipo) if ja_no_sere else None

@@ -57,6 +57,8 @@ def amb(tmp_path, monkeypatch):
     dados = tmp_path / "dados"
     dados.mkdir()
     monkeypatch.setenv("AUTO_SERE_PARECERES_BASE", str(base))
+    monkeypatch.setattr(paths, "DADOS_DIR", tmp_path / "dados_raiz")          # onde o idtipo descoberto é guardado
+    monkeypatch.setattr(paths, "CREDENCIAIS_DIR", tmp_path / "credenciais")   # e a chave do QR
     monkeypatch.setattr(paths, "ano_atual", lambda: ANO)
     monkeypatch.setattr(paths, "dados_ano_atual", lambda: dados)
     (dados / "turmas.json").write_text(json.dumps({TURMA: [
@@ -341,7 +343,7 @@ def test_ano_novo_fora_do_catalogo_acha_o_idtipo_no_sere_e_envia(amb, sere_ano_n
     assert resumo.sere_enviados == ["11", "22"] and not resumo.sere_erros
     assert [h for h, _ in sere_ano_novo["enviados"]] == ["hash39-11", "hash39-22"]
     assert sum("encontrado no SERE: idtipo 39" in l for l in linhas) == 1               # procura uma vez só, não a cada aluno
-    assert any("não está no catálogo" in l for l in linhas)
+    assert any("ainda não é conhecido" in l for l in linhas)
 
 
 def test_ano_novo_sem_o_item_na_pasta_virtual_vira_erro_claro_sem_enviar_nada(amb, sere_ano_novo):
@@ -349,7 +351,8 @@ def test_ano_novo_sem_o_item_na_pasta_virtual_vira_erro_claro_sem_enviar_nada(am
     controle, resumo, linhas = _enviar_2027(amb, sere_ano_novo)
     assert sere_ano_novo["enviados"] == [] and controle["11"]["sere"] == {}
     assert resumo.sere_erros and "Parecer Descritivo 2027-1" in resumo.sere_erros[0][1]
-    assert any("SERE_SLOTS" in l for l in linhas)
+    assert any("Confira no SERE" in l for l in linhas)
+    assert pd.carregar_slots_descobertos() == {}                                         # nada achado: nada guardado
 
 
 def test_ano_novo_com_o_item_duplicado_na_listagem_nao_chuta(amb, sere_ano_novo):
@@ -562,3 +565,31 @@ def test_pela_cli_email_de_teste_com_endereco_invalido_e_recusado_antes_de_rodar
     assert codigo == 2 and "não é um e-mail válido" in capsys.readouterr().err
     codigo = cli.main(["pareceres_digitalizados", "--assunto", "Nota $NOTA", "--email-modo", "enviar", "--simulacao", "--confirmo"])
     assert codigo == 2 and "$NOTA" in capsys.readouterr().err
+
+
+# ───────────── idtipo descoberto fica guardado (não precisa editar SERE_SLOTS) ─────────────
+
+def test_idtipo_descoberto_e_guardado_e_vale_para_a_proxima_execucao(amb, sere_ano_novo):
+    _Pagina.entradas = [{"idtipodocumento": 39, "descricao": "Parecer Descritivo 2027-1", "nomearquivo": "", "assinaturaArquivo": "y"}]
+    _, resumo, linhas = _enviar_2027(amb, sere_ano_novo)
+    assert resumo.sere_enviados == ["11"]
+    assert pd.carregar_slots_descobertos()["Parecer Descritivo 2027-1"]["idtipo"] == "39"
+    assert (amb["base"].parent / "dados_raiz" / pd.NOME_SLOTS_DESCOBERTOS).is_file()
+    assert pd.slot_sere_do_parecer("2027") == ("39", "Parecer Descritivo 2027-1")        # a próxima vez já sabe
+
+    _Pagina.entradas = []                                    # a listagem nem seria consultada: o idtipo já é conhecido
+    _, resumo2, linhas2 = _enviar_2027(amb, sere_ano_novo, cgms=("22",))
+    assert not any("ainda não é conhecido" in l or "encontrado no SERE" in l for l in linhas2)
+
+
+def test_catalogo_do_sistema_vale_mais_que_o_descoberto(amb):
+    pd.guardar_slot_descoberto("Parecer Descritivo 2026-1", "999")
+    assert pd.slot_sere_do_parecer("2026") == ("38", "Parecer Descritivo 2026-1")
+
+
+def test_arquivo_de_slots_ilegivel_volta_a_procurar_no_sere(amb):
+    arq = pd.arquivo_slots_descobertos()
+    arq.parent.mkdir(parents=True, exist_ok=True)
+    arq.write_text("{ isso não é json", encoding="utf-8")
+    assert pd.carregar_slots_descobertos() == {}
+    assert pd.slot_sere_do_parecer("2031") == (None, "Parecer Descritivo 2031-1")

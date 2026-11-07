@@ -18,6 +18,7 @@ from src.web.api import rotas
 from src.web.app import create_app
 
 NOME_ESCOLA = "Escola Municipal Profª Judith Macedo Silveira"
+_FORMATO_PADRAO_REAL = pf.formato_padrao        # a fixture `amb` troca por "docx"; um teste confere o de verdade
 
 
 def _al(n, cgm, nome, sit="Matriculado"):
@@ -71,8 +72,11 @@ def amb(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "dados_ano_atual", lambda: tmp_path / "dados" / "2026")
     (tmp_path / "dados" / "2026").mkdir(parents=True)
     (tmp_path / "dados" / "2026" / "turmas.json").write_text(json.dumps(TURMAS), encoding="utf-8")
+    monkeypatch.setattr(paths, "CREDENCIAIS_DIR", tmp_path / "credenciais")            # chave do QR criptografado
     monkeypatch.setattr(escola, "nome", lambda: NOME_ESCOLA)
     monkeypatch.delenv("AUTO_SERE_PARECERES_BASE", raising=False)
+    monkeypatch.delenv("AUTO_SERE_QR_CHAVE", raising=False)
+    monkeypatch.setattr(pf, "formato_padrao", lambda: "docx")                         # os testes antigos conferem o Word
     return tmp_path
 
 
@@ -353,7 +357,8 @@ def test_cada_parecer_leva_o_qr_do_proprio_aluno(amb):
     for arquivo, cgm in [("1 - ANA_CLARA_LIMA.docx", "1001"), ("3 - CAIO_DIAS.docx", "1003")]:
         with zipfile.ZipFile(raiz / arquivo) as z:
             png = z.read(next(n for n in z.namelist() if n.startswith("word/media/")))
-        assert pf.ler_payload_qr(_decodificar(png)) == {"ano": "2026", "cgm": cgm}
+        lido = pf.ler_payload_qr(_decodificar(png))
+        assert (lido["ano"], lido["cgm"]) == ("2026", cgm) and lido["turma"] == "1º Ano Integral A"
 
 
 def test_parecer_que_ja_existe_e_mantido_ate_pedir_para_substituir(amb):
@@ -575,3 +580,193 @@ def test_cli_turma_sem_modelo_da_erro(amb, capsys):
     from src.comum import cli
     assert cli.main(["parecer_fund", "--turma", "1º Ano Integral B", "--simular"]) == 2
     assert "ainda não têm modelo" in capsys.readouterr().err
+
+
+# ───────────── QR criptografado ─────────────
+
+def test_payload_seguro_leva_os_cinco_dados_e_nao_mostra_nada(amb):
+    texto = pf.montar_payload_qr_seguro(2027, "1001", 7, "ANA CLARA LIMA", "1º Ano Integral A")
+    assert texto.startswith("AUTOSERE|PF2|") and "ANA" not in texto and "1001" not in texto and "2027" not in texto
+    assert pf.ler_payload_qr(texto) == {"ano": "2027", "cgm": "1001", "chamada": "7", "nome": "ANA CLARA LIMA", "turma": "1º Ano Integral A"}
+
+
+def test_ler_payload_continua_aceitando_o_qr_antigo_em_texto_aberto(amb):
+    assert pf.ler_payload_qr("AUTOSERE|PF|2026|1234567890") == {"ano": "2026", "cgm": "1234567890"}
+
+
+def test_ler_payload_sem_a_chave_explica(amb):
+    from src.comum import qr_seguro
+    texto = pf.montar_payload_qr_seguro(2027, "1001", 7, "ANA", "T")
+    qr_seguro.arquivo_da_chave().unlink()
+    with pytest.raises(qr_seguro.QrIlegivel, match="chave"):
+        pf.ler_payload_qr(texto)
+
+
+def test_qr_seguro_e_legivel_no_tamanho_natural(amb):
+    texto = pf.montar_payload_qr_seguro(2027, "1234567890", 12, "MARIA APARECIDA DOS SANTOS OLIVEIRA", "1º Ano Integral A")
+    png = pf.gerar_qr_png(texto, redimensionar=False)
+    img = Image.open(io.BytesIO(png))
+    assert img.width == img.height and img.width % 10 == 0                # módulos de 10 px inteiros: quadradinhos iguais
+    assert _decodificar(png) == texto
+
+
+def test_docx_leva_o_qr_seguro_em_200px(amb):
+    pf.salvar_modelo("um.docx", _modelo_docx(), ["1º Ano Integral A"])
+    pf.gerar_pareceres_fundamental(_alunos("1001"))
+    arq = amb / "dados" / "2026" / "PARECERES" / "1º_Ano_Integral_A" / "1 - ANA_CLARA_LIMA.docx"
+    doc = Document(str(arq))
+    assert doc.inline_shapes[0].width == Emu(200 * 9525)
+    with zipfile.ZipFile(arq) as z:
+        png = z.read(next(n for n in z.namelist() if n.startswith("word/media/")))
+    lido = pf.ler_payload_qr(_decodificar(png))
+    assert lido == {"ano": "2026", "cgm": "1001", "chamada": "1", "nome": "ANA CLARA LIMA", "turma": "1º Ano Integral A"}
+
+
+def test_identificacao_pelo_qr_seguro_e_erro_claro_sem_chave(amb):
+    from src.automacao import pareceres_transferidos as pt
+    from src.comum import qr_seguro
+    texto = pf.montar_payload_qr_seguro(2026, "1003", 3, "CAIO DIAS", "1º Ano Integral A")
+    ident, motivo = pt.identificar_pelo_texto_do_qr(texto, TURMAS, "2026", preferir_transferido=False)
+    assert motivo == "" and (ident.cgm, ident.nome, ident.turma, ident.numero) == ("1003", "CAIO DIAS", "1º Ano Integral A", 3)
+    ident, motivo = pt.identificar_pelo_texto_do_qr(texto, TURMAS, "2027", preferir_transferido=False)
+    assert ident is None and "2026" in motivo and "2027" in motivo                 # ano do QR diferente do ano em uso
+    qr_seguro.arquivo_da_chave().unlink()
+    ident, motivo = pt.identificar_pelo_texto_do_qr(texto, TURMAS, "2026")
+    assert ident is None and "chave" in motivo
+
+
+# ───────────── formato de saída: PDF ─────────────
+
+@pytest.fixture()
+def lo_falso(monkeypatch):
+    """LibreOffice de mentira: grava um 'PDF' com o nome do .docx, para testar o fluxo sem depender do programa."""
+    chamadas = []
+
+    def converter(arquivos, pasta_saida, tempo_limite=180):
+        arquivos = list(arquivos)
+        chamadas.append(len(arquivos))
+        pasta_saida.mkdir(parents=True, exist_ok=True)
+        saida = {}
+        for a in arquivos:
+            pdf = pasta_saida / (a.stem + ".pdf")
+            pdf.write_bytes(b"%PDF-falso " + a.read_bytes()[:4])
+            saida[a] = pdf
+        return saida
+    monkeypatch.setattr(pf.conversao_pdf, "exigir_soffice", lambda: "soffice")
+    monkeypatch.setattr(pf.conversao_pdf, "docx_para_pdf", converter)
+    return chamadas
+
+
+def _pdfs(raiz):
+    return sorted(p.relative_to(raiz).as_posix() for p in raiz.rglob("*.pdf"))
+
+
+def test_pdf_vai_para_a_pasta_para_imprimir_sem_deixar_docx(amb, lo_falso):
+    pf.salvar_modelo("um.docx", _modelo_docx(), ["1º Ano Integral A", "1º Ano Integral B"])
+    r = pf.gerar_pareceres_fundamental(_alunos("1001", "1003", "2001"), formato="pdf")
+    raiz = amb / "dados" / "2026" / "PARECERES"
+    assert r["gerados"] == 3 and r["falhas"] == [] and r["formato"] == "pdf" and r["pasta"] == str(raiz / "_PARA_IMPRIMIR")
+    assert _pdfs(raiz) == ["_PARA_IMPRIMIR/1º_Ano_Integral_A/1 - ANA_CLARA_LIMA.pdf", "_PARA_IMPRIMIR/1º_Ano_Integral_A/3 - CAIO_DIAS.pdf",
+                           "_PARA_IMPRIMIR/1º_Ano_Integral_B/1 - DUDA_ROCHA.pdf"]
+    assert list(raiz.rglob("*.docx")) == [] and lo_falso == [3]               # uma chamada ao LibreOffice para os 3
+
+
+def test_pdf_nao_ocupa_o_nome_do_parecer_digitalizado(amb, lo_falso):
+    pf.salvar_modelo("um.docx", _modelo_docx(), ["1º Ano Integral A"])
+    pf.gerar_pareceres_fundamental(_alunos("1001"), formato="pdf")
+    assert not (amb / "dados" / "2026" / "PARECERES" / "1º_Ano_Integral_A").exists()      # a pasta da turma fica livre para o digitalizado
+
+
+def test_formato_ambos_grava_os_dois_e_conta_um_so_por_aluno(amb, lo_falso):
+    pf.salvar_modelo("um.docx", _modelo_docx(), ["1º Ano Integral A"])
+    r = pf.gerar_pareceres_fundamental(_alunos("1001", "1003"), formato="ambos")
+    raiz = amb / "dados" / "2026" / "PARECERES"
+    assert r["gerados"] == 2 and len(list(raiz.rglob("*.docx"))) == 2 and len(_pdfs(raiz)) == 2
+
+
+def test_pdf_que_ja_existe_e_mantido_e_o_word_da_turma_nao_conta(amb, lo_falso):
+    pf.salvar_modelo("um.docx", _modelo_docx(), ["1º Ano Integral A"])
+    pf.gerar_pareceres_fundamental(_alunos("1001"), formato="docx")             # já havia o Word
+    r = pf.gerar_pareceres_fundamental(_alunos("1001"), formato="pdf")           # agora pede o PDF: sai o PDF
+    assert r["gerados"] == 1
+    pdf = amb / "dados" / "2026" / "PARECERES" / "_PARA_IMPRIMIR" / "1º_Ano_Integral_A" / "1 - ANA_CLARA_LIMA.pdf"
+    pdf.write_bytes(b"EDITADO")
+    r = pf.gerar_pareceres_fundamental(_alunos("1001"), formato="pdf")
+    assert r["gerados"] == 0 and r["ja_existiam"] == 1 and pdf.read_bytes() == b"EDITADO"
+    assert pf.gerar_pareceres_fundamental(_alunos("1001"), formato="pdf", substituir=True)["gerados"] == 1
+
+
+def test_pdf_converte_em_lotes(amb, lo_falso, monkeypatch):
+    monkeypatch.setattr(pf, "LOTE_PDF", 2)
+    pf.salvar_modelo("um.docx", _modelo_docx(), ["1º Ano Integral A", "1º Ano Integral B"])
+    pf.gerar_pareceres_fundamental(_alunos("1001", "1003", "2001"), formato="pdf")
+    assert lo_falso == [2, 1]
+
+
+def test_pdf_sem_libreoffice_nao_gera_nada_e_explica(amb, monkeypatch):
+    pf.salvar_modelo("um.docx", _modelo_docx(), ["1º Ano Integral A"])
+    monkeypatch.setattr(pf.conversao_pdf, "encontrar_soffice", lambda: None)
+    with pytest.raises(ValueError, match="LibreOffice"):
+        pf.gerar_pareceres_fundamental(_alunos("1001"), formato="pdf")
+    assert not (amb / "dados" / "2026" / "PARECERES").exists()
+    assert pf.gerar_pareceres_fundamental(_alunos("1001"), formato="docx")["gerados"] == 1      # o Word segue funcionando
+
+
+def test_conversao_que_nao_sai_vira_falha_do_aluno(amb, monkeypatch):
+    pf.salvar_modelo("um.docx", _modelo_docx(), ["1º Ano Integral A"])
+    monkeypatch.setattr(pf.conversao_pdf, "exigir_soffice", lambda: "soffice")
+    monkeypatch.setattr(pf.conversao_pdf, "docx_para_pdf", lambda arquivos, pasta, tempo_limite=180: {a: None for a in arquivos})
+    r = pf.gerar_pareceres_fundamental(_alunos("1001", "1003"), formato="pdf")
+    assert r["gerados"] == 0 and [f["cgm"] for f in r["falhas"]] == ["1001", "1003"] and "PDF" in r["falhas"][0]["motivo"]
+
+
+def test_libreoffice_que_quebra_vira_falha_com_o_motivo(amb, monkeypatch):
+    pf.salvar_modelo("um.docx", _modelo_docx(), ["1º Ano Integral A"])
+    monkeypatch.setattr(pf.conversao_pdf, "exigir_soffice", lambda: "soffice")
+
+    def quebra(*a, **k):
+        raise pf.conversao_pdf.ConversaoPdfErro("O LibreOffice demorou mais de 180 s para converter.")
+    monkeypatch.setattr(pf.conversao_pdf, "docx_para_pdf", quebra)
+    r = pf.gerar_pareceres_fundamental(_alunos("1001"), formato="pdf")
+    assert r["falhas"][0]["motivo"].startswith("O LibreOffice demorou")
+
+
+def test_formato_invalido(amb):
+    with pytest.raises(ValueError, match="Formato de parecer inválido"):
+        pf.gerar_pareceres_fundamental(_alunos("1001"), formato="odt")
+
+
+def test_formato_padrao_e_pdf_e_pode_ser_mudado_na_configuracao(monkeypatch):
+    from src.comum import configuracao
+    monkeypatch.setattr(configuracao, "carregar_configuracao", lambda: {})
+    assert _FORMATO_PADRAO_REAL() == "pdf"
+    monkeypatch.setattr(configuracao, "carregar_configuracao", lambda: {"parecer_fund_formato": "Ambos"})
+    assert _FORMATO_PADRAO_REAL() == "ambos"
+    monkeypatch.setattr(configuracao, "carregar_configuracao", lambda: {"parecer_fund_formato": "lixo"})
+    assert _FORMATO_PADRAO_REAL() == "pdf"
+
+
+def test_tela_oferece_o_formato_e_o_plano_leva_ele(amb):
+    pf.salvar_modelo("um.docx", _modelo_docx(), ["1º Ano Integral A"])
+    s = reg.obter("parecer_fund")
+    campo = next(e for e in s.extras() if e["nome"] == "formato")
+    assert [o["valor"] for o in campo["opcoes"]] == ["pdf", "docx", "ambos"] and campo["padrao"] == "docx"   # padrão da fixture
+    assert s.planejar(Opcoes(), {"formato": "ambos"}, TURMAS, {}).kwargs["formato"] == "ambos"
+    assert s.planejar(Opcoes(), {}, TURMAS, {}).kwargs["formato"] == "docx"
+
+
+@pytest.mark.skipif(pf.conversao_pdf.encontrar_soffice() is None, reason="LibreOffice não instalado")
+def test_pdf_de_verdade_com_libreoffice_e_o_qr_continua_legivel(amb):
+    """Ponta a ponta: gera o PDF com o LibreOffice, rasteriza a página e lê o QR criptografado."""
+    pdfium = pytest.importorskip("pypdfium2")
+    pf.salvar_modelo("um.docx", _modelo_docx(), ["1º Ano Integral A"])
+    r = pf.gerar_pareceres_fundamental(_alunos("1003"), formato="pdf")
+    assert r["gerados"] == 1 and r["falhas"] == []
+    pdf = amb / "dados" / "2026" / "PARECERES" / "_PARA_IMPRIMIR" / "1º_Ano_Integral_A" / "3 - CAIO_DIAS.pdf"
+    assert pdf.read_bytes().startswith(b"%PDF")
+    doc = pdfium.PdfDocument(str(pdf))
+    assert len(doc) == 1                                          # o QR coube na mesma página
+    pagina = doc[0].render(scale=200 / 72).to_pil()               # como um scanner a 200 dpi
+    buf = io.BytesIO(); pagina.save(buf, format="PNG")
+    lido = pf.ler_payload_qr(_decodificar(buf.getvalue()))
+    assert (lido["ano"], lido["cgm"], lido["nome"], lido["turma"], lido["chamada"]) == ("2026", "1003", "CAIO DIAS", "1º Ano Integral A", "3")

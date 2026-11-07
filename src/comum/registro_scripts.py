@@ -735,6 +735,17 @@ def _plano_parecer_rco(o, p, tj, ctx) -> Plano:
         "mostrar_navegador": bool(p.get("mostrar_navegador", False)), "chave": CHAVE})
 
 
+def _extras_parecer_fund() -> list[dict]:
+    from src.automacao.parecer_fund import FORMATOS, formato_padrao
+    return [
+        {"tipo": "select", "id": "campo-formato-parecer", "nome": "formato", "label": "Formato do parecer", "semVazio": True,
+         "padrao": formato_padrao(), "opcoes": [{"valor": k, "texto": v} for k, v in FORMATOS.items()]},
+        {"tipo": "caixa", "id": "campo-substituir", "nome": "substituir", "label": "Substituir pareceres que já existem",
+         "descricao": "Por padrão um parecer já gerado é mantido (o professor pode já ter preenchido). "
+                      "Marque só para refazer do zero."},
+    ]
+
+
 def _plano_parecer_fund(o, p, tj, ctx) -> Plano:
     from src.automacao import parecer_fund as pf
     # Nada escolhido = todas as turmas que têm modelo; turma escolhida sem modelo = erro com a lista delas.
@@ -746,7 +757,8 @@ def _plano_parecer_fund(o, p, tj, ctx) -> Plano:
     alunos = pf.montar_alunos(tj, sel.alunos)
     if o.modo_teste:
         alunos = alunos[:1]
-    return Plano("sync", pf.gerar_pareceres_fundamental, {"alunos": alunos, "substituir": bool(p.get("substituir", False))},
+    return Plano("sync", pf.gerar_pareceres_fundamental,
+                 {"alunos": alunos, "substituir": bool(p.get("substituir", False)), "formato": pf.normalizar_formato(p.get("formato"))},
                  f"[OPÇÕES] {len(alunos)} parecer(es) em {len({a['turma'] for a in alunos})} turma(s)")
 
 
@@ -934,10 +946,7 @@ registrar(Script("parecer_rco", (_TE,), _plano_parecer_rco, validar_extras=_vali
 
 registrar(Script("parecer_fund", (_T, _S, _C, _TE), _plano_parecer_fund,
                  ajuda_teste="Gera só o parecer do primeiro aluno da seleção, para você conferir o resultado antes de gerar todos.",
-                 extras=lambda: [{"tipo": "caixa", "id": "campo-substituir", "nome": "substituir",
-                                  "label": "Substituir pareceres que já existem",
-                                  "descricao": "Por padrão um parecer já gerado é mantido (o professor pode já ter preenchido). "
-                                               "Marque só para refazer do zero."}]))
+                 extras=_extras_parecer_fund))
 
 registrar(Script("avisos", (), _plano_avisos, validar_extras=_validar_avisos, extras=_extras_avisos,
                  previa=_previa_avisos))
