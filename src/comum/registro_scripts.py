@@ -762,6 +762,74 @@ def _plano_parecer_fund(o, p, tj, ctx) -> Plano:
                  f"[OPÇÕES] {len(alunos)} parecer(es) em {len({a['turma'] for a in alunos})} turma(s)")
 
 
+# ── Consulta na Base ABC (histórico escolar de quem veio de outra escola) ──
+
+def _consultas_base_abc(p: dict) -> list:
+    """Alunos a consultar: o texto da tela (nome + data de nascimento + mãe, ou CGM, um por linha) e/ou a lista da
+    pré-matrícula; sem nenhum dos dois, o arquivo transferidos-<ano anterior>.json do script antigo."""
+    from src.automacao import consulta_base_abc as cb
+    from src.comum import paths
+    consultas: list = []
+    texto = str(p.get("alunos_texto") or "").strip()
+    if texto:
+        digitadas, erros = cb.interpretar_texto(texto)
+        if erros:
+            raise ValueError("Não deu para entender " + ("esta linha: " if len(erros) == 1 else f"estas {len(erros)} linhas: ")
+                             + "; ".join(f"“{linha}” ({motivo})" for linha, motivo in erros[:5])
+                             + (" …" if len(erros) > 5 else "") + ". Use: nome completo + data (dd/mm/aaaa) e/ou mãe, ou o CGM.")
+        consultas += digitadas
+    pre = str(p.get("pre_matricula") or "nao").strip() or "nao"
+    if pre != "nao":
+        da_pre = cb.consultas_da_pre_matricula_arquivo(pre)
+        if not da_pre:
+            raise ValueError("A pré-matrícula não tem nenhum aluno com essa situação (e nome com sobrenome) para consultar.")
+        vistas = {c.chave for c in consultas}
+        consultas += [c for c in da_pre if c.chave not in vistas]
+    if consultas:
+        return consultas
+    arquivo = paths.dados_ano_atual() / f"transferidos-{int(paths.ano_atual()) - 1}.json"
+    if not arquivo.exists():
+        raise ValueError("Escreva os alunos (um por linha: nome completo + data de nascimento e/ou mãe, ou o CGM) ou escolha "
+                         f"usar a pré-matrícula. Em branco o sistema usa {arquivo.name}, que não existe em {arquivo.parent}.")
+    consultas = cb.consultas_do_arquivo(arquivo)
+    if not consultas:
+        raise ValueError(f"{arquivo.name} não tem nenhum aluno com CGM (ou nome e data de nascimento).")
+    return consultas
+
+
+def _extras_base_abc() -> list[dict]:
+    return [
+        {"tipo": "texto", "multilinha": True, "linhas": 6, "id": "campo-alunos-abc", "nome": "alunos_texto",
+         "label": "Alunos a consultar (um por linha)",
+         "placeholder": "Maria Aparecida Souza Lima 12/03/2015 mãe: Ana Paula Lima\nJoao Pedro Silva; 03/11/2014; Carla Silva\n1025059227",
+         "descricao": "Nome do aluno + data de nascimento + nome da mãe (a mãe e a data é que separam homônimos), ou só o CGM. "
+                      "Pode separar os dados com ; ou escrever \"mãe: …\". Quem não está na Base ABC não dá erro: "
+                      "fica registrado em buscas_base.json."},
+        {"tipo": "select", "id": "campo-pre-matricula-abc", "nome": "pre_matricula", "label": "Incluir alunos da pré-matrícula",
+         "semVazio": True, "padrao": "nao",
+         "opcoes": [{"valor": "nao", "texto": "Não incluir"}, {"valor": "matriculados", "texto": "Matriculados"},
+                    {"valor": "pendentes", "texto": "Aguardando vaga"},
+                    {"valor": "matriculados_e_pendentes", "texto": "Matriculados e aguardando"},
+                    {"valor": "todos", "texto": "Todos (inclui cancelados)"}]},
+        {"tipo": "caixa", "id": "campo-mostrar-navegador-abc", "nome": "mostrar_navegador", "label": "Mostrar o navegador",
+         "descricao": "Abre a janela do SERE enquanto trabalha. Útil na primeira vez, para conferir a busca. A pré-matrícula "
+                      "não tem data de nascimento nem mãe: a busca por ela é mais fraca (veja \"conferido_por\" no resultado)."},
+    ]
+
+
+def _validar_base_abc(p: dict) -> None:
+    _consultas_base_abc(p)
+
+
+def _plano_base_abc(o, p, tj, ctx) -> Plano:
+    from src.automacao.consulta_base_abc import consultar_base_abc_via_login
+    consultas = _consultas_base_abc(p)
+    return Plano("coroutine", consultar_base_abc_via_login,
+                 {"consultas": consultas[:1] if o.modo_teste else consultas, "modo_teste": o.modo_teste,
+                  "mostrar_navegador": bool(p.get("mostrar_navegador", False))},
+                 f"[OPÇÕES] {1 if o.modo_teste else len(consultas)} aluno(s) na Base ABC")
+
+
 def _args_avisos(p: dict) -> dict:
     return {"publico": p.get("publico"), "canal": p.get("canal") or "email", "modo": p.get("modo") or "simular",
             "assunto": p.get("assunto"), "mensagem": p.get("mensagem"),
@@ -947,6 +1015,9 @@ registrar(Script("parecer_rco", (_TE,), _plano_parecer_rco, validar_extras=_vali
 registrar(Script("parecer_fund", (_T, _S, _C, _TE), _plano_parecer_fund,
                  ajuda_teste="Gera só o parecer do primeiro aluno da seleção, para você conferir o resultado antes de gerar todos.",
                  extras=_extras_parecer_fund))
+
+registrar(Script("base_abc", (_TE,), _plano_base_abc, validar_extras=_validar_base_abc, extras=_extras_base_abc,
+                 ajuda_teste="Consulta só o primeiro aluno da lista, para você conferir a busca antes de consultar todos."))
 
 registrar(Script("avisos", (), _plano_avisos, validar_extras=_validar_avisos, extras=_extras_avisos,
                  previa=_previa_avisos))

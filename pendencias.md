@@ -78,6 +78,16 @@ Uso real, definido em 2026-11-02: (1) escrever **para a escola de origem**, na h
 - [!] **Validar no computador da escola**: LibreOffice no Windows gerando o PDF com o modelo real; imprimir, digitalizar e ler o QR criptografado de verdade (o QR tem mais módulos: se a leitura falhar com o scan, aumentar `LADO_QR_SEGURO_PX` em `parecer_fund.py`)
 - [!] **Guardar cópia de `credenciais/chave_qr.key`** (sem ela os QR já impressos não abrem). Decidir onde fica o backup da chave
 
+### Consulta na Base ABC (2026-11-08)
+Adaptação do script antigo `consulta_transferidos_ano_anterior.py`: automação `base_abc` (menu → Consulta na Base ABC), em `src/automacao/consulta_base_abc.py`. Busca por **nome + data de nascimento + nome da mãe** (ou CGM) e registra em `dados/<ano>/buscas_base.json`: data da busca, nome, possui CGM, CGM, data de nascimento, nome da mãe e `escolas` numeradas (ano, escola, série), mais situação, observação, parecidos achados e o pedido digitado. Aluno que não está na base **não é erro**: fica registrado. Só lê do SERE.
+- [x] Entrada em linha (`Nome 12/03/2015 mãe: Fulana`, ou `Nome; data; mãe`, ou CGM), homônimos separados por data + mãe, ambíguo nunca escolhido (registra os candidatos), registro "encontrado" nunca apagado por busca que não achou: coberto por teste com navegador de mentira
+- [!] **Validar no SERE real** (o formulário da Base ABC não foi visto): campos Nome, Data de nascimento e Nome da mãe do formulário (`CAMPOS_NOME`, `CAMPOS_NASCIMENTO`, `CAMPOS_MAE`); se a tabela de resultados mostra a data; rótulos do cadastro (`ROTULOS_*`) para Nome, CGM, Data de nascimento e Nome da mãe. Campo Nome não achado: a execução para e lista os campos da página (mande a lista para ajustar)
+- [!] Rode primeiro com "Mostrar o navegador" e o modo de teste (só o 1º aluno)
+- [x] **Lista da pré-matrícula** (2026-11-08): campo "Incluir alunos da pré-matrícula" (matriculados, aguardando, os dois ou todos) lê `pre_matricula.json` e soma ao que foi digitado. ⚠️ A pré-matrícula **não tem data de nascimento nem nome da mãe**: a busca é por nome (+ o responsável só desempata homônimos, quando é a mãe no cadastro da Base ABC). `conferido_por` diz o quanto cada aluno foi confirmado; confira à mão os "só o nome"
+- [ ] Decidir se a coleta da pré-matrícula (`pre_matricula.py`, etapa 2) passa a guardar data de nascimento e nome da mãe, quando o portal mostrar: aí a busca por ela fica tão forte quanto a digitada
+- [ ] `escolas` traz **todas** as linhas do histórico (a janela de 3 anos do script antigo saiu). Decidir se volta a limitar
+- [ ] Decidir se `buscas_base.json` alimenta algo (escola de origem do `avisos`, ficha do transferido). Hoje só é gravado
+
 ---
 
 ## 3. Limpeza e robustez

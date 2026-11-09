@@ -1283,6 +1283,7 @@ AUTOMACOES_DISPONIVEIS = [
     {"chave": "termos", "nome": "Gerar termos de ciência", "descricao": "Gera termos de ciência para os funcionários."},
     {"chave": "mapear_pastas", "nome": "Mapear pastas dos alunos", "descricao": "Mapeia e organiza caminhos das pastas dos alunos."},
     {"chave": "mascara", "nome": "Máscara de dados", "descricao": "Aplica máscara em dados sensíveis (LGPD)."},
+    {"chave": "base_abc", "nome": "Consulta na Base ABC", "descricao": "Busca o aluno na Base ABC do SERE (nome + data de nascimento + nome da mãe, ou CGM) e registra em buscas_base.json as escolas do histórico escolar. Quem não está na base fica registrado, sem erro. Só lê: não altera nada no SERE."},
     {"chave": "gerar_chaves", "nome": "Gerar chaves de acesso", "descricao": "Gera no SERE a chave de acesso do responsável de cada aluno matriculado e guarda (com o CPF) para a rematrícula usar. Não rematricula ninguém."},
     {"chave": "rematricula", "nome": "Rematrícula alunos no SERE", "descricao": "Realiza rematrícula dos alunos no SERE."},
     {"chave": "prematricula_completa", "nome": "Processo de pré-matrícula", "descricao": "Roda o processo completo de pré-matrícula (coleta, cadastro, pendentes, contatos)."},
