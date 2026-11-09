@@ -369,6 +369,11 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         paths.garantir_diretorios_runtime()
+        try:                                  # virou o ano? passa para o novo ano letivo antes de subir o servidor
+            from src.automacao.rotina_diaria import garantir_ano_letivo
+            garantir_ano_letivo()
+        except Exception:                     # nunca impede o programa de abrir
+            pass
         if not garantir_servidor():
             return 1
         if not args.sem_janela:
