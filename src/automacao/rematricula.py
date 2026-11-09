@@ -615,7 +615,7 @@ async def acessar_matricula_online(page, nome_aluno):
         print("➡️ Abrindo página de confirmação da matrícula...")
 
         try:
-            await page.click("//a[contains(@href,'confirmacaoEscolaSugerida.jsf')]", timeout=4000)
+            await page.click("//a[contains(@href,'confirmacaoEscolaSugerida.jsf?fluxo=geral')]", timeout=4000)
         except Exception:
             await page.goto(URL_CONFIRMACAO)
 
