@@ -7,7 +7,11 @@ Processo de pré-matrícula, em 4 etapas que compartilham o mesmo login:
                          os alunos com intenção de vaga -> pre_matricula.json
                          (chave "turmas_intencao", mesclada sem apagar histórico)
   ETAPA 2 - CADASTRO:    consulta o cadastro completo de cada CPF coletado
-                         -> pre_matricula.json (chave "cadastros")
+                         -> pre_matricula.json (chave "cadastros"): aluno (nome,
+                         data de nascimento, sexo), responsável (nome, CPF, telefones,
+                         e-mail), endereço (texto corrido + CEP, logradouro, número,
+                         complemento, bairro, município, UF), critérios, escolas
+                         escolhidas e a data/hora da consulta
   ETAPA 3 - CONTATOS:    cruza as etapas 1 e 2 e gera o CSV de importação do
                          Google Contacts -> TEMPLATE_PREENCHIDO_<data>.csv
   ETAPA 4 - PENDENTES:   re-consulta o CPF de quem sumiu da lista de
@@ -34,6 +38,9 @@ Diferenças em relação ao script original:
     registrado como cancelado).
   - extrair_cep() usa regex (antes pegava qualquer palavra com hífen com 8+
     caracteres, como "9999-9999", antes do CEP real).
+  - O cadastro guarda TODOS os campos que a consulta por CPF mostra (antes só
+    nome, responsável, telefone, e-mail, endereço corrido, critérios e escolas).
+    Campos opcionais ausentes na página não travam a coleta (sem espera de 30 s).
 """
 
 from __future__ import annotations
@@ -647,9 +654,74 @@ async def _extrair_escolas_escolhidas(page):
     return {"turma": turma, "opcoes": opcoes}
 
 
+# Campos de texto do cadastro lidos na consulta por CPF:
+#   chave gravada em cadastros[cpf] -> id(s) do <span> no portal.
+# "{s}" é o sufixo do cadastro na página: "0" = 1º cadastro (dDataNasc0, dNomeResponsavel0...).
+# O modal que abre ao clicar no nome, na lista de intenções de vaga, usa os mesmos ids sem sufixo.
+# Mais de um id = alternativas (o 1º que existir e tiver texto vale).
+SUFIXO_CADASTRO = "0"
+CAMPOS_CADASTRO = {
+    "data_nascimento": ("dDataNasc{s}",),
+    "sexo": ("dSexo{s}",),
+    "nome_responsavel": ("dNomeResponsavel{s}",),
+    "cpf_responsavel": ("dCPFResponsavel{s}",),
+    "telefone": ("dTelefoneResponsavel{s}",),
+    "telefone_2": ("dTelefoneResponsavel2{s}", "dTelefoneResponsavel{s}2"),
+    "email": ("dEmailResponsavel{s}",),
+    "cep": ("dCEP{s}",),
+    "logradouro": ("dLogradouro{s}",),
+    "numero": ("dNumero{s}",),
+    "complemento": ("dComplemento{s}",),
+    "bairro": ("dBairro{s}",),
+    "municipio": ("dMunicipio{s}",),
+    "uf": ("dUF{s}",),
+}
+
+
+async def _texto_se_existe(page, seletor):
+    """
+    Texto do elemento, ou "" se ele não existe na página.
+
+    Ao contrário de safe_text(), confere antes com count(): inner_text() num
+    elemento ausente espera o timeout padrão do Playwright (30 s) antes de
+    falhar, e um campo opcional em branco (Complemento, Telefone 2) não pode
+    custar isso a cada CPF consultado.
+    """
+    try:
+        if await page.locator(seletor).count() == 0:
+            return ""
+        return (await page.locator(seletor).inner_text()).strip()
+    except Exception:
+        return ""
+
+
+async def extrair_dados_cadastro(page, sufixo=SUFIXO_CADASTRO):
+    """
+    Lê todos os campos de texto do cadastro (CAMPOS_CADASTRO) do cadastro de
+    sufixo `sufixo` na página. Campo inexistente ou em branco -> "".
+    """
+    dados = {}
+    for chave, modelos in CAMPOS_CADASTRO.items():
+        valor = ""
+        for modelo in modelos:
+            valor = await _texto_se_existe(page, "span#" + modelo.format(s=sufixo))
+            if valor:
+                break
+        dados[chave] = valor
+    return dados
+
+
+# Campos gravados em MAIÚSCULA (nome, endereço e demais textos livres). Não entram:
+# e-mail (minúscula), data de nascimento, números, telefones, CPF e CEP (formato do portal).
+_CAMPOS_MAIUSCULA = (
+    "nome_aluno", "nome_responsavel", "endereco",
+    "sexo", "logradouro", "complemento", "bairro", "municipio", "uf",
+)
+
+
 def _normalizar_maiusculas_aluno(aluno_dados):
     """Dados do aluno em MAIÚSCULA; e-mail em minúscula."""
-    for campo in ("nome_aluno", "nome_responsavel", "endereco"):
+    for campo in _CAMPOS_MAIUSCULA:
         if aluno_dados.get(campo):
             aluno_dados[campo] = aluno_dados[campo].upper()
 
@@ -694,26 +766,45 @@ async def consultar_cpf(page, cpf, etapa="cadastro", analise=False):
         await page.wait_for_selector("div#divCadastros", timeout=7000)
         await capturar_tela(page, etapa, f"resultado cpf {cpf}", analise=analise)
 
+        campos = await extrair_dados_cadastro(page)
+        nome_aluno = (
+            await _texto_se_existe(page, "h5#dNomeAluno")
+            or await _texto_se_existe(page, f"span#dNome{SUFIXO_CADASTRO}")
+        )
+
         aluno_dados = {
             "cpf": cpf,
-            "nome_aluno": await safe_text(page, "h5#dNomeAluno")
-            or await safe_text(page, "span#dNome0"),
-            "nome_responsavel": await safe_text(page, "span#dNomeResponsavel0"),
-            "telefone": await safe_text(page, "span#dTelefoneResponsavel0"),
-            "email": await safe_text(page, "span#dEmailResponsavel0"),
+            "nome_aluno": nome_aluno,
+            "data_nascimento": campos["data_nascimento"],
+            "sexo": campos["sexo"],
+            "nome_responsavel": campos["nome_responsavel"],
+            "cpf_responsavel": campos["cpf_responsavel"],
+            "telefone": campos["telefone"],
+            "telefone_2": campos["telefone_2"],
+            "email": campos["email"],
+            # Texto corrido do endereço: mantido porque o CSV de contatos, extrair_cep()
+            # e as telas leem este campo. Os mesmos dados, separados, vêm logo abaixo.
             "endereco": " ".join(
                 [
-                    await safe_text(page, "span#dLogradouro0"),
-                    await safe_text(page, "span#dNumero0"),
-                    await safe_text(page, "span#dComplemento0"),
-                    await safe_text(page, "span#dBairro0"),
-                    await safe_text(page, "span#dMunicipio0"),
-                    await safe_text(page, "span#dUF0"),
-                    await safe_text(page, "span#dCEP0"),
+                    campos["logradouro"],
+                    campos["numero"],
+                    campos["complemento"],
+                    campos["bairro"],
+                    campos["municipio"],
+                    campos["uf"],
+                    campos["cep"],
                 ]
             ),
-            "criterios": await page.locator("div#dCriterios0 li").all_inner_texts(),
+            "cep": campos["cep"],
+            "logradouro": campos["logradouro"],
+            "numero": campos["numero"],
+            "complemento": campos["complemento"],
+            "bairro": campos["bairro"],
+            "municipio": campos["municipio"],
+            "uf": campos["uf"],
+            "criterios": await page.locator(f"div#dCriterios{SUFIXO_CADASTRO} li").all_inner_texts(),
             "escolas_escolhidas": await _extrair_escolas_escolhidas(page),
+            "consultado_em": datetime.now().isoformat(timespec="seconds"),
         }
 
         _normalizar_maiusculas_aluno(aluno_dados)

@@ -6,7 +6,7 @@ o histórico escolar e grava, em  dados/<ano>/buscas_base.json  (uma lista, um r
 
     {"data_busca": "08/11/2026 14:30", "nome": "...", "possui_cgm": true, "cgm": "...",
      "data_nascimento": "12/03/2015", "nome_mae": "...",
-     "escolas": {"1": {"ano": 2026, "escola": "...", "serie": "..."}, "2": {...}},       (todas as linhas do histórico, do ano mais novo ao mais antigo)
+     "escolas": {"1": {"ano","municipio","escola","curso","serie","resultado","turma"}, "2": {...}},   (todas as linhas do histórico; a "1" é a escola ATUAL: no ano mais novo, a linha "Matriculado"; sem ela, a última linha do ano; "turma" = equivalente da pré-matrícula, ex. EDUC INFANTIL série 5 = Infantil V)
      "situacao": "encontrado" | "nao_encontrado" | "ambiguo" | "erro",
      "conferido_por": "nome + data de nascimento + nome da mãe" | "nome + data de nascimento" | "nome + nome da mãe" |
                       "nome + responsável (= mãe)" | "CGM" | "só o nome",
@@ -25,11 +25,12 @@ Como o aluno é indicado — uma linha por aluno (a ordem dos dados não importa
     1025059227                                                                CGM (como no script antigo)
     1025059227 Claudio Alex 12/03/2015                                        os dois (o cadastro achado precisa bater)
 
-Lista vinda da pré-matrícula (opcional, na tela): lê dados/<ano>/pre_matricula.json (cadastros: nome do aluno + nome do
-responsável) e consulta quem você escolher (matriculados, aguardando…). ⚠️ A pré-matrícula NÃO tem data de nascimento nem
-nome da mãe: a busca é mais fraca. O responsável só ajuda a separar homônimos (quando o nome do responsável é o da mãe no
-cadastro da Base ABC); nunca derruba um candidato, porque pode ser o pai. O registro diz em "conferido_por" como o aluno foi
-confirmado ("só o nome" é o mais fraco: confira esses).
+Lista vinda da pré-matrícula (opcional, na tela): lê dados/<ano>/pre_matricula.json (cadastros: nome do aluno, DATA DE
+NASCIMENTO e nome do responsável) e consulta quem você escolher (matriculados, aguardando…). A data de nascimento é a
+chave que separa homônimos (na prática bate em ~98% dos casos). O responsável (geralmente a mãe) ajuda a desempatar quando
+o nome dele é o da mãe no cadastro da Base ABC; nunca derruba um candidato, porque pode ser o pai. Cadastros antigos, coletados
+antes de a pré-matrícula guardar a data, entram só com nome + responsável (busca mais fraca). O registro diz em
+"conferido_por" como o aluno foi confirmado ("só o nome" é o mais fraco: confira esses).
 
 Homônimos — a data de nascimento e o nome da mãe é que separam um aluno do outro:
   • o nome vale por palavras (acentos e maiúsculas não importam; "CLAU" vale para "CLAUDIO");
@@ -287,8 +288,8 @@ def _situacao_pre_matricula(opcoes: list) -> str:
 def consultas_da_pre_matricula(dados: dict, quais: str = "matriculados") -> list[Consulta]:
     """
     Alunos do pre_matricula.json (cadastros por CPF; quem só está na fila, sem cadastro, entra só com o nome) cuja situação
-    está em `quais` ("matriculados", "pendentes", "matriculados_e_pendentes", "todos"). Só o nome do aluno e o do responsável
-    são usados: CPF, telefone e e-mail não saem do arquivo da pré-matrícula.
+    está em `quais` ("matriculados", "pendentes", "matriculados_e_pendentes", "todos"). Só o nome do aluno, a data de nascimento
+    e o nome do responsável são usados: CPF, telefone e e-mail não saem do arquivo da pré-matrícula.
     """
     if quais not in SITUACOES_PRE_MATRICULA:
         raise ValueError(f"Opção de pré-matrícula inválida: '{quais}'. Use: {', '.join(SITUACOES_PRE_MATRICULA)}.")
@@ -297,11 +298,16 @@ def consultas_da_pre_matricula(dados: dict, quais: str = "matriculados") -> list
     cadastros = dados.get("cadastros") if isinstance(dados.get("cadastros"), dict) else {}
     saida, vistos, com_cadastro = [], set(), set()
 
-    def juntar(nome: str, responsavel: str) -> None:
+    def juntar(nome: str, responsavel: str, nascimento: Any = None) -> None:
         nome = re.sub(r"\s+", " ", str(nome or "")).strip()
         if len(nome.split()) < 2:
             return                                          # só um nome: homônimos demais para procurar
-        c = Consulta(nome=nome, responsavel=re.sub(r"\s+", " ", str(responsavel or "")).strip(), origem="pre_matricula")
+        try:
+            nasc = parse_data(nascimento)                   # cadastro antigo não tem a data: None
+        except ValueError:
+            nasc = None                                     # data impossível (31/02): busca sem ela
+        c = Consulta(nome=nome, nascimento=nasc, responsavel=re.sub(r"\s+", " ", str(responsavel or "")).strip(),
+                     origem="pre_matricula")
         if c.chave not in vistos:
             vistos.add(c.chave)
             saida.append(c)
@@ -313,7 +319,7 @@ def consultas_da_pre_matricula(dados: dict, quais: str = "matriculados") -> list
         escolhas = c.get("escolas_escolhidas") if isinstance(c.get("escolas_escolhidas"), dict) else {}
         opcoes = [o for o in (escolhas.get("opcoes") or []) if isinstance(o, dict)]
         if _situacao_pre_matricula(opcoes) in aceitas:
-            juntar(c.get("nome_aluno"), c.get("nome_responsavel"))
+            juntar(c.get("nome_aluno"), c.get("nome_responsavel"), c.get("data_nascimento"))
     if "pendente" in aceitas:                                # quem está na fila e ainda não tem cadastro coletado
         turmas = dados.get("turmas_intencao") if isinstance(dados.get("turmas_intencao"), dict) else {}
         for lista in turmas.values():
@@ -382,7 +388,7 @@ def candidato_da_linha(indice: int, celulas: list[str], cabecalho: Optional[list
         except ValueError:
             nasc_col = None
         if nome:
-            return Candidato(indice, tuple(c for c in bruto if c), nasc_col, cgm_col if re.fullmatch(r"\d{8,12}", cgm_col) else "", mae, nome)
+            return Candidato(indice, tuple(c for c in bruto if c), nasc_col, cgm_col if re.fullmatch(r"\d{5,20}", cgm_col) else "", mae, nome)
     celulas = tuple(c for c in bruto if c)
     nasc = None
     for c in celulas:
@@ -418,6 +424,11 @@ def cadastro_confere(consulta: Consulta, cad: dict) -> bool:
     if consulta.mae and cad.get("mae") and not nome_confere(consulta.mae, cad["mae"]):
         return False
     return True
+
+
+def unir_tabela_e_cadastro(c: Candidato, cad: dict) -> dict:
+    """O que o cadastro não mostra (CGM, nascimento, mãe) completa-se com o que a tabela de resultados mostrou."""
+    return {**cad, "cgm": cad.get("cgm") or c.cgm, "nascimento": cad.get("nascimento") or c.nascimento, "mae": cad.get("mae") or c.mae}
 
 
 def _parecido(c: Candidato) -> dict:
@@ -484,11 +495,40 @@ def tentativas_de_busca(consulta: Consulta) -> list[tuple[str, bool]]:
 
 # ───────────────────────────── resultado ─────────────────────────────
 
+def _em_curso(r: dict) -> bool:
+    """A linha do histórico é a matrícula vigente (Resultado "Matriculado")? Transferido/Aprovado/Reprovado não são."""
+    return normalizar(r.get("resultado")).startswith(("MATRICULAD", "CURSANDO"))
+
+
+_ROMANOS = {1: "I", 2: "II", 3: "III", 4: "IV", 5: "V"}
+
+
+def turma_equivalente(curso: str, serie) -> str:
+    """Série do histórico do SERE → turma da pré-matrícula: EDUC INFANTIL série 5 = "Infantil V", série 4 = "Infantil IV";
+    ensino fundamental série 4 = "4º Ano do Ensino Fundamental". Vazio se não der para saber."""
+    c = normalizar(curso)
+    m = re.search(r"\d+", str(serie or ""))
+    n = int(m.group(0)) if m else 0
+    if c.startswith("EDUC INFANTIL") and n in _ROMANOS:
+        return f"Infantil {_ROMANOS[n]}"
+    if "FUND" in c and 1 <= n <= 9:
+        return f"{n}º Ano do Ensino Fundamental"
+    return ""
+
+
 def _escolas(historico: list[dict]) -> dict:
-    """{"1": {"ano","escola","serie"}, "2": …} com todas as linhas do histórico, do ano mais novo ao mais antigo."""
-    linhas = [r for r in historico if isinstance(r.get("ano"), int)]
-    linhas.sort(key=lambda r: r["ano"], reverse=True)
-    return {str(i): {"ano": r["ano"], "escola": r.get("escola", ""), "serie": r.get("serie", "")} for i, r in enumerate(linhas, 1)}
+    """
+    {"1": {...}, "2": {...}} com todas as linhas do histórico. A "1" é a escola ATUAL: do ano mais novo, a linha com Resultado
+    "Matriculado" (o aluno pode ter várias linhas no mesmo ano: transferências); se nenhuma está matriculada, a última linha
+    daquele ano na tabela. Depois vêm as outras do mesmo ano (da última para a primeira) e os anos anteriores, do mais novo
+    ao mais antigo, com a mesma regra.
+    """
+    linhas = [(i, r) for i, r in enumerate(historico) if isinstance(r.get("ano"), int)]
+    linhas.sort(key=lambda t: (-t[1]["ano"], 0 if _em_curso(t[1]) else 1, -t[0]))
+    return {str(n): {"ano": r["ano"], "municipio": r.get("municipio", ""), "escola": r.get("escola", ""), "curso": r.get("curso", ""),
+                     "serie": r.get("serie", ""), "resultado": r.get("resultado", ""),
+                     "turma": turma_equivalente(r.get("curso", ""), r.get("serie", ""))}
+            for n, (_, r) in enumerate(linhas, 1)}
 
 
 @dataclass
@@ -550,9 +590,16 @@ def _mesmo_aluno(a: dict, b: dict) -> bool:
     if a.get("cgm") and b.get("cgm"):
         return str(a["cgm"]) == str(b["cgm"])
     pa, pb = a.get("pedido") or {}, b.get("pedido") or {}
-    chave = lambda p: (normalizar(p.get("nome")), p.get("data_nascimento", ""), normalizar(p.get("nome_mae")), p.get("cgm", ""),  # noqa: E731
-                       normalizar(p.get("responsavel")))
-    return bool(pa) and chave(pa) == chave(pb)
+    if not pa or not pb:
+        return False
+    chave = lambda p: (normalizar(p.get("nome")), normalizar(p.get("nome_mae")), p.get("cgm", ""), normalizar(p.get("responsavel")))  # noqa: E731
+    if chave(pa) != chave(pb):
+        return False
+    da, db = pa.get("data_nascimento", ""), pb.get("data_nascimento", "")
+    if da == db:
+        return True
+    # pré-matrícula: o registro de antes de a data existir (sem data) é do mesmo aluno que o novo (com data)
+    return pa.get("origem") == pb.get("origem") == "pre_matricula" and (not da or not db)
 
 
 def atualizar_consolidado(registro: dict, ano: Optional[str] = None) -> tuple[Path, bool]:
@@ -602,14 +649,14 @@ async def _avaliar_nome(nav, consulta: Consulta, pesquisa: dict) -> Resultado:
         motivo = "há alunos com esse nome, mas com outra data de nascimento" if descartados else "nenhum aluno com esse nome"
         return Resultado("nao_encontrado", motivo=motivo, parecidos=parecidos)
 
-    def com_data_da_tabela(c: Candidato, cad: dict) -> dict:
-        return {**cad, "nascimento": cad.get("nascimento") or c.nascimento, "mae": cad.get("mae") or c.mae}
+    com_data_da_tabela = unir_tabela_e_cadastro
 
     if len(a_conferir) == 1:
         await nav.abrir(a_conferir[0])
         cad = await nav.cadastro()
         if cadastro_confere(consulta, cad):
-            return Resultado("encontrado", cad, conferido_por=como_foi_conferido(consulta, com_data_da_tabela(a_conferir[0], cad), True))
+            cad = com_data_da_tabela(a_conferir[0], cad)
+            return Resultado("encontrado", cad, conferido_por=como_foi_conferido(consulta, cad, True))
         await nav.fechar()
         return Resultado("nao_encontrado", motivo="o aluno com esse nome tem outra data de nascimento ou outra mãe",
                          parecidos=parecidos + [_parecido_do_cadastro(cad)])
@@ -622,7 +669,7 @@ async def _avaliar_nome(nav, consulta: Consulta, pesquisa: dict) -> Resultado:
     parecidos += [_parecido_do_cadastro(cad) for _, cad in rejeitados]
     if len(confirmados) == 1:
         c, cad = confirmados[0]
-        return Resultado("encontrado", await _abrir_e_ler(nav, pesquisa, c), parecidos=parecidos,
+        return Resultado("encontrado", com_data_da_tabela(c, await _abrir_e_ler(nav, pesquisa, c)), parecidos=parecidos,
                          conferido_por=como_foi_conferido(consulta, com_data_da_tabela(c, cad), True))
     if len(confirmados) > 1 and consulta.responsavel and not consulta.mae:
         # pré-matrícula: sem data nem mãe, o nome do responsável desempata se for o da mãe no cadastro
@@ -630,7 +677,7 @@ async def _avaliar_nome(nav, consulta: Consulta, pesquisa: dict) -> Resultado:
         if len(pelo_responsavel) == 1:
             c, cad = pelo_responsavel[0]
             outros = [_parecido_do_cadastro(x) for _, x in confirmados if x is not cad]
-            return Resultado("encontrado", await _abrir_e_ler(nav, pesquisa, c), parecidos=parecidos + outros,
+            return Resultado("encontrado", com_data_da_tabela(c, await _abrir_e_ler(nav, pesquisa, c)), parecidos=parecidos + outros,
                              conferido_por=como_foi_conferido(consulta, com_data_da_tabela(c, cad), True),
                              motivo=f"{len(confirmados)} homônimos: escolhido o de mãe = responsável da pré-matrícula")
     if len(confirmados) > 1:
@@ -639,17 +686,47 @@ async def _avaliar_nome(nav, consulta: Consulta, pesquisa: dict) -> Resultado:
         if len(exatos) == 1:
             c, cad = exatos[0]
             outros = [_parecido_do_cadastro(x) for _, x in confirmados if x is not cad]
-            return Resultado("encontrado", await _abrir_e_ler(nav, pesquisa, c), parecidos=parecidos + outros,
+            return Resultado("encontrado", com_data_da_tabela(c, await _abrir_e_ler(nav, pesquisa, c)), parecidos=parecidos + outros,
                              conferido_por=como_foi_conferido(consulta, com_data_da_tabela(c, cad), True),
                              motivo=f"{len(confirmados)} alunos serviam: escolhido o de nome idêntico ao pedido")
     if len(confirmados) > 1:
-        faltam = "informe a data de nascimento e o nome da mãe para separá-los" if not (consulta.nascimento and consulta.mae) \
-            else "têm o mesmo nome, data de nascimento e mãe"
+        falta = [x for x, tem in (("a data de nascimento", consulta.nascimento), ("o nome da mãe", consulta.mae)) if not tem]
+        faltam = f"informe {' e '.join(falta)} para separá-los" if falta else "têm o mesmo nome, data de nascimento e mãe"
         return Resultado("ambiguo", motivo=f"{len(confirmados)} alunos servem para o pedido: {faltam}",
                          parecidos=[_parecido_do_cadastro(cad) for _, cad in confirmados])
     aviso = f" (só os {LIMITE_VERIFICAR} primeiros foram conferidos)" if len(a_conferir) > LIMITE_VERIFICAR else ""
     return Resultado("nao_encontrado", motivo=f"há alunos com esse nome, mas nenhum com essa data de nascimento e essa mãe{aviso}",
                      parecidos=parecidos)
+
+
+async def completar_pela_base_abc(nav, consulta: Consulta, cad: dict, log: Callable[[str], None] = print) -> dict:
+    """
+    Aluno achado, mas sem CGM (e/ou sem mãe): procura o mesmo aluno em "Pesquisar ABC" (tabela CGM | Nome | Nome da Mãe |
+    Data Nasc.) e devolve {"cgm", "mae", "nascimento"} do que for achado — só aceita se for UM aluno com o nome idêntico
+    (e a mesma data/mãe, quando conhecidas). Nunca levanta: sem confirmação devolve {}.
+    """
+    nome = cad.get("nome") or consulta.nome
+    nasc = cad.get("nascimento") or consulta.nascimento
+    alvo = Consulta(nome=nome, nascimento=nasc, mae=cad.get("mae") or consulta.mae, responsavel=consulta.responsavel)
+    for termo, com_data in ((nome, False), (nome, True)) if nasc else ((nome, False),):
+        try:
+            log(f"    sem CGM no cadastro: procurando em Pesquisar ABC — {termo}" + (f" + {formatar_data(nasc)}" if com_data else ""))
+            if not await nav.pesquisar_abc(nome=termo, nascimento=nasc if com_data else None):
+                continue
+            a_conferir, _ = filtrar_candidatos(await nav.candidatos_abc(), alvo)
+        except FormularioDesconhecido:
+            raise
+        except Exception as exc:                          # noqa: BLE001 — o plano B nunca derruba o registro
+            log(f"    ⚠️  Pesquisar ABC falhou: {exc}")
+            return {}
+        exatos = [c for c in a_conferir if normalizar(c.nome_para_conferir) == normalizar(nome)] or a_conferir
+        if len(exatos) > 1 and consulta.responsavel:
+            exatos = [c for c in exatos if c.mae and (nome_confere(consulta.responsavel, c.mae) or nome_confere(c.mae, consulta.responsavel))] or exatos
+        if len(exatos) == 1 and exatos[0].cgm:
+            c = exatos[0]
+            log(f"    CGM {c.cgm} achado em Pesquisar ABC")
+            return {"cgm": c.cgm, "mae": c.mae, "nascimento": c.nascimento}
+    return {}
 
 
 async def localizar_e_abrir(nav, consulta: Consulta, log: Callable[[str], None] = print) -> Resultado:
@@ -713,6 +790,19 @@ async def processar_consulta(nav, consulta: Consulta, resumo: ResumoBaseAbc, ano
     except Exception as exc:                                     # noqa: BLE001 — um aluno com problema não derruba os outros
         resultado = Resultado("erro", motivo=str(exc)[:200])
         historico = []
+    if resultado.estado == "encontrado" and resultado.cadastro is not None:
+        try:
+            await nav.fechar()                                   # a tela do formulário volta antes de procurar em Pesquisar ABC
+        except Exception as exc:                                 # noqa: BLE001
+            log(f"    ⚠️  Não foi possível fechar o cadastro: {exc}")
+        cad = resultado.cadastro
+        if not (cad.get("cgm") or consulta.cgm):
+            extra = await completar_pela_base_abc(nav, consulta, cad, log)
+            if extra:
+                resultado.cadastro = {**cad, "cgm": extra["cgm"], "mae": cad.get("mae") or extra.get("mae") or "",
+                                      "nascimento": cad.get("nascimento") or extra.get("nascimento")}
+            else:
+                resultado.motivo = (resultado.motivo + "; " if resultado.motivo else "") + "aluno achado, mas o CGM não apareceu no cadastro nem em Pesquisar ABC"
     registro = montar_registro(consulta, resultado, historico)
     arquivo, gravou = atualizar_consolidado(registro, ano)
     resumo.arquivo = str(arquivo)
@@ -721,10 +811,6 @@ async def processar_consulta(nav, consulta: Consulta, resumo: ResumoBaseAbc, ano
         escolas = registro["escolas"]
         recente = escolas.get("1", {}).get("escola") or "(sem histórico)"
         log(f"    ✅ {registro['nome']} (CGM {registro['cgm'] or 'sem CGM'}) — {recente}; {len(escolas)} escola(s) no histórico")
-        try:
-            await nav.fechar()
-        except Exception as exc:                                 # noqa: BLE001 — o registro já foi gravado
-            log(f"    ⚠️  Não foi possível fechar o cadastro: {exc}")
         return
     lista = {"nao_encontrado": resumo.nao_encontrados, "ambiguo": resumo.ambiguos, "erro": resumo.erros}[resultado.estado]
     lista.append((rotulo, resultado.motivo))
@@ -812,10 +898,38 @@ class NavegadorBaseAbc:
             return False
         return await self.page.locator("#lista_alunos_div a").count() > 0
 
-    async def candidatos(self) -> list[Candidato]:
-        ths = self.page.locator("#lista_alunos_div #list_tabela th")
+    async def pesquisar_abc(self, *, nome: str, nascimento: Optional[date]) -> bool:
+        """Botão "Pesquisar ABC": o resultado vem em #lista_alunos_ABC_div (CGM | Nome | Nome da Mãe | Data Nasc.)."""
+        from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+
+        c_nome = await self._campo(CAMPOS_NOME, ROTULOS_NOME)
+        c_nasc = await self._campo(CAMPOS_NASCIMENTO, ROTULOS_NASCIMENTO)
+        if c_nome is None:
+            raise FormularioDesconhecido("campo Nome não encontrado para Pesquisar ABC. Campos da página (id|name|tipo): "
+                                         f"{await self.descrever_formulario()}")
+        for campo in (await self._campo(CAMPOS_CGM), c_nome, c_nasc):
+            if campo is not None:
+                await campo.fill("")
+        await c_nome.fill(nome)
+        if nascimento and c_nasc is not None:
+            await c_nasc.fill(formatar_data(nascimento))
+        botao = self.page.locator("input[value='Pesquisar ABC']")
+        if await botao.count() == 0:
+            return False
+        await botao.first.click()
+        try:
+            await self.page.wait_for_selector("#lista_alunos_ABC_div #list_tabela", timeout=8000)
+        except PlaywrightTimeoutError:
+            return False
+        return await self.page.locator("#lista_alunos_ABC_div #list_tabela tr:has(a)").count() > 0
+
+    async def candidatos_abc(self) -> list[Candidato]:
+        return await self.candidatos("#lista_alunos_ABC_div")
+
+    async def candidatos(self, div: str = "#lista_alunos_div") -> list[Candidato]:
+        ths = self.page.locator(f"{div} #list_tabela th")
         cabecalho = [(await ths.nth(j).inner_text()).strip() for j in range(await ths.count())]     # CGM | Nome | Nome da Mãe | Data Nasc.
-        linhas = self.page.locator("#lista_alunos_div #list_tabela tr:has(a)")
+        linhas = self.page.locator(f"{div} #list_tabela tr:has(a)")
         saida = []
         for i in range(await linhas.count()):
             tds = linhas.nth(i).locator("td")
