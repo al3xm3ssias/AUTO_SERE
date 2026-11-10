@@ -249,7 +249,7 @@ def test_acha_pelo_nome_data_e_mae_e_registra_as_escolas(amb):
     [r] = _lido()
     assert (r["cgm"], r["possui_cgm"], r["nome_mae"], r["situacao"]) == ("1025059227", True, "MARIA APARECIDA DE SOUZA", "encontrado")
     assert r["escolas"]["1"] == {"ano": 2026, "escola": "ESC ATUAL", "serie": "5º ano"} and len(r["escolas"]) == 3
-    assert nav.fechados >= 1 and nav.pesquisas[0]["mae"] == "Maria Aparecida"          # a mãe vai para o formulário também
+    assert nav.fechados >= 1 and nav.pesquisas[0]["nascimento"] is None and nav.pesquisas[0]["mae"] == ""   # 1ª busca: só o nome completo
 
 
 def test_homonimos_com_a_mesma_data_sao_separados_pela_mae(amb):
@@ -328,21 +328,43 @@ def test_cgm_que_nao_existe(amb):
     assert resumo.nao_encontrados and _lido()[0]["situacao"] == "nao_encontrado"
 
 
-def test_tenta_variantes_do_nome_e_por_ultimo_sem_os_filtros(amb):
-    class NavSoSemFiltro(NavFalso):
+def test_sem_resultado_com_o_nome_completo_pesquisa_nome_completo_mais_data(amb):
+    class NavSoComData(NavFalso):
         async def pesquisar(self, *, cgm, nome, nascimento, mae=""):
-            # o formulário só acha quando data e mãe NÃO são enviados (como se a mãe digitada fosse escrita diferente)
-            if nascimento is not None or mae:
+            # a Base ABC só devolve o aluno quando a data de nascimento vai junto no formulário
+            if nascimento is None:
                 self.pesquisas.append({"cgm": cgm, "nome": nome, "nascimento": nascimento, "mae": mae})
                 return False
             return await super().pesquisar(cgm=cgm, nome=nome, nascimento=nascimento, mae=mae)
-    nav = NavSoSemFiltro(BASE)
+    nav = NavSoComData(BASE)
     resumo, _ = _rodar(nav, "Claudio Alex Mendes de Souza 12/03/2015 mãe: Maria Aparecida")
     assert len(resumo.encontrados) == 1 and _lido()[0]["cgm"] == "1025059227"
-    filtradas = [p for p in nav.pesquisas if p["nascimento"] is not None]
-    assert [p["nome"] for p in filtradas] == ["Claudio Alex Mendes de Souza", "Claudio Souza", "Claudio Alex"]     # variantes, com data e mãe
-    ultima = nav.pesquisas[-1]
-    assert (ultima["nome"], ultima["nascimento"], ultima["mae"]) == ("Claudio Alex Mendes de Souza", None, "")   # por último, sem os filtros
+    assert [(p["nome"], p["nascimento"], p["mae"]) for p in nav.pesquisas] == [
+        ("Claudio Alex Mendes de Souza", None, ""),                      # 1º: só o nome completo
+        ("Claudio Alex Mendes de Souza", D(2015, 3, 12), "")]            # 2º: nome completo + data de nascimento
+
+
+def test_ordem_das_tentativas_de_busca():
+    c = cb.Consulta(nome="Claudio Alex Mendes de Souza", nascimento=D(2015, 3, 12))
+    assert cb.tentativas_de_busca(c) == [("Claudio Alex Mendes de Souza", False), ("Claudio Alex Mendes de Souza", True),
+                                         ("Claudio Souza", True), ("Claudio Alex", True)]
+    sem_data = cb.Consulta(nome="Claudio Alex Mendes de Souza", mae="Maria")
+    assert cb.tentativas_de_busca(sem_data) == [("Claudio Alex Mendes de Souza", False), ("Claudio Souza", False), ("Claudio Alex", False)]
+    assert cb.tentativas_de_busca(cb.Consulta(cgm="1025059227")) == []
+
+
+def test_tenta_variantes_do_nome_depois_do_nome_completo_com_data(amb):
+    class NavSoVariante(NavFalso):
+        async def pesquisar(self, *, cgm, nome, nascimento, mae=""):
+            if nome == "Claudio Alex Mendes de Souza":                   # o nome completo nunca devolve nada
+                self.pesquisas.append({"cgm": cgm, "nome": nome, "nascimento": nascimento, "mae": mae})
+                return False
+            return await super().pesquisar(cgm=cgm, nome=nome, nascimento=nascimento, mae=mae)
+    nav = NavSoVariante(BASE)
+    resumo, _ = _rodar(nav, "Claudio Alex Mendes de Souza 12/03/2015 mãe: Maria Aparecida")
+    assert len(resumo.encontrados) == 1 and _lido()[0]["cgm"] == "1025059227"
+    assert [(p["nome"], p["nascimento"]) for p in nav.pesquisas] == [
+        ("Claudio Alex Mendes de Souza", None), ("Claudio Alex Mendes de Souza", D(2015, 3, 12)), ("Claudio Souza", D(2015, 3, 12))]
 
 
 def test_erro_tecnico_e_registrado_e_os_outros_seguem(amb):
@@ -587,3 +609,58 @@ def test_modo_teste_pega_so_o_primeiro_da_pre_matricula(amb):
     (amb / "dados" / "2026" / "pre_matricula.json").write_text(json.dumps(PRE), encoding="utf-8")
     plano = reg.obter("base_abc").planejar(Opcoes(modo_teste=True), {"pre_matricula": "todos"}, {}, {})
     assert len(plano.kwargs["consultas"]) == 1
+
+
+# ───────────── tabela real da Base ABC: CGM | Nome | Nome da Mãe | Data Nasc. ─────────────
+
+CAB = ["CGM", "Nome", "Nome da Mãe", "Data Nasc."]
+
+
+def test_candidato_le_as_colunas_pelo_cabecalho():
+    c = cb.candidato_da_linha(0, ["1025059227", "JOAO MARIARO", "VALDIEIRO", "10/10/1900"], CAB)
+    assert (c.cgm, c.nome, c.mae, c.nascimento) == ("1025059227", "JOAO MARIARO", "VALDIEIRO", D(1900, 10, 10))
+    vazio = cb.candidato_da_linha(1, ["", "ANA LIMA", "", ""], CAB)               # célula vazia não desloca as colunas
+    assert (vazio.nome, vazio.mae, vazio.nascimento) == ("ANA LIMA", "", None)
+
+
+def test_nome_da_mae_na_tabela_nao_conta_como_nome_do_aluno():
+    c = cb.candidato_da_linha(0, ["1025059227", "ANA LIMA", "MARIA CLARA SOUZA", "01/01/2015"], CAB)
+    assert cb.filtrar_candidatos([c], cb.Consulta(nome="Clara Souza", nascimento=D(2015, 1, 1)))[0] == []
+
+
+def test_tabela_descarta_quem_tem_outra_mae_e_fica_o_que_bate():
+    cs = [cb.candidato_da_linha(0, ["1000000001", "JOAO PEDRO SILVA", "ROSA MENDES", "01/05/2014"], CAB),
+          cb.candidato_da_linha(1, ["1000000002", "JOAO PEDRO SILVA", "MARIA APARECIDA DE SOUZA", "01/05/2014"], CAB),
+          cb.candidato_da_linha(2, ["1000000003", "JOAO PEDRO SILVA", "MARIA APARECIDA DE SOUZA", "09/09/2013"], CAB)]
+    ficam, fora = cb.filtrar_candidatos(cs, cb.Consulta(nome="Joao Pedro Silva", nascimento=D(2014, 5, 1), mae="Maria Aparecida"))
+    assert [c.cgm for c in ficam] == ["1000000002"] and [c.cgm for c in fora] == ["1000000001", "1000000003"]
+    assert fora[0].mae == "ROSA MENDES"
+
+
+class NavTabelaReal(NavFalso):
+    """Tabela com mãe e data, como a real."""
+    async def candidatos(self):
+        return [cb.candidato_da_linha(i, [a["cgm"], a["nome"], a["mae"], cb.formatar_data(a["nasc"])], CAB) for i, a in enumerate(self.resultado)]
+
+
+HOMONIMOS = [{"cgm": f"10000000{i}", "nome": "JOAO MARIARO", "nasc": D(2015, 1, i + 1), "mae": f"MAE {n}", "historico": HIST}
+             for i, n in enumerate(["UM", "DOIS", "TRES", "QUATRO", "CINCO"])]
+
+
+def test_cinco_homonimos_a_data_e_a_mae_da_tabela_escolhem_o_certo(amb):
+    nav = NavTabelaReal(HOMONIMOS)
+    resumo, _ = _rodar(nav, "Joao Mariaro 03/01/2015 mãe: Mae Tres")
+    assert len(resumo.encontrados) == 1 and _lido()[0]["cgm"] == "100000002"
+    assert nav.pesquisas[0]["nascimento"] is None                              # a tabela decidiu, sem precisar da data no formulário
+
+
+def test_cinco_homonimos_so_com_o_nome_continua_ambiguo(amb):
+    resumo, _ = _rodar(NavTabelaReal(HOMONIMOS), "Joao Mariaro mãe: Mae")       # mãe parcial bate nos cinco
+    assert len(resumo.ambiguos) == 1 and len(_lido()[0]["encontrados_parecidos"]) == 5
+
+
+def test_desempate_pelo_nome_identico(amb):
+    base = [{"cgm": "1", "nome": "JOAO PEDRO", "nasc": D(2015, 1, 1), "mae": "ANA", "historico": HIST},
+            {"cgm": "2", "nome": "JOAO PEDROSO", "nasc": D(2015, 1, 1), "mae": "ANA", "historico": []}]
+    resumo, _ = _rodar(NavTabelaReal(base), "Joao Pedro 01/01/2015")
+    assert len(resumo.encontrados) == 1 and _lido()[0]["cgm"] == "1" and "idêntico" in _lido()[0]["observacao"]

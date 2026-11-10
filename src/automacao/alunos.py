@@ -66,6 +66,12 @@ MUDANÇAS EM RELAÇÃO AO ORIGINAL:
    (mantém transferido + matriculado, usa o nº da chamada como validador
    secundário, descarta só leitura repetida e marca "Retorno": True).
 
+8. CORREÇÃO (10/11/2026) — Page.go_back: net::ERR_CACHE_MISS ao voltar da
+   lista de alunos para a lista de turmas (ver _voltar_para_lista_turmas()):
+   o botão correto da lista de alunos é #btnVoltar (a ficha continua com
+   input Voltar — seletores separados por tela); o go_back() agora é só fallback e, se
+   falhar por cache miss, a navegação até 'Por Turma' é refeita.
+
 Toda a lógica de extração de campos (XPaths, tratamento do campo "Cor",
 navegação por CGM, retorno para a lista de turmas) é idêntica ao original —
 nenhuma regra de negócio foi alterada.
@@ -82,13 +88,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from playwright.async_api import async_playwright
+from playwright.async_api import Error as PlaywrightError, async_playwright
 
 from src.comum.credenciais import LOGIN, SENHA
 from src.comum.logger import get_logger
 from src.comum import paths as _paths
 from src.comum.registros_aluno import consolidar_registros
-from src.comum.sere_api import URL, navegar_por_turma
+from src.comum.sere_api import URL, garantir_logado, navegar_por_turma
 
 log = get_logger(__file__)
 
@@ -101,6 +107,64 @@ if not LOGIN or not SENHA:
 _DADOS = _paths.dados_ano_atual()
 
 ALUNOS_JSON = _DADOS / "alunos.json"
+
+
+# Botões "Voltar" por tela — a ORDEM IMPORTA e não pode ser compartilhada:
+# - ficha cadastral do aluno: <input value="Voltar"> volta para a lista de
+#   alunos da turma. Ali o #btnVoltar (se existir) leva para a lista de
+#   TURMAS, voltando "demais" e quebrando o restante do loop.
+# - lista de alunos da turma: #btnVoltar volta para a lista de turmas
+#   (mesmo seletor de src.automacao.turmas).
+_VOLTAR_FICHA = ("//input[@value='Voltar']",)
+_VOLTAR_LISTA_ALUNOS = ("#btnVoltar", "input[name='btnVoltar']", "//input[@value='Voltar']")
+
+
+async def _clicar_voltar(page, seletores) -> bool:
+    """Clica no primeiro botão 'Voltar' encontrado entre `seletores`. False se nenhum existir."""
+    for seletor in seletores:
+        botao = await page.query_selector(seletor)
+        if botao:
+            await botao.click()
+            return True
+    return False
+
+
+async def _voltar_para_lista_turmas(page, turma_id: str) -> None:
+    """
+    Volta da lista de alunos da turma para a lista de turmas.
+
+    CORREÇÃO (10/11/2026): o código antigo procurava só
+    //input[@value='Voltar']; na lista de alunos o botão é #btnVoltar, então
+    caía em page.go_back(). Como essa tela é resultado de um POST, o Chromium
+    não tem a página em cache e go_back() estoura
+    "net::ERR_CACHE_MISS". Agora: (1) tenta os botões Voltar conhecidos;
+    (2) só então tenta go_back(); (3) se o go_back falhar por cache miss,
+    refaz a navegação 'Consulta Padrão → Por Turma' em vez de abortar.
+    """
+    if await _clicar_voltar(page, _VOLTAR_LISTA_ALUNOS):
+        await page.wait_for_timeout(500)
+        return
+
+    log.warning(f"[{turma_id}] Botão Voltar não encontrado; tentando page.go_back()...")
+    try:
+        await page.go_back()
+        await page.wait_for_timeout(500)
+        return
+    except PlaywrightError as e:
+        if "ERR_CACHE_MISS" not in str(e):
+            raise
+        log.warning(f"[{turma_id}] go_back() falhou (ERR_CACHE_MISS); refazendo navegação até 'Por Turma'...")
+
+    try:
+        await navegar_por_turma(page)
+    except Exception as e:
+        # A página pode ter ido para a tela de erro do navegador — recarrega o
+        # SERE, garante o login e navega de novo.
+        log.warning(f"[{turma_id}] Navegação direta falhou ({e}); recarregando o SERE...")
+        await page.goto(URL)
+        await garantir_logado(page, LOGIN, SENHA)
+        await navegar_por_turma(page)
+    await page.wait_for_timeout(1000)
 
 
 async def get_turmas_validas(page) -> list[str]:
@@ -142,16 +206,22 @@ async def get_dados_aluno(page, cgm: str, linha=None) -> dict:
         if linha is not None:
             link = linha.locator("a[href^='javascript:AoClicarAluno']").first
             if await link.count() == 0:
-                print(f"[AVISO] CGM {cgm}: link não encontrado na linha")
-                return aluno_data
+                # Sem o link na linha a página não é a lista da turma: sinaliza
+                # para o chamador reabrir a turma (ver get_alunos_da_turma).
+                raise RuntimeError(f"CGM {cgm}: link não encontrado na linha")
         else:
             link = await page.query_selector(f"//td[a/text()='{cgm}']/a")
             if not link:
                 print(f"[AVISO] CGM {cgm} não encontrado")
                 return aluno_data
 
-        await link.click()
+        await link.click(timeout=15_000)
+        # Mesma espera do original (1s) — NÃO trocar por wait_for_selector de
+        # um campo da ficha: o campo "Nome" já satisfaz a espera na página
+        # antiga, antes da navegação terminar, e a leitura começa no meio da
+        # troca de página ("Execution context was destroyed").
         await page.wait_for_timeout(1000)
+        await page.wait_for_load_state("domcontentloaded")
 
         async def get_text(xpath: str) -> str:
             el = await page.query_selector(xpath)
@@ -208,15 +278,19 @@ async def get_dados_aluno(page, cgm: str, linha=None) -> dict:
         aluno_data["NIS Estudante"] = await get_text("//td[@class='texto_form'][contains(text(),'NIS do Estudante')]/font")
         aluno_data["NIS Responsável"] = await get_text("//td[@class='texto_form'][contains(text(),'NIS do Responsável')]/font")
 
-        voltar = await page.query_selector("//input[@value='Voltar']")
-        if voltar:
-            await voltar.click()
-        else:
+        if not await _clicar_voltar(page, _VOLTAR_FICHA):
             await page.go_back()
         await page.wait_for_timeout(500)
+        # Garante que voltou para a lista de alunos da turma antes do próximo aluno.
+        await page.wait_for_selector(
+            "//table//tr[td/a[contains(@href,'javascript:AoClicarAluno')]]", timeout=15_000
+        )
 
     except Exception as e:
+        # Não engole mais o erro: o chamador (get_alunos_da_turma) precisa saber
+        # que a ficha falhou para refazer a navegação e tentar o aluno de novo.
         print(f"[ERRO] Falha ao coletar dados do CGM {cgm}: {e}")
+        raise
 
     return aluno_data
 
@@ -240,64 +314,144 @@ async def _ler_meta_linha(linha) -> dict:
     return meta
 
 
+_XPATH_LINHAS_ALUNOS = "//table//tr[td/a[contains(@href,'javascript:AoClicarAluno')]]"
+_XPATH_LINHAS_TURMAS = "//tr[td/a[starts-with(@href,'javascript:AoClicarTurma')]]"
+
+# Tentativas por aluno antes de desistir dele e seguir para o próximo, e limite
+# de falhas na turma inteira antes de abandoná-la (evita loop infinito).
+MAX_TENTATIVAS_ALUNO = 3
+MAX_FALHAS_TURMA = 12
+MAX_TENTATIVAS_ABRIR_TURMA = 3
+
+
+async def _abrir_turma(page, turma_id: str) -> bool:
+    """
+    Com a lista de turmas na tela, clica na turma `turma_id` e espera a lista
+    de alunos aparecer. False se a turma não está na página; exceção se o
+    clique ou a espera falharem.
+    """
+    rows = await page.query_selector_all(_XPATH_LINHAS_TURMAS)
+    for r in rows:
+        colunas = await r.query_selector_all("td")
+        if len(colunas) < 4:
+            continue
+        serie = (await colunas[1].inner_text()).strip()
+        turno = (await colunas[2].inner_text()).strip()
+        letra = (await colunas[3].inner_text()).strip()
+        if f"{serie} {turno} {letra}" != turma_id:
+            continue
+        link = await r.query_selector("a[href^='javascript:AoClicarTurma']")
+        if not link:
+            return False
+        await link.click(timeout=15_000)
+        await page.wait_for_selector(_XPATH_LINHAS_ALUNOS, timeout=20_000)
+        return True
+    return False
+
+
+async def _reabrir_turma(page, turma_id: str) -> bool:
+    """
+    RECUPERAÇÃO: refaz Menu → Consulta Padrão → Por Turma e reabre a turma.
+    Se o menu não estiver acessível (página de erro / sessão caída), recarrega
+    o SERE, refaz o login se preciso e navega de novo.
+    """
+    log.warning(f"[{turma_id}] Recuperando: Menu → Consulta Padrão → Por Turma...")
+    try:
+        try:
+            await navegar_por_turma(page)
+        except Exception as e:
+            log.warning(f"[{turma_id}] Menu indisponível ({type(e).__name__}); recarregando o SERE...")
+            await page.goto(URL)
+            await page.wait_for_timeout(1_500)
+            await garantir_logado(page, LOGIN, SENHA)
+            await navegar_por_turma(page)
+        await page.wait_for_selector(_XPATH_LINHAS_TURMAS, timeout=20_000)
+        return await _abrir_turma(page, turma_id)
+    except Exception as e:
+        log.error(f"[{turma_id}] Falha na recuperação: {type(e).__name__}: {e}")
+        return False
+
+
+async def _abrir_turma_com_recuperacao(page, turma_id: str) -> bool:
+    """Abre a turma; na falha, refaz a navegação até 'Por Turma' e tenta de novo."""
+    for tentativa in range(1, MAX_TENTATIVAS_ABRIR_TURMA + 1):
+        if tentativa == 1:
+            try:
+                if await _abrir_turma(page, turma_id):
+                    return True
+                print(f"[AVISO] Não encontrou a turma {turma_id}")
+            except Exception as e:
+                log.warning(f"[{turma_id}] Falha ao abrir a turma ({type(e).__name__}): {e}")
+        elif await _reabrir_turma(page, turma_id):
+            return True
+        log.warning(f"[{turma_id}] Abertura da turma falhou (tentativa {tentativa}/{MAX_TENTATIVAS_ABRIR_TURMA}).")
+    return False
+
+
 async def get_alunos_da_turma(page, turma_id: str) -> tuple[str, list[dict]]:
     """
     Abre a turma pelo `turma_id` e coleta o cadastro completo de todos os
-    seus alunos (um clique no CGM por aluno, retornando à lista de alunos
-    da turma só depois de todos coletados).
+    seus alunos (um clique no CGM por aluno, voltando à lista de alunos da
+    turma a cada ficha e à lista de turmas só no fim).
+
+    RECUPERAÇÃO (10/11/2026): se qualquer passo falhar (timeout, "Execution
+    context was destroyed", ficha que não abre...), em vez de abortar o
+    script refaz Menu → Consulta Padrão → Por Turma, reabre a turma e RETOMA
+    do aluno em que parou (os já coletados são mantidos). Cada aluno tem até
+    MAX_TENTATIVAS_ALUNO tentativas; esgotadas, ele é pulado (logado como
+    erro) e a coleta segue. A turma é abandonada após MAX_FALHAS_TURMA falhas.
     """
     alunos: list[dict] = []
 
-    rows = await page.query_selector_all("//tr[td/a[starts-with(@href,'javascript:AoClicarTurma')]]")
-    target_row = None
-    for r in rows:
-        colunas = await r.query_selector_all("td")
-        if len(colunas) >= 4:
-            serie = (await colunas[1].inner_text()).strip()
-            turno = (await colunas[2].inner_text()).strip()
-            letra = (await colunas[3].inner_text()).strip()
-            full_id = f"{serie} {turno} {letra}"
-            if full_id == turma_id:
-                target_row = r
+    if not await _abrir_turma_com_recuperacao(page, turma_id):
+        log.error(f"[{turma_id}] Não foi possível abrir a turma. Pulando.")
+        return turma_id, alunos
+
+    i = 0
+    tentativas_aluno = 0
+    falhas_turma = 0
+
+    while True:
+        try:
+            aluno_rows = page.locator(_XPATH_LINHAS_ALUNOS)
+            await page.wait_for_selector(_XPATH_LINHAS_ALUNOS, timeout=15_000)
+            if i >= await aluno_rows.count():
+                break  # todos os alunos da turma processados
+
+            linha = aluno_rows.nth(i)
+            cgm_link = linha.locator("a[href^='javascript:AoClicarAluno']")
+            cgm = (await cgm_link.inner_text(timeout=15_000)).strip()
+            meta = await _ler_meta_linha(linha)  # lido ANTES do clique (a página muda depois)
+            dados_aluno = await get_dados_aluno(page, cgm, linha=linha)
+            if dados_aluno:
+                dados_aluno.update(meta)
+                alunos.append(dados_aluno)
+            # NÃO volta à lista de turmas aqui — só depois que acabar o loop
+            i += 1
+            tentativas_aluno = 0
+
+        except Exception as e:
+            tentativas_aluno += 1
+            falhas_turma += 1
+            log.warning(
+                f"[{turma_id}] Falha no aluno nº {i + 1} "
+                f"(tentativa {tentativas_aluno}/{MAX_TENTATIVAS_ALUNO}): {type(e).__name__}: {e}"
+            )
+            if falhas_turma >= MAX_FALHAS_TURMA:
+                log.error(f"[{turma_id}] {falhas_turma} falhas na turma — abandonando o restante dela.")
                 break
-
-    if not target_row:
-        print(f"[AVISO] Não encontrou a turma {turma_id}")
-        return turma_id, alunos
-
-    link = await target_row.query_selector("a[href^='javascript:AoClicarTurma']")
-    if link:
-        await link.click()
-    else:
-        print(f"[ERRO] Link não encontrado na linha da turma {turma_id}")
-        return turma_id, alunos
-
-    await page.wait_for_selector(
-        "//table//tr[td/a[contains(@href,'javascript:AoClicarAluno')]]", timeout=5000
-    )
-
-    aluno_rows = page.locator("//table//tr[td/a[contains(@href,'javascript:AoClicarAluno')]]")
-    count = await aluno_rows.count()
-
-    for i in range(count):
-        linha = aluno_rows.nth(i)
-        cgm_link = linha.locator("a[href^='javascript:AoClicarAluno']")
-        cgm = (await cgm_link.inner_text()).strip()
-        meta = await _ler_meta_linha(linha)  # lido ANTES do clique (a página muda depois)
-        dados_aluno = await get_dados_aluno(page, cgm, linha=linha)
-        if dados_aluno:
-            dados_aluno.update(meta)
-            alunos.append(dados_aluno)
-        # NÃO volta aqui! só volta depois que acabar o loop
+            if tentativas_aluno >= MAX_TENTATIVAS_ALUNO:
+                log.error(f"[{turma_id}] Aluno nº {i + 1} pulado após {MAX_TENTATIVAS_ALUNO} tentativas.")
+                i += 1
+                tentativas_aluno = 0
+            if not await _reabrir_turma(page, turma_id):
+                log.error(f"[{turma_id}] Não foi possível reabrir a turma — encerrando a coleta dela.")
+                break
+            log.info(f"[{turma_id}] Turma reaberta; retomando do aluno nº {i + 1}.")
 
     alunos = consolidar_registros(alunos, rotulo=turma_id)
 
-    voltar = await page.query_selector("//input[@value='Voltar']")
-    if voltar:
-        await voltar.click()
-    else:
-        await page.go_back()
-    await page.wait_for_timeout(500)
+    await _voltar_para_lista_turmas(page, turma_id)
 
     return turma_id, alunos
 

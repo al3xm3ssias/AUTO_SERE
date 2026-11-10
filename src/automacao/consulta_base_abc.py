@@ -36,13 +36,19 @@ Homônimos — a data de nascimento e o nome da mãe é que separam um aluno do 
   • entre os de mesmo nome, só fica quem tem a mesma data de nascimento E o mesmo nome da mãe, quando esses dados foram
     informados e o SERE os mostra (se o cadastro não mostra o dado, ele não derruba o candidato);
   • sobrou mais de um → NÃO escolhe: registra "ambiguo" com os candidatos. Informe a mãe ou a data para separar.
+  • a tabela de resultados traz CGM, Nome, Nome da Mãe e Data Nasc.: são lidos pelo cabeçalho e já descartam quem tem outra
+    data ou outra mãe; entre os que sobram, se só um tem o nome IGUAL ao pedido, é ele;
   • se a tabela de resultados não mostra a data, abre o cadastro de cada candidato (até LIMITE_VERIFICAR) e confere lá;
-  • sem resultado com o nome completo, tenta primeiro + último nome, os dois primeiros e, por último, o nome completo sem
-    os filtros de data e de mãe do formulário (a conferência continua sendo feita no cadastro).
+  • a busca começa só com o NOME COMPLETO; se não achar o aluno OU se achar homônimos que a tabela/cadastro não separam
+    (ambíguo), repete com o nome completo + a DATA DE NASCIMENTO no formulário (quando a data foi informada) e, depois,
+    com o nome encurtado (tirando uma palavra do fim de cada vez até as duas primeiras: "João Maria dos Santos" →
+    "João Maria") e primeiro + último nome, sempre com a data. A mãe não vai para o formulário (a Base ABC não tem esse
+    campo): é conferida no cadastro (e, na tabela, quando ela mostra a coluna).
 
-⚠️  O formulário real da Base ABC não foi visto ao escrever isto: os nomes dos campos Nome, Data de nascimento e Nome da
-mãe são tentativas (CAMPOS_NOME / CAMPOS_NASCIMENTO / CAMPOS_MAE) e os rótulos do cadastro também (ROTULOS_*). Se o campo
-Nome não for achado, a execução PARA com a lista dos campos que existem na página, para ajustar as constantes.
+Formulário da Base ABC (conferido no HTML da tela): campos cgm, nome e dataNasc (mascarados dd/mm/aaaa) e os botões
+"Pesquisar ABC" e "Pesquisar SERE"; a tabela de resultados é list_tabela (CGM | Nome | Nome da Mãe | Data Nasc.). Os nomes
+tentados ficam em CAMPOS_NOME / CAMPOS_NASCIMENTO / CAMPOS_MAE e os rótulos do cadastro em ROTULOS_*. Se o campo Nome não
+for achado, a execução PARA com a lista dos campos que existem na página, para ajustar as constantes.
 Nada aqui grava no SERE: só lê e escreve o arquivo local.
 ═══════════════════════════════════════════════════════════════════════════════════════════
 """
@@ -76,7 +82,10 @@ _RE_DATA = re.compile(r"(?<!\d)(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})(?!\d)")
 _RE_CGM_SOZINHO = re.compile(r"(?i)^\s*(?:cgm\s*[:\-]?\s*)?(\d{8,12})\s*$")
 _RE_CGM_NA_LINHA = re.compile(r"(?<![\d/.\-])\d{8,12}(?![\d/.\-])")
 _RE_MAE = re.compile(r"(?i)\b(?:nome\s+da\s+m[aã]e|m[aã]e|filia[cç][aã]o)\b\s*[:\-]?\s*")
-_PALAVRAS_DE_ROTULO = re.compile(r"(?i)\b(?:data\s+de\s+nascimento|data\s+nasc\.?|nascimento|nasc\.?|d\.?n\.?|cgm|nome)\b\s*[:\-]?")
+# Rótulos de campo a tirar do nome. "nascimento", "nasc.", "d.n." e "nome" só valem com os dois-pontos ("Nasc.: 12/03/2015"),
+# porque também podem ser sobrenome ("João Maria dos Santos Nascimento").
+_PALAVRAS_DE_ROTULO = re.compile(r"(?i)\b(?:data\s+de\s+nascimento|data\s+nasc\.?|cgm)\b\s*[:\-]?"
+                                 r"|\b(?:nascimento|nasc\.?|d\.?n\.?|nome)\s*:\s*")
 
 
 class FormularioDesconhecido(RuntimeError):
@@ -340,14 +349,41 @@ class Candidato:
     celulas: tuple = ()
     nascimento: Optional[date] = None
     cgm: str = ""
+    mae: str = ""                         # coluna "Nome da Mãe" da tabela (vazia se a tabela não tiver)
+    nome: str = ""                        # coluna "Nome" da tabela (vazia se não deu para identificar o cabeçalho)
 
     @property
     def texto(self) -> str:
         return " ".join(self.celulas)
 
+    @property
+    def nome_para_conferir(self) -> str:
+        """Só a coluna Nome, quando a tabela tem cabeçalho (não mistura o nome da mãe); senão a linha inteira."""
+        return self.nome or self.texto
 
-def candidato_da_linha(indice: int, celulas: list[str]) -> Candidato:
-    celulas = tuple(str(c or "").strip() for c in celulas if str(c or "").strip())
+
+def _coluna(cabecalho: list[str], cel: list[str], *chaves: str) -> str:
+    for i, h in enumerate(cabecalho):
+        if i < len(cel) and any(h == k or h.startswith(k) for k in chaves):
+            return cel[i]
+    return ""
+
+
+def candidato_da_linha(indice: int, celulas: list[str], cabecalho: Optional[list[str]] = None) -> Candidato:
+    """Linha da tabela → Candidato. Com `cabecalho` (CGM | Nome | Nome da Mãe | Data Nasc.) lê cada coluna pelo nome dela."""
+    bruto = [str(c or "").strip() for c in celulas]
+    cab = [normalizar(h) for h in (cabecalho or [])]
+    if cab:
+        nome = _coluna(cab, bruto, "NOME")
+        mae = _coluna(cab, bruto, "NOME DA MAE", "MAE")
+        cgm_col = _coluna(cab, bruto, "CGM")
+        try:
+            nasc_col = parse_data(_coluna(cab, bruto, "DATA"))
+        except ValueError:
+            nasc_col = None
+        if nome:
+            return Candidato(indice, tuple(c for c in bruto if c), nasc_col, cgm_col if re.fullmatch(r"\d{8,12}", cgm_col) else "", mae, nome)
+    celulas = tuple(c for c in bruto if c)
     nasc = None
     for c in celulas:
         try:
@@ -385,7 +421,7 @@ def cadastro_confere(consulta: Consulta, cad: dict) -> bool:
 
 
 def _parecido(c: Candidato) -> dict:
-    return {"nome": c.texto, "cgm": c.cgm, "data_nascimento": formatar_data(c.nascimento), "nome_mae": ""}
+    return {"nome": c.nome_para_conferir, "cgm": c.cgm, "data_nascimento": formatar_data(c.nascimento), "nome_mae": c.mae}
 
 
 def _parecido_do_cadastro(cad: dict) -> dict:
@@ -394,21 +430,29 @@ def _parecido_do_cadastro(cad: dict) -> dict:
 
 
 def filtrar_candidatos(candidatos: list[Candidato], consulta: Consulta) -> tuple[list[Candidato], list[Candidato]]:
-    """(a conferir no cadastro, parecidos descartados). Descarta só o que a TABELA prova ser outro: nome diferente (nem entra)
-    ou data de nascimento diferente. A mãe e a data ausente da tabela são conferidas no cadastro."""
-    por_nome = [c for c in candidatos if nome_confere(consulta.nome, c.texto)]
-    if consulta.nascimento is None:
-        return por_nome, []
-    ficam = [c for c in por_nome if c.nascimento is None or c.nascimento == consulta.nascimento]
+    """(a conferir no cadastro, parecidos descartados). Descarta o que a TABELA prova ser outro: nome diferente (nem entra),
+    data de nascimento diferente ou nome da mãe diferente. Dado que a tabela não mostra é conferido no cadastro."""
+    por_nome = [c for c in candidatos if nome_confere(consulta.nome, c.nome_para_conferir)]
+
+    def serve(c: Candidato) -> bool:
+        if consulta.nascimento and c.nascimento and c.nascimento != consulta.nascimento:
+            return False
+        if consulta.mae and c.mae and not nome_confere(consulta.mae, c.mae):
+            return False
+        return True
+    ficam = [c for c in por_nome if serve(c)]
     return ficam, [c for c in por_nome if c not in ficam]
 
 
 def variantes_de_busca(nome: str) -> list[str]:
-    """O que digitar no campo Nome, do mais específico ao mais aberto (sem repetir)."""
+    """O que digitar no campo Nome, do mais específico ao mais aberto (sem repetir): o nome completo; o nome tirando uma
+    palavra do fim de cada vez, até as duas primeiras (\"João Maria dos Santos Nascimento\" → \"João Maria dos Santos\" →
+    \"João Maria dos\" → \"João Maria\"); primeiro + último nome; e o nome completo sem acento."""
     palavras = nome.split()
     todas = [" ".join(palavras)]
+    todas += [" ".join(palavras[:n]) for n in range(len(palavras) - 1, 1, -1)]
     if len(palavras) > 2:
-        todas += [f"{palavras[0]} {palavras[-1]}", f"{palavras[0]} {palavras[1]}"]
+        todas.append(f"{palavras[0]} {palavras[-1]}")
     sem_acento = normalizar(nome)
     if sem_acento and sem_acento != todas[0].upper():
         todas.append(sem_acento)
@@ -418,6 +462,24 @@ def variantes_de_busca(nome: str) -> list[str]:
             vistos.add(v)
             saida.append(v)
     return saida
+
+
+def tentativas_de_busca(consulta: Consulta) -> list[tuple[str, bool]]:
+    """
+    (texto do campo Nome, enviar a data de nascimento?) na ordem em que a Base ABC é consultada:
+      1. nome completo, sem data;
+      2. nome completo + data de nascimento (só se a data foi informada);
+      3. primeiro + último nome e os dois primeiros (e o nome sem acento), com a data quando houver.
+    """
+    variantes = variantes_de_busca(consulta.nome)
+    if not variantes:
+        return []
+    completo, resto = variantes[0], variantes[1:]
+    tentativas = [(completo, False)]
+    if consulta.nascimento:
+        tentativas.append((completo, True))
+    tentativas += [(v, bool(consulta.nascimento)) for v in resto]
+    return tentativas
 
 
 # ───────────────────────────── resultado ─────────────────────────────
@@ -541,7 +603,7 @@ async def _avaliar_nome(nav, consulta: Consulta, pesquisa: dict) -> Resultado:
         return Resultado("nao_encontrado", motivo=motivo, parecidos=parecidos)
 
     def com_data_da_tabela(c: Candidato, cad: dict) -> dict:
-        return {**cad, "nascimento": cad.get("nascimento") or c.nascimento}
+        return {**cad, "nascimento": cad.get("nascimento") or c.nascimento, "mae": cad.get("mae") or c.mae}
 
     if len(a_conferir) == 1:
         await nav.abrir(a_conferir[0])
@@ -572,6 +634,15 @@ async def _avaliar_nome(nav, consulta: Consulta, pesquisa: dict) -> Resultado:
                              conferido_por=como_foi_conferido(consulta, com_data_da_tabela(c, cad), True),
                              motivo=f"{len(confirmados)} homônimos: escolhido o de mãe = responsável da pré-matrícula")
     if len(confirmados) > 1:
+        # desempate: "Joao Pedro" também confere com "JOAO PEDROSO"; se só um tem o nome IGUAL ao pedido, é ele
+        exatos = [(c, cad) for c, cad in confirmados if normalizar(cad.get("nome") or c.nome_para_conferir) == normalizar(consulta.nome)]
+        if len(exatos) == 1:
+            c, cad = exatos[0]
+            outros = [_parecido_do_cadastro(x) for _, x in confirmados if x is not cad]
+            return Resultado("encontrado", await _abrir_e_ler(nav, pesquisa, c), parecidos=parecidos + outros,
+                             conferido_por=como_foi_conferido(consulta, com_data_da_tabela(c, cad), True),
+                             motivo=f"{len(confirmados)} alunos serviam: escolhido o de nome idêntico ao pedido")
+    if len(confirmados) > 1:
         faltam = "informe a data de nascimento e o nome da mãe para separá-los" if not (consulta.nascimento and consulta.mae) \
             else "têm o mesmo nome, data de nascimento e mãe"
         return Resultado("ambiguo", motivo=f"{len(confirmados)} alunos servem para o pedido: {faltam}",
@@ -599,25 +670,30 @@ async def localizar_e_abrir(nav, consulta: Consulta, log: Callable[[str], None] 
                                                   f"nascido em {formatar_data(cad.get('nascimento')) or '?'})",
                          parecidos=[_parecido_do_cadastro(cad)])
 
-    variantes = variantes_de_busca(consulta.nome)
-    tentativas = [(v, True) for v in variantes]
-    if consulta.nascimento or consulta.mae:
-        tentativas.append((variantes[0], False))             # por último, sem os filtros do formulário
+    tentativas = tentativas_de_busca(consulta)
     ultimo = Resultado("nao_encontrado", motivo="nenhum aluno com esse nome")
     parecidos: list = []
-    for termo, com_filtros in tentativas:
-        pesquisa = {"cgm": "", "nome": termo, "nascimento": consulta.nascimento if com_filtros else None,
-                    "mae": consulta.mae if com_filtros else ""}
-        log(f"    pesquisando por nome: {termo}{'' if com_filtros else ' (sem data e mãe no formulário)'}")
+    ambiguo: Optional[Resultado] = None                  # homônimos achados na busca sem a data: guardados enquanto se tenta com a data
+    for termo, com_data in tentativas:
+        pesquisa = {"cgm": "", "nome": termo, "nascimento": consulta.nascimento if com_data else None, "mae": ""}
+        log(f"    pesquisando por nome: {termo}" + (f" + data de nascimento {formatar_data(consulta.nascimento)}" if com_data else ""))
         if not await nav.pesquisar(**pesquisa):
             continue
         r = await _avaliar_nome(nav, consulta, pesquisa)
-        if r.estado in ("encontrado", "ambiguo"):
+        if r.estado == "encontrado":
             return r
+        if r.estado == "ambiguo":
+            if com_data or consulta.nascimento is None:
+                return r                                 # já foi com a data (ou não há data para usar): não dá para separar
+            ambiguo = ambiguo or r
+            log("    homônimos: repetindo a busca com o nome + a data de nascimento")
+            continue
         ultimo = r
         for p in r.parecidos:
             if p not in parecidos:
                 parecidos.append(p)
+    if ambiguo is not None:                              # nem com a data apareceu um aluno só: continua ambíguo
+        return ambiguo
     ultimo.parecidos = parecidos
     return ultimo
 
@@ -737,12 +813,14 @@ class NavegadorBaseAbc:
         return await self.page.locator("#lista_alunos_div a").count() > 0
 
     async def candidatos(self) -> list[Candidato]:
+        ths = self.page.locator("#lista_alunos_div #list_tabela th")
+        cabecalho = [(await ths.nth(j).inner_text()).strip() for j in range(await ths.count())]     # CGM | Nome | Nome da Mãe | Data Nasc.
         linhas = self.page.locator("#lista_alunos_div #list_tabela tr:has(a)")
         saida = []
         for i in range(await linhas.count()):
             tds = linhas.nth(i).locator("td")
             celulas = [(await tds.nth(j).inner_text()).strip() for j in range(await tds.count())]
-            saida.append(candidato_da_linha(i, celulas))
+            saida.append(candidato_da_linha(i, celulas, cabecalho))
         return saida
 
     async def abrir(self, candidato: Candidato) -> None:
