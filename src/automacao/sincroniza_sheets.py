@@ -274,6 +274,22 @@ def sincronizar_turmas(turmas: dict, planilha: str, *, turmas_selecionadas=None,
     return total
 
 
+def _salvar_nas_configuracoes(info: dict) -> None:
+    """
+    Guarda a planilha recém-criada na lista de Configurações → Planilhas do Google Drive (nome, link e id).
+    A planilha já existe no Google: se não der para salvar na lista, só avisa (o ID continua guardado como "última usada").
+    """
+    from src.comum import configuracao
+    try:
+        link = f"https://docs.google.com/spreadsheets/d/{info['id']}/edit"          # o mesmo link que o Google devolve
+        item = configuracao.registrar_planilha_criada(info.get("titulo") or "Planilha", link)
+    except (ValueError, OSError) as exc:
+        log.warning("  ⚠ A planilha foi criada, mas não deu para salvá-la na lista de Configurações: %s", exc)
+        return
+    if item:
+        log.info("  Salva em Configurações → Planilhas do Google Drive (id %s).", item["id"])
+
+
 def _imprimir_resumo(r: Resumo, simulacao: bool) -> None:
     log.info("")
     log.info("═" * 60)
@@ -352,6 +368,7 @@ def executar_planilha_google(operacao: str, planilha: str = "", nome: str = "", 
             configuracao.definir_planilha_google(info["id"])
             log.info("✓ Planilha criada: %s", info["titulo"])
             log.info("  Link: %s", info["url"])
+            _salvar_nas_configuracoes(info)
             planilha = info["id"]
         resumo = Resumo()
         if planilha:                                            # recém-criada: o preenchimento usa o mesmo motor

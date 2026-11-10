@@ -41,7 +41,7 @@ Segurança: `credenciais/google_*.json` e `credenciais/*token*.json` estão no `
 
 * **Só verificar o acesso** — confere se a planilha existe, se há permissão e lista as abas. Não grava. Comece por aqui.
 * **Atualizar uma planilha existente** — informe o link/ID (na próxima vez já vem preenchido). Marque *Simulação* para ver o que mudaria.
-* **Criar uma planilha nova** — informe o nome; cria uma aba por turma com cabeçalhos, preenche e mostra o link.
+* **Criar uma planilha nova** — informe o nome; cria uma aba por turma com cabeçalhos, preenche e mostra o link. A planilha criada também é **salva na lista de Configurações** (veja abaixo).
 
 **Linha de comando** (mesmas opções da tela):
 
@@ -70,3 +70,16 @@ Cada turma vai para uma aba (mapa padrão da escola em `ABA_PADRAO`; ajuste em `
 
 `python -m pytest tests/test_google_sheets.py` — tudo simulado (planilha falsa em memória + cliente oficial sobre HTTP falso).
 O que exige credenciais reais: autorizar de verdade, `--operacao verificar` e `atualizar --simulacao` numa planilha sua, e o 1º `criar`.
+
+
+## Planilhas do Google Drive (lista de links)
+
+**Configurações → Credenciais e integrações → Planilhas do Google Drive.** Guarda o **link**, o **nome** e um **id** de cada planilha
+(`config/config_usuario.json` → `google_sheets.planilhas`). O id é um número sequencial só deste cadastro e nunca é reaproveitado, mesmo
+depois de remover uma planilha. Esta tela só guarda links: não fala com o Google nem altera a planilha. Aceita o link completo ou só o
+ID do Google, recusa links que não sejam de planilha do Google e não deixa salvar a mesma planilha duas vezes.
+
+* Ao **criar** uma planilha pela automação (não vale para a *Simulação*), ela entra sozinha nessa lista. Se não der para salvar na lista,
+  a criação não é desfeita: o log só avisa.
+* A lista convive com `google_sheets.planilha_id` (a última planilha usada, que a automação e a rotina diária leem): uma não mexe na outra.
+* *Remover* só esquece o link; a planilha no Google não é apagada.

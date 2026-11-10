@@ -682,6 +682,114 @@ def test_pedido_invalido_e_recusado_antes_de_autenticar(monkeypatch):
             sh.executar_planilha_google(**kw)
 
 
+# ═════════════════════════ planilhas salvas (Configurações → Planilhas do Google Drive) ═════════════════════════
+
+ID2 = "1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE"
+
+
+def test_planilha_criada_e_salva_na_lista_das_configuracoes(servico_falso):
+    servico_falso["fake"] = nova()
+    r = sh.executar_planilha_google("criar", nome="Turmas 2026", turmas={TURMA: [aluno(1, "1000001", "MARIA")]})
+    salvas = configuracao.planilhas_google()
+    assert len(salvas) == 1
+    assert salvas[0]["id"] == 1 and salvas[0]["nome"] == "Turmas 2026"
+    assert salvas[0]["planilha_id"] == r["id"] and salvas[0]["link"].endswith("/edit")
+    assert configuracao.planilha_google_id() == r["id"]                       # a "última usada" continua funcionando
+
+
+def test_criar_simulado_nao_salva_nada_na_lista(servico_falso):
+    servico_falso["fake"] = nova()
+    sh.executar_planilha_google("criar", nome="X", turmas={TURMA: [aluno(1, "1000001", "M")]}, simulacao=True)
+    assert configuracao.planilhas_google() == []
+
+
+def test_falha_ao_salvar_na_lista_nao_derruba_a_criacao(servico_falso, monkeypatch):
+    servico_falso["fake"] = nova()
+
+    def quebra(*a, **k):
+        raise OSError("disco cheio")
+    monkeypatch.setattr(configuracao, "registrar_planilha_criada", quebra)
+    r = sh.executar_planilha_google("criar", nome="X", turmas={TURMA: [aluno(1, "1000001", "M")]})
+    assert r["resumo"].adicionados == 1 and configuracao.planilha_google_id() == r["id"]
+
+
+def test_adicionar_guarda_nome_link_e_id_sequencial():
+    a = configuracao.adicionar_planilha_google("  Turmas   2026 ", URL)
+    b = configuracao.adicionar_planilha_google("Turmas 2027", ID2)               # só o ID: o link completo é montado
+    assert (a["id"], a["nome"], a["link"], a["planilha_id"]) == (1, "Turmas 2026", URL, ID)
+    assert b["id"] == 2 and b["link"] == f"https://docs.google.com/spreadsheets/d/{ID2}/edit"
+    assert [i["nome"] for i in configuracao.planilhas_google()] == ["Turmas 2026", "Turmas 2027"]
+
+
+def test_id_de_planilha_removida_nao_e_reaproveitado():
+    configuracao.adicionar_planilha_google("A", URL)
+    configuracao.adicionar_planilha_google("B", ID2)
+    configuracao.remover_planilha_google(2)
+    outra = configuracao.adicionar_planilha_google("C", f"https://docs.google.com/spreadsheets/d/{'x' * 25}/edit")
+    assert outra["id"] == 3
+    assert [i["id"] for i in configuracao.planilhas_google()] == [1, 3]
+
+
+@pytest.mark.parametrize("nome,link,trecho", [
+    ("", URL, "nome da planilha"),
+    ("X", "", "Planilha não reconhecida"),
+    ("X", "lixo", "Planilha não reconhecida"),
+    ("X", "https://exemplo.com/spreadsheets/d/" + ID, "planilha do Google"),
+    ("X" * 251, URL, "muito longo"),
+])
+def test_adicionar_recusa_dados_invalidos_sem_gravar(nome, link, trecho):
+    with pytest.raises(ValueError, match=trecho):
+        configuracao.adicionar_planilha_google(nome, link)
+    assert configuracao.planilhas_google() == []
+
+
+def test_mesma_planilha_nao_entra_duas_vezes_e_registrar_criada_nao_duplica():
+    configuracao.adicionar_planilha_google("Primeira", URL)
+    with pytest.raises(ValueError, match="já está salva como 'Primeira' \\(id 1\\)"):
+        configuracao.adicionar_planilha_google("Outra", ID)
+    assert configuracao.registrar_planilha_criada("Outra", URL) is None
+    assert len(configuracao.planilhas_google()) == 1
+
+
+def test_remover_id_inexistente_e_recusado():
+    with pytest.raises(ValueError, match="Não há planilha salva com o id 9"):
+        configuracao.remover_planilha_google(9)
+
+
+def test_lista_convive_com_planilha_lembrada_e_mapa_de_abas():
+    configuracao.definir_planilha_google(ID)
+    configuracao._salvar_configuracao({**configuracao.carregar_configuracao(), "google_sheets": {
+        **configuracao.google_sheets_config(), "mapa_abas": {"X": "Y"}}})
+    configuracao.adicionar_planilha_google("A", URL)
+    bloco = configuracao.google_sheets_config()
+    assert bloco["planilha_id"] == ID and bloco["mapa_abas"] == {"X": "Y"} and len(bloco["planilhas"]) == 1
+    configuracao.definir_planilha_google(ID2)                                  # trocar a "última usada" não apaga a lista
+    assert len(configuracao.planilhas_google()) == 1
+
+
+def test_rotas_das_planilhas_salvas_listar_adicionar_e_remover():
+    c = create_app().test_client()
+    base = "/web/api/configuracoes/planilhas-google"
+    assert c.get(base).get_json() == {"planilhas": []}
+    r = c.post(base, json={"nome": "Turmas 2026", "link": URL})
+    assert r.status_code == 200 and r.get_json()["item"]["id"] == 1
+    r = c.post(base, json={"nome": "Repetida", "link": ID})
+    assert r.status_code == 400 and "já está salva" in r.get_json()["erro"]
+    r = c.post(base, json={"nome": "", "link": URL})
+    assert r.status_code == 400 and "nome" in r.get_json()["erro"]
+    r = c.delete(f"{base}/1")
+    assert r.status_code == 200 and r.get_json()["planilhas"] == []
+    assert c.delete(f"{base}/1").status_code == 404
+
+
+def test_tela_de_configuracoes_tem_a_opcao_das_planilhas():
+    from pathlib import Path
+    raiz = Path(__file__).resolve().parents[1] / "src" / "web"
+    assert 'data-config="planilhas_google"' in (raiz / "templates" / "configuracoes.html").read_text(encoding="utf-8")
+    js = (raiz / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    assert "planilhas_google:" in js and "conectarFormPlanilhasGoogle" in js
+
+
 # ═════════════════════════ encaixe no sistema ═════════════════════════
 
 TURMAS_JSON = {TURMA: [aluno(1, "1000001", "MARIA"), aluno(2, "1000002", "JOAO", sit="Transferido")], "2º Ano Integral A": [aluno(1, "2000001", "ANA")]}

@@ -1788,6 +1788,35 @@ def configuracao_data_corte_salvar():
     return jsonify(resposta)
 
 
+@api_bp.route("/configuracoes/planilhas-google", methods=["GET"])
+def configuracao_planilhas_google_obter():
+    """Links das planilhas do Google Drive salvos (id, nome, link)."""
+    return jsonify({"planilhas": _config.planilhas_google()})
+
+
+@api_bp.route("/configuracoes/planilhas-google", methods=["POST"])
+def configuracao_planilhas_google_salvar():
+    """payload: {"nome": "Turmas 2026", "link": "https://docs.google.com/spreadsheets/d/…"} — só guarda o link, não fala com o Google."""
+    payload = request.get_json(silent=True) or {}
+    try:
+        item = _config.adicionar_planilha_google(payload.get("nome"), payload.get("link"))
+    except ValueError as exc:
+        return jsonify({"erro": str(exc)}), 400
+    return jsonify({"status": "ok", "mensagem": f"Planilha salva (id {item['id']}).", "item": item,
+                    "planilhas": _config.planilhas_google()})
+
+
+@api_bp.route("/configuracoes/planilhas-google/<id_item>", methods=["DELETE"])
+def configuracao_planilhas_google_remover(id_item):
+    """Esquece um link salvo (a planilha no Google não é apagada)."""
+    try:
+        item = _config.remover_planilha_google(id_item)
+    except ValueError as exc:
+        return jsonify({"erro": str(exc)}), 404
+    return jsonify({"status": "ok", "mensagem": f"Link '{item.get('nome')}' removido da lista.",
+                    "planilhas": _config.planilhas_google()})
+
+
 @api_bp.route("/configuracoes/pasta-digitalizacao", methods=["GET"])
 def configuracao_pasta_digitalizacao_obter():
     """
