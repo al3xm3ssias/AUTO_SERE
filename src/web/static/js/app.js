@@ -1753,6 +1753,7 @@ const ICONES_AUTOMACAO = {
   transferidos: "transfer",
   parecer_fund: "certificate",
   parecer_rco: "certificate",
+  parecer_planilha: "certificate",
   pareceres_digitalizados: "certificate",
   transferidos_fila: "transfer",
   transferidos_gerar: "transfer",

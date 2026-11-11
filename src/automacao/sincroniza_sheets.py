@@ -49,10 +49,6 @@ log = get_logger(__file__)
 
 OPERACOES = ("criar", "atualizar", "verificar")
 
-#ESSE ARQUIVO SERIA APENAS PARA UM TIPO DE PLANILHA, MAS VAI SER REUTILIZADO PARA FUTURAS IGUAIS, 
-# TALVEZ VAI TER QUE ADPATAR PARA ALGUMA OUTRAS SITUAÇÕES, 
-# MAS A MAIORIA DAS FUNÇÕES SÃO REUTILIZÁVEIS, ENTÃO VAI FICAR AQUI MESMO.
-
 # ── layout da planilha (letras de coluna; antes: sheets_sync/config.py) ────────────────────────────────
 COLUNAS = {"numero": "A", "cpf": "B", "cgm": "C", "sus": "D", "nome": "E", "data_nasc": "F", "idade": "G",
            "sexo": "H", "status": "I", "data_matricula": "J", "escola_origem": "K", "data_transferencia": "L"}
@@ -65,11 +61,6 @@ SEXO = {"Masculino": "M", "Feminino": "F"}
 
 # Turma do turmas.json → aba da planilha da escola (antes: ABA_MAP em sheets_sync/main.py). Pode ser
 # complementado/substituído em config/config_usuario.json → google_sheets.mapa_abas. Turma fora do mapa usa o próprio nome.
-
-#CLAUDE LER COM MUITO CUIDADO ESSA PARTE, POIS É A PARTE QUE VAI TER QUE SER MUDADA PARA AS PRÓXIMAS PLANILHAS,
-# VAI TER QUE MUDAR ESSAS ABAS PADRÕES PARA ATUALIZAR APENAS PARA PLANILHA DE 2026, 
-# PARA AS PROXIMAS VAI TER QUE MAPEAR E VER QUAIS ESTÃO DISPONIVEIS
-
 ABA_PADRAO = {
     "INFANTIL 4 Integral A": "INFANTIL IV",
     "INFANTIL 5 Integral A": "INFANTIL V",
@@ -80,34 +71,6 @@ ABA_PADRAO = {
     "4º Ano Integral A": "4º ANO",
     "5º Ano Integral A": "5º ANO",
 }
-
-#COLOCAR AQUI QUE AS LINHAS DOS ALUNOS INICIAM NA LINHA 10 POR PADRÃO, SE TIVER PREENCHIDO PERCORRER A PLANILHA ATÉ ACHAR UMA CELULAR VAZIA
-
-
-LINHA_INICIAL_ALUNOS = 11   # primeira linha de aluno nas planilhas padrão da escola
-
-def _linha_vazia(linha: list) -> bool:
-    """Vazia = nada de B a L. A coluna A (Nº) pode vir pré-numerada no modelo, então não conta."""
-    return not any(_texto(c) for c in linha[1:])
-
-
-def _linhas_livres(leitura: list[list], quantidade: int, linha_inicial: int = LINHA_INICIAL_ALUNOS) -> list[int]:
-    """
-    Números das próximas `quantidade` linhas livres, a partir de `linha_inicial`. Se a linha estiver preenchida,
-    desce até achar uma vazia; linhas ocupadas no meio do caminho são puladas (nunca sobrescreve aluno).
-    Além do fim do que foi lido, toda linha é considerada vazia.
-    """
-    livres: list[int] = []
-    posicao = linha_inicial
-    while len(livres) < quantidade:
-        linha = leitura[posicao - 1] if posicao - 1 < len(leitura) else []
-        if _linha_vazia(linha):
-            livres.append(posicao)
-        posicao += 1
-    return livres
-
-
-
 
 _RE_CGM = re.compile(r"^\d{5,12}$")
 
@@ -233,8 +196,7 @@ def escolher_registros(alunos: list[dict]) -> list[dict]:
 # SINCRONIZAÇÃO
 # ══════════════════════════════════════════════════════════════════════════
 
-def sincronizar_aba(planilha: str, aba: str, alunos: list[dict], *, simulacao: bool = False, servico=None,
-                    linha_inicial: int = LINHA_INICIAL_ALUNOS) -> Resumo:  
+def sincronizar_aba(planilha: str, aba: str, alunos: list[dict], *, simulacao: bool = False, servico=None) -> Resumo:
     """Sincroniza UMA aba com a lista de alunos de uma turma. Com `simulacao`, lê e compara mas não grava."""
     resumo = Resumo()
     leitura = gs.ler_intervalo(planilha, gs.intervalo_a1(aba, "A", ULTIMA_COLUNA), servico=servico)
@@ -274,21 +236,19 @@ def sincronizar_aba(planilha: str, aba: str, alunos: list[dict], *, simulacao: b
                 resumo.transferidos += 1
             log.info("  ➕ ADICIONADO%s | %-40s | CGM %s", " (TRANSF.)" if transferido else "           ", aluno.get("Nome"), cgm)
 
-    if novas:
-        for posicao, linha in zip(_linhas_livres(leitura, len(novas), linha_inicial), novas):
-            alteracoes[gs.intervalo_a1(aba, f"A{posicao}", f"{ULTIMA_COLUNA}{posicao}")] = [linha]
-
     if simulacao:
         return resumo
     if alteracoes:
         celulas = gs.atualizar_intervalos(planilha, alteracoes, servico=servico)
-        log.debug("  → %d célula(s) gravada(s) em lote (%d aluno(s) novo(s)).", celulas, len(novas))
+        log.debug("  → %d célula(s) atualizada(s) em lote.", celulas)
+    if novas:
+        inseridas = gs.anexar_linhas(planilha, aba, novas, servico=servico)
+        log.debug("  → %d linha(s) nova(s) inserida(s).", inseridas)
     return resumo
 
 
-
-def sincronizar_turmas(turmas, planilha, *, turmas_selecionadas=None, simulacao=False,
-                       servico=None, mapa=None, linha_inicial: int = LINHA_INICIAL_ALUNOS) -> Resumo:
+def sincronizar_turmas(turmas: dict, planilha: str, *, turmas_selecionadas=None, simulacao: bool = False,
+                       servico=None, mapa: dict | None = None) -> Resumo:
     """
     Sincroniza as turmas escolhidas (padrão: todas) com as abas da planilha. Erros de acesso/credencial interrompem
     tudo; aba ausente ou com erro só entra no resumo, e as demais seguem. Quem chama decide o que fazer com `erros`.
@@ -305,8 +265,7 @@ def sincronizar_turmas(turmas, planilha, *, turmas_selecionadas=None, simulacao=
         log.info("─── Turma: %s (%d aluno(s)) ───", turma, len(alunos))
         try:
             aba = gs.resolver_aba(mapa.get(turma, turma), info["abas"])
-            total.somar(sincronizar_aba(info["id"], aba, alunos, simulacao=simulacao, servico=servico,
-                                linha_inicial=linha_inicial))
+            total.somar(sincronizar_aba(info["id"], aba, alunos, simulacao=simulacao, servico=servico))
         except (gs.SheetsAutenticacaoErro, gs.SheetsAcessoErro):
             raise                                              # vale para a planilha toda: continuar só repetiria o erro
         except gs.GoogleErro as exc:

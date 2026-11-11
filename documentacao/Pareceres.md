@@ -41,3 +41,31 @@ Baixa os PDFs dos alunos **Matriculados** de Infantil IV e V.
 - **Segurança:** diagnóstico (captura, HTML, log de rede) só quando o **login falha**, em `dados/<ano>/debug_rco/`; o log não
   guarda a query das URLs (têm o `code` do OAuth) e os cookies guardam só nome e domínio.
 - **[não validado]** login, 2FA, nomes de botões e download no site real (ajustar seletores se mudou).
+
+## Infantil — `parecer_planilha` (planilhas do Google, 1º e 3º bimestres)
+Portado de `gerar_pareceres_infantil_planilha.py`. As professoras do Infantil preenchem uma planilha do Google por turma
+(Infantil IV e V); o sistema gera um PDF por aluno **Matriculado** a partir dela. É a metade "planilha" dos pareceres do
+Infantil: faz o **1º e o 3º bimestre**, e o `parecer_rco` (acima) faz o **2º e o 4º**. Os dois gravam na mesma árvore de
+pastas, então o resultado fica junto.
+1. **Cadastre as planilhas** em *Planilhas do Drive*: uma por turma, com a finalidade **Pareceres do Infantil** e a **turma**
+   (o nome igual ao de `turmas.json`, por exemplo `INFANTIL 4 Integral A`). Só vale a planilha **Ativa**; para trocar de
+   planilha (outro ano, outro bimestre) deixe a antiga inativa e ative a nova. O sistema não deixa haver duas ativas para a
+   mesma turma.
+2. Em *Automações → Pareceres infantil (planilha)*, escolha o **bimestre** (1º ou 3º) e execute.
+3. Para cada aluno, na ordem do nº de chamada: grava o nome na célula `C5` da aba `F.D.SON. A` (a lista suspensa), espera
+   a planilha recalcular (3 s), exporta `A1:N52` em PDF (A4 paisagem), cola o **QR code** no canto inferior esquerdo da
+   última página e salva. No fim de cada planilha a `C5` volta ao valor de antes.
+- Destino: `dados/<ano>/PARECERES INFANTIL/<N>º Bimestre/<turma>/<nº chamada> - <nome>.pdf` (a pasta da turma segue o nome do
+  `parecer_rco`, como `INFANTIL_4_Integral_A`; ou `AUTO_SERE_PARECERES_INFANTIL_DIR`).
+- **Já gerado** é o PDF existir: por padrão é mantido; marque **Substituir** para refazer. **Modo teste** faz só o primeiro
+  aluno de cada planilha.
+- **QR:** no padrão do sistema (`qr_seguro`, o mesmo dos pareceres do Fundamental: ano, nº da chamada, nome, turma e CGM).
+  Esse padrão não leva o bimestre; o bimestre está na pasta do arquivo.
+- **Primeira vez:** o Google pede para autorizar o acesso às planilhas **e a leitura do Drive** (necessária para exportar
+  PDF); o navegador abre sozinho. O token fica em `credenciais/google_token_drive.json`, separado do token das planilhas.
+  As credenciais do Google são as de `docs/GOOGLE_SHEETS.md`. Se der erro 401 ao exportar, apague esse arquivo e rode de novo.
+- A conta que autoriza precisa ter acesso às planilhas das professoras (como editora, porque o sistema escreve na `C5`).
+- Um aluno que falha (erro ao exportar, sem CGM) vai para a lista de falhas e os outros continuam; erro de permissão para tudo.
+- **[não validado]** no Google real: a exportação em PDF e o tempo de recálculo (ajustar `ESPERA_ATUALIZACAO_S` se o
+  parecer sair com o aluno anterior).
+

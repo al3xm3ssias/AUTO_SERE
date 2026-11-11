@@ -111,6 +111,7 @@ PERMITIDAS = [
     re.compile(r"^/web/api/configuracoes/ano-letivo/(backup|restaurar)$"),      # restaurar: só com aplicar=false
     re.compile(r"^/web/api/automacoes/[^/]+/(previa|cancelar)$"),
     re.compile(r"^/web/api/whatsapp/webhook$"),
+    re.compile(r"^/web/api/planilhas(/[^/]+)?$"),      # cadastro de planilhas do Drive: atravessa os anos, não é dado de um ano
 ]
 
 

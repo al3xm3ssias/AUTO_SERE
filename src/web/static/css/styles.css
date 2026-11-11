@@ -1891,7 +1891,7 @@ tbody td{padding:11px 14px;vertical-align:middle}
 
 
 /* ---------- Planilhas do Drive (cadastro de links) ---------- */
-.pl-link{display:inline-block;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom;
+.pl-link{display:inline-block;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom;
   font-family:var(--mono);font-size:.72rem;color:var(--cyan);text-decoration:none}
 .pl-link:hover{text-decoration:underline}
 .pl-legenda{display:flex;flex-wrap:wrap;gap:18px;align-items:center;list-style:none;padding:0;margin:14px 2px 0;
@@ -1899,5 +1899,7 @@ tbody td{padding:11px 14px;vertical-align:middle}
 .pl-legenda li{display:flex;align-items:center;gap:8px}
 .pl-legenda-nota{color:var(--txt3)}
 .pl-rodape{display:flex;flex-direction:column;align-items:center;gap:10px;margin:18px 0 6px}
-#pl-tabela td .row-actions{justify-content:flex-end}
+#pl-tabela td .row-actions{justify-content:flex-end;flex-wrap:nowrap}
+#pl-tabela td:last-child{white-space:nowrap}
+#pl-nova{white-space:nowrap}
 .pl-erro{color:var(--rose);font-size:.76rem;min-height:1.1em;margin:-4px 0 10px}

@@ -735,6 +735,27 @@ def _plano_parecer_rco(o, p, tj, ctx) -> Plano:
         "mostrar_navegador": bool(p.get("mostrar_navegador", False)), "chave": CHAVE})
 
 
+def _extras_parecer_planilha() -> list[dict]:
+    from src.automacao.parecer_planilha import BIMESTRES
+    return [
+        {"tipo": "select", "id": "campo-bimestre-planilha", "nome": "bimestre", "label": "Bimestre",
+         "opcoes": [{"valor": k, "texto": v} for k, v in BIMESTRES.items()]},
+        {"tipo": "caixa", "id": "campo-substituir-planilha", "nome": "substituir", "label": "Substituir pareceres que já existem",
+         "descricao": "Por padrão um parecer já gerado é mantido. Marque só para refazer do zero."},
+    ]
+
+
+def _validar_parecer_planilha(p: dict) -> None:
+    from src.automacao import parecer_planilha
+    parecer_planilha.validar_pedido(p.get("bimestre"))
+
+
+def _plano_parecer_planilha(o, p, tj, ctx) -> Plano:
+    from src.automacao.parecer_planilha import gerar_pareceres_infantil_planilha
+    return Plano("sync", gerar_pareceres_infantil_planilha, {
+        "bimestre": p.get("bimestre"), "modo_teste": o.modo_teste, "substituir": bool(p.get("substituir", False))})
+
+
 def _extras_parecer_fund() -> list[dict]:
     from src.automacao.parecer_fund import FORMATOS, formato_padrao
     return [
@@ -1011,6 +1032,11 @@ registrar(Script("parecer_rco", (_TE,), _plano_parecer_rco, validar_extras=_vali
                  extras=_extras_parecer_rco,
                  ajuda_teste="Baixa só o parecer do primeiro aluno do Infantil IV/V, para você conferir o login, o código "
                              "de verificação e a pasta antes de rodar todos."))
+
+registrar(Script("parecer_planilha", (_TE,), _plano_parecer_planilha, validar_extras=_validar_parecer_planilha,
+                 extras=_extras_parecer_planilha,
+                 ajuda_teste="Gera só o parecer do primeiro aluno de cada planilha do Infantil, para você conferir o acesso ao "
+                             "Google, o PDF e a pasta antes de gerar todos."))
 
 registrar(Script("parecer_fund", (_T, _S, _C, _TE), _plano_parecer_fund,
                  ajuda_teste="Gera só o parecer do primeiro aluno da seleção, para você conferir o resultado antes de gerar todos.",

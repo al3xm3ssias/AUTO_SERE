@@ -18,6 +18,7 @@
     q: "", status: "", categoria: "", ordem: "id", dir: "asc",
     itens: [], total: 0, proximo: null,
     resumo: { total: 0, ativas: 0, inativas: 0 },
+    finalidades: {},                                        // valor → nome ("parecer_infantil" → "Pareceres do Infantil")
     pronto: false, req: 0,
   };
 
@@ -91,9 +92,10 @@
     const linkSeguro = String(p.link || "").startsWith(PREFIXO_LINK);
     const ativa = p.status === "ativa";
     const origem = p.origem === "sistema" ? "criada pelo sistema" : "cadastrada à mão";
+    const uso = p.finalidade ? `${st.finalidades[p.finalidade] || p.finalidade} · ${p.turma || "sem turma"}` : "";
     return `<tr data-id="${esc(p.id)}">
       <td class="td-mono">${esc(p.id)}</td>
-      <td class="td-name" title="${esc(p.observacao || "")}">${esc(p.nome)}<small>${origem}</small></td>
+      <td class="td-name" title="${esc(p.observacao || "")}">${esc(p.nome)}<small>${esc(uso ? uso + " · " : "")}${origem}</small></td>
       <td>${esc(p.categoria)}</td>
       <td>${linkSeguro
         ? `<a class="pl-link" href="${esc(p.link)}" target="_blank" rel="noopener noreferrer" title="${esc(p.link)}">${esc(p.link)}</a>`
@@ -101,9 +103,9 @@
       <td><span class="badge ${ativa ? "bg-lime" : "bg-muted"}">${ativa ? "Ativa" : "Inativa"}</span></td>
       <td class="td-mono">${esc(dataBr(p.atualizado_em))}</td>
       <td><div class="row-actions">
-        <button class="btn-sm" type="button" data-acao="copiar" style="padding:6px 10px;font-size:.72rem">Copiar link</button>
-        <button class="btn-sm" type="button" data-acao="editar" style="padding:6px 10px;font-size:.72rem">Editar</button>
-        <button class="btn-sm" type="button" data-acao="remover" style="padding:6px 10px;font-size:.72rem">Remover</button>
+        <button class="btn-sm" type="button" data-acao="copiar" title="Copiar o link da planilha" style="padding:6px 9px;font-size:.72rem">Copiar</button>
+        <button class="btn-sm" type="button" data-acao="editar" style="padding:6px 9px;font-size:.72rem">Editar</button>
+        <button class="btn-sm" type="button" data-acao="remover" style="padding:6px 9px;font-size:.72rem">Remover</button>
       </div></td>
     </tr>`;
   }
@@ -125,8 +127,19 @@
 
   // ---------------------------------------------------------------- formulário (cadastrar / editar)
 
+  async function carregarFinalidades() {
+    try {
+      const d = await api("GET", "/finalidades");
+      st.finalidades = Object.fromEntries(d.finalidades.map((f) => [f.valor, f.nome]));
+      return d;
+    } catch (e) {
+      return { finalidades: [], turmas: [] };
+    }
+  }
+
   async function abrirFormulario(item) {
     const todas = await carregarCategorias();
+    const fin = await carregarFinalidades();
     const editando = !!item;
     const fundo = document.createElement("div");
     fundo.className = "modal-overlay";
@@ -143,6 +156,14 @@
         <div class="field"><label>Situação</label>
           <select id="pl-f-status"><option value="ativa">Ativa</option><option value="inativa">Inativa</option></select></div>
       </div>
+      <div class="form-linha">
+        <div class="field"><label>Finalidade no sistema</label>
+          <select id="pl-f-fin"><option value="">Só guardar o link</option>${fin.finalidades.map((f) => `<option value="${esc(f.valor)}">${esc(f.nome)}</option>`).join("")}</select></div>
+        <div class="field" id="pl-f-turma-campo" hidden><label>Turma (igual ao turmas.json)</label>
+          <input type="text" id="pl-f-turma" list="pl-f-turmas" maxlength="100" placeholder="INFANTIL 4 Integral A" autocomplete="off">
+          <datalist id="pl-f-turmas">${fin.turmas.map((c) => `<option value="${esc(c)}"></option>`).join("")}</datalist></div>
+      </div>
+      <div class="cep-msg" id="pl-f-fin-ajuda" style="margin:-4px 0 14px" hidden>As automações usam a planilha <b>ativa</b> de cada turma. Para trocar de planilha, deixe a antiga inativa.</div>
       <div class="field"><label>Observação (opcional)</label>
         <textarea id="pl-f-obs" rows="2" maxlength="500" placeholder="Para que serve, quem usa…"></textarea></div>
       <div class="pl-erro" id="pl-f-erro" role="alert"></div>
@@ -161,7 +182,16 @@
       campo("pl-f-cat").value = item.categoria;
       campo("pl-f-status").value = item.status;
       campo("pl-f-obs").value = item.observacao || "";
+      campo("pl-f-fin").value = item.finalidade || "";
+      campo("pl-f-turma").value = item.turma || "";
     }
+    const mostrarTurma = () => {
+      const comFinalidade = !!campo("pl-f-fin").value;
+      campo("pl-f-turma-campo").hidden = !comFinalidade;
+      campo("pl-f-fin-ajuda").hidden = !comFinalidade;
+    };
+    campo("pl-f-fin").addEventListener("change", mostrarTurma);
+    mostrarTurma();
     const fechar = () => { fundo.remove(); document.removeEventListener("keydown", aoTeclar); };
     const aoTeclar = (ev) => { if (ev.key === "Escape") fechar(); };
     document.addEventListener("keydown", aoTeclar);
@@ -176,11 +206,14 @@
         categoria: campo("pl-f-cat").value.trim(),
         status: campo("pl-f-status").value,
         observacao: campo("pl-f-obs").value.trim(),
+        finalidade: campo("pl-f-fin").value,
+        turma: campo("pl-f-fin").value ? campo("pl-f-turma").value.trim() : "",
       };
       const erro = campo("pl-f-erro");
       erro.textContent = "";
       if (!corpo.nome) { erro.textContent = "Informe o nome da planilha."; return; }
       if (!corpo.link) { erro.textContent = "Informe o link da planilha."; return; }
+      if (corpo.finalidade && !corpo.turma) { erro.textContent = "Informe a turma desta planilha."; return; }
       const botao = campo("pl-f-salvar");
       botao.disabled = true;
       try {
@@ -258,7 +291,7 @@
 
   window.carregarPlanilhas = async function () {
     iniciar();
-    await carregarCategorias();
+    await Promise.all([carregarCategorias(), carregarFinalidades()]);
     await carregar(true);
   };
 })();

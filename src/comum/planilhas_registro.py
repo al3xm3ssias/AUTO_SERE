@@ -15,8 +15,14 @@ Um registro (linha da tabela):
     planilha_id   ID do Google tirado do link — é ÚNICO: a mesma planilha não entra duas vezes
     observacao    anotação livre (opcional, até 500 caracteres)
     status        "ativa" | "inativa" (inativa = guardada, mas fora de uso)
+    finalidade    para que o SISTEMA usa a planilha: "" (só guardada) | "parecer_infantil" (planilha dos pareceres do
+                  Infantil, preenchida pelas professoras; lida pela automação parecer_planilha)
+    turma         turma a que a planilha pertence (nome como em turmas.json); obrigatória quando há finalidade
     origem        "manual" (cadastrada na tela) | "sistema" (criada pela automação do Google Sheets)
     criado_em / atualizado_em   data e hora locais ISO (aaaa-mm-ddThh:mm:ss)
+
+Regra de banco: para cada finalidade + turma só pode haver UMA planilha ativa (a vigente). Para trocar de planilha
+(outro ano, outro bimestre) deixe a antiga inativa e cadastre/ative a nova; as automações pegam sempre a ativa.
 
 Operações (CRUD): criar, obter, atualizar, remover, listar (busca, filtros, ordenação e paginação), resumo, categorias.
 Esta camada só guarda links: NÃO fala com o Google, então não precisa de credenciais.
@@ -42,17 +48,20 @@ STATUS = ("ativa", "inativa")
 ORIGENS = ("manual", "sistema")
 CATEGORIA_PADRAO = "Outras"
 CATEGORIA_TURMAS = "Turmas"
+FINALIDADE_PARECER_INFANTIL = "parecer_infantil"
+FINALIDADES = {FINALIDADE_PARECER_INFANTIL: "Pareceres do Infantil"}        # valor → nome na tela
 CATEGORIAS_SUGERIDAS = (CATEGORIA_TURMAS, "Pareceres do Infantil", "Pareceres do Fundamental", "Matrícula",
                         "Funcionários", CATEGORIA_PADRAO)
 
 LIMITE_NOME = 250
 LIMITE_CATEGORIA = 60
 LIMITE_OBSERVACAO = 500
+LIMITE_TURMA = 100
 ORDENS = ("id", "nome", "categoria", "status", "atualizado_em")
 LIMITE_PAGINA_PADRAO = 20
 LIMITE_PAGINA_MAXIMO = 200
 
-CAMPOS_EDITAVEIS = ("nome", "link", "categoria", "observacao", "status")
+CAMPOS_EDITAVEIS = ("nome", "link", "categoria", "observacao", "status", "finalidade", "turma")   # mesma ordem de _limpar
 _PREFIXO_LINK = "https://docs.google.com/spreadsheets/"
 
 _lock = threading.RLock()                      # leitura-alteração-gravação de uma só vez (a API é multithread)
@@ -64,6 +73,10 @@ class PlanilhaNaoEncontrada(LookupError):
 
 class PlanilhaDuplicada(ValueError):
     """Aquela planilha (mesmo ID do Google) já está cadastrada."""
+
+
+class PlanilhaEmConflito(ValueError):
+    """Já há outra planilha ATIVA para a mesma finalidade e turma."""
 
 
 # ───────────────────────────── armazenamento ───────────────────────────────────
@@ -165,7 +178,7 @@ def _validar_link(link) -> tuple[str, str]:
     return f"{_PREFIXO_LINK}d/{pid}/edit", pid
 
 
-def _limpar(nome, link, categoria, observacao, status) -> dict:
+def _limpar(nome, link, categoria, observacao, status, finalidade="", turma="") -> dict:
     nome = _texto(nome)
     if not nome:
         raise ValueError("Informe o nome da planilha.")
@@ -180,8 +193,20 @@ def _limpar(nome, link, categoria, observacao, status) -> dict:
     status = _texto(status or "ativa").casefold()
     if status not in STATUS:
         raise ValueError("Situação inválida: use 'ativa' ou 'inativa'.")
+    finalidade = _texto(finalidade).casefold()
+    if finalidade and finalidade not in FINALIDADES:
+        raise ValueError(f"Finalidade inválida: use {' ou '.join(FINALIDADES)} (ou deixe em branco).")
+    turma = _texto(turma)
+    if finalidade:
+        if not turma:
+            raise ValueError("Informe a turma desta planilha (o nome igual ao de turmas.json).")
+        if len(turma) > LIMITE_TURMA:
+            raise ValueError(f"Nome da turma muito longo (máximo {LIMITE_TURMA} caracteres).")
+    else:
+        turma = ""                                                    # turma só faz sentido com finalidade
     link, pid = _validar_link(link)
-    return {"nome": nome, "categoria": categoria, "link": link, "planilha_id": pid, "observacao": observacao, "status": status}
+    return {"nome": nome, "categoria": categoria, "link": link, "planilha_id": pid, "observacao": observacao,
+            "status": status, "finalidade": finalidade, "turma": turma}
 
 
 def _achar(itens: list[dict], id_item) -> tuple[int, dict]:
@@ -198,16 +223,32 @@ def _conferir_unica(itens: list[dict], planilha_id: str, ignorar_id=None) -> Non
             raise PlanilhaDuplicada(f"Esta planilha já está cadastrada como '{item.get('nome')}' (id {item.get('id')}).")
 
 
+def _conferir_vigente_unica(itens: list[dict], campos: dict, ignorar_id=None) -> None:
+    """Para finalidade + turma, só uma planilha ativa (a vigente)."""
+    if campos["status"] != "ativa" or not campos["finalidade"]:
+        return
+    for item in itens:
+        if (item.get("id") != ignorar_id and item.get("status") == "ativa" and item.get("finalidade") == campos["finalidade"]
+                and _chave(item.get("turma")) == _chave(campos["turma"])):
+            raise PlanilhaEmConflito(
+                f"Já existe a planilha '{item.get('nome')}' (id {item.get('id')}) ativa para "
+                f"{FINALIDADES[campos['finalidade']]} da turma '{campos['turma']}'. Deixe uma das duas inativa.")
+
+
 # ───────────────────────────── operações ───────────────────────────────────────
 
-def criar(nome, link, categoria="", observacao="", status="ativa", origem="manual") -> dict:
-    """Cadastra uma planilha e devolve o registro (com o id novo). ValueError se algum dado for inválido; PlanilhaDuplicada se já existir."""
-    campos = _limpar(nome, link, categoria, observacao, status)
+def criar(nome, link, categoria="", observacao="", status="ativa", origem="manual", finalidade="", turma="") -> dict:
+    """
+    Cadastra uma planilha e devolve o registro (com o id novo). ValueError se algum dado for inválido; PlanilhaDuplicada
+    se já existir; PlanilhaEmConflito se já houver outra ativa para a mesma finalidade e turma.
+    """
+    campos = _limpar(nome, link, categoria, observacao, status, finalidade, turma)
     if origem not in ORIGENS:
         raise ValueError(f"Origem inválida: use {' ou '.join(ORIGENS)}.")
     with _lock:
         tabela = _ler()
         _conferir_unica(tabela["itens"], campos["planilha_id"])
+        _conferir_vigente_unica(tabela["itens"], campos)
         agora = _agora()
         item = {"id": tabela["proximo_id"], **campos, "origem": origem, "criado_em": agora, "atualizado_em": agora}
         tabela["itens"].append(item)
@@ -222,7 +263,7 @@ def obter(id_item) -> dict:
 
 
 def atualizar(id_item, **campos) -> dict:
-    """Altera só os campos informados (nome, link, categoria, observacao, status). id, origem e criado_em não mudam."""
+    """Altera só os campos informados (nome, link, categoria, observacao, status, finalidade, turma). id, origem e criado_em não mudam."""
     desconhecidos = sorted(set(campos) - set(CAMPOS_EDITAVEIS))
     if desconhecidos:
         raise ValueError(f"Campo(s) que não podem ser alterados: {', '.join(desconhecidos)}.")
@@ -231,7 +272,8 @@ def atualizar(id_item, **campos) -> dict:
         posicao, atual = _achar(tabela["itens"], id_item)
         novos = _limpar(*(campos.get(c, atual.get(c)) for c in CAMPOS_EDITAVEIS))
         _conferir_unica(tabela["itens"], novos["planilha_id"], ignorar_id=atual["id"])
-        if all(atual.get(k) == v for k, v in novos.items()):
+        _conferir_vigente_unica(tabela["itens"], novos, ignorar_id=atual["id"])
+        if all(str(atual.get(k) or "") == v for k, v in novos.items()):
             return dict(atual)                                         # nada mudou: não mexe na data
         item = {**atual, **novos, "atualizado_em": _agora()}
         tabela["itens"][posicao] = item
@@ -260,7 +302,8 @@ def _numero(valor, nome: str, minimo: int, maximo: int | None = None) -> int:
     return n
 
 
-def listar(q="", status="", categoria="", ordem="id", direcao="asc", limite=LIMITE_PAGINA_PADRAO, inicio=0) -> dict:
+def listar(q="", status="", categoria="", ordem="id", direcao="asc", limite=LIMITE_PAGINA_PADRAO, inicio=0,
+           finalidade="") -> dict:
     """
     Consulta com busca, filtros, ordenação e paginação (o "Carregar mais" da tela pede a página seguinte com `inicio`).
     `q` procura (sem acento nem maiúsculas) em id, nome, categoria, link e observação.
@@ -269,6 +312,9 @@ def listar(q="", status="", categoria="", ordem="id", direcao="asc", limite=LIMI
     status = _texto(status).casefold()
     if status and status not in STATUS:
         raise ValueError("Situação inválida: use 'ativa' ou 'inativa'.")
+    finalidade = _texto(finalidade).casefold()
+    if finalidade and finalidade not in FINALIDADES:
+        raise ValueError(f"Finalidade inválida: use {' ou '.join(FINALIDADES)}.")
     ordem = _texto(ordem).casefold() or "id"
     if ordem not in ORDENS:
         raise ValueError(f"Ordenação inválida: use {', '.join(ORDENS)}.")
@@ -287,7 +333,9 @@ def listar(q="", status="", categoria="", ordem="id", direcao="asc", limite=LIMI
             continue
         if cat and _chave(item.get("categoria")) != cat:
             continue
-        if busca and busca not in _chave(" ".join(str(item.get(c, "")) for c in ("id", "nome", "categoria", "link", "observacao"))):
+        if finalidade and item.get("finalidade") != finalidade:
+            continue
+        if busca and busca not in _chave(" ".join(str(item.get(c, "")) for c in ("id", "nome", "categoria", "link", "observacao", "turma"))):
             continue
         achados.append(item)
 
@@ -298,6 +346,16 @@ def listar(q="", status="", categoria="", ordem="id", direcao="asc", limite=LIMI
     fim = inicio + len(pagina)
     return {"itens": pagina, "total": len(achados), "inicio": inicio, "limite": limite,
             "proximo": fim if fim < len(achados) else None}
+
+
+def planilhas_da_finalidade(finalidade: str) -> list[dict]:
+    """As planilhas ATIVAS (vigentes) com essa finalidade, por turma. É o que as automações consultam."""
+    if finalidade not in FINALIDADES:
+        raise ValueError(f"Finalidade inválida: use {' ou '.join(FINALIDADES)}.")
+    with _lock:
+        itens = _ler()["itens"]
+    ativas = [dict(i) for i in itens if i.get("finalidade") == finalidade and i.get("status") == "ativa"]
+    return sorted(ativas, key=lambda i: (_chave(i.get("turma")), _inteiro(i.get("id"), 0)))
 
 
 def resumo() -> dict:

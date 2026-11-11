@@ -84,6 +84,9 @@ não entra duas vezes, mesmo com link escrito de outro jeito. Aceita o link comp
 A tela tem busca, filtros por situação e categoria, colunas ordenáveis, "Carregar mais", e ações de copiar link, editar e remover
 (remover só tira o link do cadastro; a planilha no Google não é apagada).
 
+* Cada planilha pode ter uma **finalidade** no sistema. Hoje existe **Pareceres do Infantil** (com a **turma** dela): é como a
+  automação *Pareceres infantil (planilha)* acha a planilha das professoras (ver `documentacao/Pareceres.md`). Para cada
+  finalidade + turma só pode haver **uma planilha ativa** (a vigente); para trocar, deixe a antiga inativa.
 * Ao **criar** uma planilha pela automação (não vale para a *Simulação*), ela é cadastrada sozinha, na categoria "Turmas". Se não
   der para cadastrar, a criação não é desfeita: o log só avisa.
 * Fica em `dados/planilhas/planilhas.json` (um arquivo só, gravado de forma atômica), e não em `dados/<ano letivo>/`, porque as

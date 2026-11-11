@@ -177,7 +177,7 @@ toast.
 O `chave` de cada automação usado pela interface já corresponde 1:1 aos
 itens do menu lateral (`gerar_pastas`, `analisa_pasta`, `analisa_sere`,
 `documentos`, `cruzamento`, `cep`, `sus`, `transferidos`, `parecer_fund`,
-`parecer_rco`, `comprimir`, `coleta_emails`, `agendador`, `backup`,
+`parecer_rco`, `parecer_planilha`, `comprimir`, `coleta_emails`, `agendador`, `backup`,
 `avisos`, `compara_anos`, `termos`, `mapear_pastas`, `mascara`,
 `rematricula`) — veja a lista completa em `AUTOMACOES_DISPONIVEIS` no
 topo de `rotas.py`.

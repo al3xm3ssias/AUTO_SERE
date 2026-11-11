@@ -30,7 +30,7 @@ Regra de ouro: nenhum caminho é fixo no código. Tudo vem de `src/comum/paths.p
 ## Automações registradas (34 chaves)
 
 `analisa_sere`, `validar`, `documentos`, `limpeza`, `espec`, `aluno`, `gerar_chaves`, `rematricula`, `prematricula_completa`,
-`transferidos_fila`, `transferidos_gerar`, `transferidos`, `pareceres_transferidos`, `pareceres_digitalizados`, `parecer_rco`, `parecer_fund`,
+`transferidos_fila`, `transferidos_gerar`, `transferidos`, `pareceres_transferidos`, `pareceres_digitalizados`, `parecer_rco`, `parecer_planilha`, `parecer_fund`,
 `avisos`, `sheets` (Google Sheets: `docs/GOOGLE_SHEETS.md`), `turmas`, `alunos`, `funcionarios`, `vinculos`, `sus`, `cep`, `termos`, `comprimir`, `compara_anos`,
 `gerar_pastas`, `analisa_pasta`, `mapear_pastas`, `cruzamento`, `mascara`, `coleta_emails`, `backup`.
 

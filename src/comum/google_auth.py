@@ -43,6 +43,7 @@ from .paths import CREDENCIAIS_DIR, RAIZ_PROJETO
 log = logging.getLogger(__name__)
 
 ESCOPO_SHEETS = "https://www.googleapis.com/auth/spreadsheets"
+ESCOPO_DRIVE_LEITURA = "https://www.googleapis.com/auth/drive.readonly"   # exigido pela exportação de planilha em PDF
 ESCOPOS_PADRAO = [ESCOPO_SHEETS]
 
 MODO_OAUTH = "oauth"
@@ -78,6 +79,16 @@ def caminho_credenciais() -> Path:
 
 def caminho_token() -> Path:
     return _caminho_de(("GOOGLE_TOKEN_FILE",), NOME_TOKEN_PADRAO)
+
+
+def caminho_token_drive() -> Path:
+    """
+    Token do OAuth para quem precisa TAMBÉM ler o Drive (exportar planilha em PDF: pareceres do Infantil). Fica num arquivo
+    à parte (google_token_drive.json) para o token só-de-planilhas continuar valendo: o token guarda os escopos de quando
+    foi autorizado, então misturar os dois faria o programa achar que já tem a permissão do Drive sem ter.
+    """
+    base = caminho_token()
+    return base.with_name(f"{base.stem}_drive{base.suffix}")
 
 
 def credenciais_configuradas() -> bool:
@@ -128,12 +139,12 @@ def _salvar_token(creds, caminho: Path) -> None:
     log.info("Token do Google salvo (%s).", caminho.name)
 
 
-def _oauth(caminho_cred: Path, escopos: list[str], interativo: bool):
+def _oauth(caminho_cred: Path, escopos: list[str], interativo: bool, arquivo_token: Path | None = None):
     from google.auth.exceptions import RefreshError
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
 
-    caminho_tok = caminho_token()
+    caminho_tok = Path(arquivo_token) if arquivo_token else caminho_token()
     creds = None
     if caminho_tok.is_file():
         try:
@@ -187,10 +198,11 @@ def _conta_de_servico(caminho_cred: Path, escopos: list[str]):
 
 # ───────────────────────────── entrada principal ───────────────────────────────
 
-def obter_credenciais(escopos: list[str] | None = None, *, interativo: bool = True):
+def obter_credenciais(escopos: list[str] | None = None, *, interativo: bool = True, arquivo_token: Path | None = None):
     """
     Credenciais prontas para usar na API. `interativo=False` nunca abre navegador (agendador): se faltar
-    autorização, levanta CredenciaisGoogleErro explicando o que fazer.
+    autorização, levanta CredenciaisGoogleErro explicando o que fazer. `arquivo_token` guarda o token do OAuth num
+    arquivo próprio (padrão: google_token.json); a conta de serviço não usa token em arquivo.
     """
     escopos = list(escopos or ESCOPOS_PADRAO)
     caminho_cred = caminho_credenciais()
@@ -198,4 +210,4 @@ def obter_credenciais(escopos: list[str] | None = None, *, interativo: bool = Tr
     log.info("Autenticando no Google (modo %s, arquivo %s).", modo, caminho_cred.name)
     if modo == MODO_CONTA_SERVICO:
         return _conta_de_servico(caminho_cred, escopos)
-    return _oauth(caminho_cred, escopos, interativo)
+    return _oauth(caminho_cred, escopos, interativo, arquivo_token)
