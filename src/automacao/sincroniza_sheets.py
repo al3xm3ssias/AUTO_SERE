@@ -274,20 +274,20 @@ def sincronizar_turmas(turmas: dict, planilha: str, *, turmas_selecionadas=None,
     return total
 
 
-def _salvar_nas_configuracoes(info: dict) -> None:
+def _salvar_no_cadastro(info: dict) -> None:
     """
-    Guarda a planilha recém-criada na lista de Configurações → Planilhas do Google Drive (nome, link e id).
-    A planilha já existe no Google: se não der para salvar na lista, só avisa (o ID continua guardado como "última usada").
+    Cadastra a planilha recém-criada na tela "Planilhas do Drive" (nome, link e id). A planilha já existe no Google:
+    se não der para cadastrar, só avisa (o ID continua guardado como "última usada" nas Configurações).
     """
-    from src.comum import configuracao
+    from src.comum import planilhas_registro
+    from src.comum.arquivos_json import ArquivoJsonCorrompidoError
     try:
-        link = f"https://docs.google.com/spreadsheets/d/{info['id']}/edit"          # o mesmo link que o Google devolve
-        item = configuracao.registrar_planilha_criada(info.get("titulo") or "Planilha", link)
-    except (ValueError, OSError) as exc:
-        log.warning("  ⚠ A planilha foi criada, mas não deu para salvá-la na lista de Configurações: %s", exc)
+        item = planilhas_registro.registrar_planilha_criada(info.get("titulo") or "Planilha", info["id"])
+    except (ValueError, OSError, ArquivoJsonCorrompidoError) as exc:
+        log.warning("  ⚠ A planilha foi criada, mas não deu para cadastrá-la em 'Planilhas do Drive': %s", exc)
         return
     if item:
-        log.info("  Salva em Configurações → Planilhas do Google Drive (id %s).", item["id"])
+        log.info("  Cadastrada em 'Planilhas do Drive' (id %s).", item["id"])
 
 
 def _imprimir_resumo(r: Resumo, simulacao: bool) -> None:
@@ -368,7 +368,7 @@ def executar_planilha_google(operacao: str, planilha: str = "", nome: str = "", 
             configuracao.definir_planilha_google(info["id"])
             log.info("✓ Planilha criada: %s", info["titulo"])
             log.info("  Link: %s", info["url"])
-            _salvar_nas_configuracoes(info)
+            _salvar_no_cadastro(info)
             planilha = info["id"]
         resumo = Resumo()
         if planilha:                                            # recém-criada: o preenchimento usa o mesmo motor

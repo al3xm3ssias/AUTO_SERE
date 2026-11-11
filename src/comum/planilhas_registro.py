@@ -1,0 +1,336 @@
+"""
+planilhas_registro.py — cadastro das planilhas do Google Drive
+=============================================================================
+Uma "tabela" de planilhas (pareceres do Infantil, turmas, matrícula, ...) com as regras de um cadastro de banco de
+dados, guardada no padrão do projeto (JSON gravado de forma atômica, como o calendário e as demais bases em dados/):
+
+    dados/planilhas/planilhas.json
+        {"versao": 1, "proximo_id": 4, "itens": [ {registro}, ... ]}
+
+Um registro (linha da tabela):
+    id            número sequencial (chave primária). Nunca é reaproveitado, nem depois de remover um registro.
+    nome          nome da planilha (obrigatório, até 250 caracteres)
+    categoria     texto livre com sugestões ("Turmas", "Pareceres do Infantil", ...); vazio vira "Outras"
+    link          link da planilha no Google (só https://docs.google.com/spreadsheets/…)
+    planilha_id   ID do Google tirado do link — é ÚNICO: a mesma planilha não entra duas vezes
+    observacao    anotação livre (opcional, até 500 caracteres)
+    status        "ativa" | "inativa" (inativa = guardada, mas fora de uso)
+    origem        "manual" (cadastrada na tela) | "sistema" (criada pela automação do Google Sheets)
+    criado_em / atualizado_em   data e hora locais ISO (aaaa-mm-ddThh:mm:ss)
+
+Operações (CRUD): criar, obter, atualizar, remover, listar (busca, filtros, ordenação e paginação), resumo, categorias.
+Esta camada só guarda links: NÃO fala com o Google, então não precisa de credenciais.
+
+Por que fica em dados/planilhas/ e não em dados/<ano letivo>/: as planilhas atravessam os anos letivos (as "futuras"
+também), e trocar o ano em Configurações não pode esconder nem bloquear o cadastro.
+
+A configuração antiga (config_usuario.json → google_sheets.planilhas, de uma versão anterior) é importada uma única
+vez, na primeira leitura, e removida de lá.
+"""
+from __future__ import annotations
+
+import re
+import threading
+import unicodedata
+from datetime import datetime
+
+from . import paths as _paths
+from .arquivos_json import carregar_json, salvar_json_atomico
+
+VERSAO_ESQUEMA = 1
+STATUS = ("ativa", "inativa")
+ORIGENS = ("manual", "sistema")
+CATEGORIA_PADRAO = "Outras"
+CATEGORIA_TURMAS = "Turmas"
+CATEGORIAS_SUGERIDAS = (CATEGORIA_TURMAS, "Pareceres do Infantil", "Pareceres do Fundamental", "Matrícula",
+                        "Funcionários", CATEGORIA_PADRAO)
+
+LIMITE_NOME = 250
+LIMITE_CATEGORIA = 60
+LIMITE_OBSERVACAO = 500
+ORDENS = ("id", "nome", "categoria", "status", "atualizado_em")
+LIMITE_PAGINA_PADRAO = 20
+LIMITE_PAGINA_MAXIMO = 200
+
+CAMPOS_EDITAVEIS = ("nome", "link", "categoria", "observacao", "status")
+_PREFIXO_LINK = "https://docs.google.com/spreadsheets/"
+
+_lock = threading.RLock()                      # leitura-alteração-gravação de uma só vez (a API é multithread)
+
+
+class PlanilhaNaoEncontrada(LookupError):
+    """Não existe registro com esse id."""
+
+
+class PlanilhaDuplicada(ValueError):
+    """Aquela planilha (mesmo ID do Google) já está cadastrada."""
+
+
+# ───────────────────────────── armazenamento ───────────────────────────────────
+
+def _arquivo():
+    """dados/planilhas/planilhas.json (função, para os testes trocarem a pasta)."""
+    return _paths.DADOS_DIR / "planilhas" / "planilhas.json"
+
+
+def _agora() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _inteiro(valor, padrao: int) -> int:
+    try:
+        return int(valor)
+    except (TypeError, ValueError):
+        return padrao
+
+
+def _ler() -> dict:
+    """
+    A tabela inteira, já conferida. Arquivo ilegível levanta ArquivoJsonCorrompidoError SEM ser alterado
+    (o cadastro nunca é tratado como vazio por engano). Chamar sempre com `_lock`.
+    """
+    arquivo = _arquivo()
+    existia = arquivo.exists()
+    bruto = carregar_json(arquivo, dict, dict)
+    itens = [i for i in bruto["itens"] if isinstance(i, dict)] if isinstance(bruto.get("itens"), list) else []
+    ids = [int(i["id"]) for i in itens if str(i.get("id", "")).isdigit()]
+    tabela = {"versao": VERSAO_ESQUEMA, "proximo_id": max(_inteiro(bruto.get("proximo_id"), 1), max(ids, default=0) + 1),
+              "itens": itens}
+    if not existia:
+        _importar_da_configuracao(tabela)
+    return tabela
+
+
+def _gravar(tabela: dict) -> None:
+    salvar_json_atomico(_arquivo(), {"versao": VERSAO_ESQUEMA, "proximo_id": tabela["proximo_id"], "itens": tabela["itens"]})
+
+
+def _importar_da_configuracao(tabela: dict) -> None:
+    """Traz para o cadastro a lista que uma versão anterior guardava em config_usuario.json (uma vez só)."""
+    from . import configuracao
+    try:
+        config = configuracao.carregar_configuracao()
+    except (OSError, ValueError):
+        return
+    bloco = config.get("google_sheets")
+    antigos = bloco.get("planilhas") if isinstance(bloco, dict) else None
+    if not isinstance(antigos, list) or not antigos:
+        return
+    agora = _agora()
+    for a in antigos:
+        if not isinstance(a, dict) or not a.get("planilha_id") or not a.get("link"):
+            continue
+        if any(i.get("planilha_id") == a["planilha_id"] for i in tabela["itens"]):
+            continue
+        novo = _inteiro(a.get("id"), 0)
+        if novo < 1 or any(i.get("id") == novo for i in tabela["itens"]):
+            novo = tabela["proximo_id"]
+        tabela["itens"].append({"id": novo, "nome": str(a.get("nome") or "Planilha"), "categoria": CATEGORIA_PADRAO,
+                                "link": a["link"], "planilha_id": a["planilha_id"], "observacao": "", "status": "ativa",
+                                "origem": "manual", "criado_em": agora, "atualizado_em": agora})
+        tabela["proximo_id"] = max(tabela["proximo_id"], novo + 1)
+    tabela["proximo_id"] = max(tabela["proximo_id"], _inteiro(bloco.get("proximo_id"), 1))
+    _gravar(tabela)                                                   # primeiro o cadastro novo…
+    bloco.pop("planilhas", None)
+    bloco.pop("proximo_id", None)
+    try:
+        configuracao._salvar_configuracao(config)                     # …depois limpa a lista antiga
+    except OSError:
+        pass
+
+
+# ───────────────────────────── regras (validação) ──────────────────────────────
+
+def _texto(valor) -> str:
+    return " ".join(str(valor if valor is not None else "").split())
+
+
+def _chave(texto) -> str:
+    """Sem acento, sem maiúsculas e sem espaços repetidos: para buscar e comparar."""
+    sem = "".join(c for c in unicodedata.normalize("NFD", str(texto or "")) if unicodedata.category(c) != "Mn")
+    return " ".join(sem.casefold().split())
+
+
+def _validar_link(link) -> tuple[str, str]:
+    """(link, ID do Google). Aceita o link completo ou só o ID (e então monta o link). ValueError com mensagem pronta."""
+    from .google_sheets import extrair_id_planilha                    # import tardio: não carrega o Google à toa
+    bruto = str(link or "").strip()
+    pid = extrair_id_planilha(bruto)                                  # SheetsValidacaoErro (é ValueError) explica o formato
+    if re.search(r"\s", bruto):
+        raise ValueError("O link não pode ter espaços.")
+    if "/" in bruto:
+        if not bruto.startswith(_PREFIXO_LINK):                       # o link vira botão na tela: só links do Google Sheets
+            raise ValueError("O link precisa ser de uma planilha do Google (começa com https://docs.google.com/spreadsheets/).")
+        return bruto, pid
+    return f"{_PREFIXO_LINK}d/{pid}/edit", pid
+
+
+def _limpar(nome, link, categoria, observacao, status) -> dict:
+    nome = _texto(nome)
+    if not nome:
+        raise ValueError("Informe o nome da planilha.")
+    if len(nome) > LIMITE_NOME:
+        raise ValueError(f"Nome da planilha muito longo (máximo {LIMITE_NOME} caracteres).")
+    categoria = _texto(categoria) or CATEGORIA_PADRAO
+    if len(categoria) > LIMITE_CATEGORIA:
+        raise ValueError(f"Categoria muito longa (máximo {LIMITE_CATEGORIA} caracteres).")
+    observacao = str(observacao or "").strip()
+    if len(observacao) > LIMITE_OBSERVACAO:
+        raise ValueError(f"Observação muito longa (máximo {LIMITE_OBSERVACAO} caracteres).")
+    status = _texto(status or "ativa").casefold()
+    if status not in STATUS:
+        raise ValueError("Situação inválida: use 'ativa' ou 'inativa'.")
+    link, pid = _validar_link(link)
+    return {"nome": nome, "categoria": categoria, "link": link, "planilha_id": pid, "observacao": observacao, "status": status}
+
+
+def _achar(itens: list[dict], id_item) -> tuple[int, dict]:
+    alvo = str(id_item).strip()
+    for posicao, item in enumerate(itens):
+        if str(item.get("id")) == alvo:
+            return posicao, item
+    raise PlanilhaNaoEncontrada(f"Não há planilha cadastrada com o id {alvo}.")
+
+
+def _conferir_unica(itens: list[dict], planilha_id: str, ignorar_id=None) -> None:
+    for item in itens:
+        if item.get("planilha_id") == planilha_id and item.get("id") != ignorar_id:
+            raise PlanilhaDuplicada(f"Esta planilha já está cadastrada como '{item.get('nome')}' (id {item.get('id')}).")
+
+
+# ───────────────────────────── operações ───────────────────────────────────────
+
+def criar(nome, link, categoria="", observacao="", status="ativa", origem="manual") -> dict:
+    """Cadastra uma planilha e devolve o registro (com o id novo). ValueError se algum dado for inválido; PlanilhaDuplicada se já existir."""
+    campos = _limpar(nome, link, categoria, observacao, status)
+    if origem not in ORIGENS:
+        raise ValueError(f"Origem inválida: use {' ou '.join(ORIGENS)}.")
+    with _lock:
+        tabela = _ler()
+        _conferir_unica(tabela["itens"], campos["planilha_id"])
+        agora = _agora()
+        item = {"id": tabela["proximo_id"], **campos, "origem": origem, "criado_em": agora, "atualizado_em": agora}
+        tabela["itens"].append(item)
+        tabela["proximo_id"] += 1
+        _gravar(tabela)
+        return dict(item)
+
+
+def obter(id_item) -> dict:
+    with _lock:
+        return dict(_achar(_ler()["itens"], id_item)[1])
+
+
+def atualizar(id_item, **campos) -> dict:
+    """Altera só os campos informados (nome, link, categoria, observacao, status). id, origem e criado_em não mudam."""
+    desconhecidos = sorted(set(campos) - set(CAMPOS_EDITAVEIS))
+    if desconhecidos:
+        raise ValueError(f"Campo(s) que não podem ser alterados: {', '.join(desconhecidos)}.")
+    with _lock:
+        tabela = _ler()
+        posicao, atual = _achar(tabela["itens"], id_item)
+        novos = _limpar(*(campos.get(c, atual.get(c)) for c in CAMPOS_EDITAVEIS))
+        _conferir_unica(tabela["itens"], novos["planilha_id"], ignorar_id=atual["id"])
+        if all(atual.get(k) == v for k, v in novos.items()):
+            return dict(atual)                                         # nada mudou: não mexe na data
+        item = {**atual, **novos, "atualizado_em": _agora()}
+        tabela["itens"][posicao] = item
+        _gravar(tabela)
+        return dict(item)
+
+
+def remover(id_item) -> dict:
+    """Tira o registro do cadastro (a planilha no Google não é tocada). Devolve o registro removido."""
+    with _lock:
+        tabela = _ler()
+        posicao, item = _achar(tabela["itens"], id_item)
+        del tabela["itens"][posicao]
+        _gravar(tabela)
+        return dict(item)
+
+
+def _numero(valor, nome: str, minimo: int, maximo: int | None = None) -> int:
+    try:
+        n = int(str(valor).strip())
+    except (TypeError, ValueError):
+        raise ValueError(f"Valor inválido para '{nome}': informe um número inteiro.") from None
+    if n < minimo or (maximo is not None and n > maximo):
+        faixa = f"entre {minimo} e {maximo}" if maximo is not None else f"a partir de {minimo}"
+        raise ValueError(f"Valor inválido para '{nome}': use um número {faixa}.")
+    return n
+
+
+def listar(q="", status="", categoria="", ordem="id", direcao="asc", limite=LIMITE_PAGINA_PADRAO, inicio=0) -> dict:
+    """
+    Consulta com busca, filtros, ordenação e paginação (o "Carregar mais" da tela pede a página seguinte com `inicio`).
+    `q` procura (sem acento nem maiúsculas) em id, nome, categoria, link e observação.
+    Devolve {"itens": [...], "total": <com os filtros>, "inicio", "limite", "proximo": <início da próxima página ou None>}.
+    """
+    status = _texto(status).casefold()
+    if status and status not in STATUS:
+        raise ValueError("Situação inválida: use 'ativa' ou 'inativa'.")
+    ordem = _texto(ordem).casefold() or "id"
+    if ordem not in ORDENS:
+        raise ValueError(f"Ordenação inválida: use {', '.join(ORDENS)}.")
+    direcao = _texto(direcao).casefold() or "asc"
+    if direcao not in ("asc", "desc"):
+        raise ValueError("Direção inválida: use 'asc' ou 'desc'.")
+    limite = _numero(limite, "limite", 1, LIMITE_PAGINA_MAXIMO)
+    inicio = _numero(inicio, "inicio", 0)
+    busca, cat = _chave(q), _chave(categoria)
+
+    with _lock:
+        itens = _ler()["itens"]
+    achados = []
+    for item in itens:
+        if status and item.get("status") != status:
+            continue
+        if cat and _chave(item.get("categoria")) != cat:
+            continue
+        if busca and busca not in _chave(" ".join(str(item.get(c, "")) for c in ("id", "nome", "categoria", "link", "observacao"))):
+            continue
+        achados.append(item)
+
+    def valor(item):
+        return _inteiro(item.get("id"), 0) if ordem == "id" else _chave(item.get(ordem))
+    achados.sort(key=lambda i: (valor(i), _inteiro(i.get("id"), 0)), reverse=(direcao == "desc"))
+    pagina = [dict(i) for i in achados[inicio:inicio + limite]]
+    fim = inicio + len(pagina)
+    return {"itens": pagina, "total": len(achados), "inicio": inicio, "limite": limite,
+            "proximo": fim if fim < len(achados) else None}
+
+
+def resumo() -> dict:
+    """Contagens do cadastro todo (sem filtro): total, ativas e inativas."""
+    with _lock:
+        itens = _ler()["itens"]
+    ativas = sum(1 for i in itens if i.get("status") == "ativa")
+    return {"total": len(itens), "ativas": ativas, "inativas": len(itens) - ativas}
+
+
+def categorias() -> dict:
+    """{"usadas": categorias que existem no cadastro, "sugeridas": as padrão, "todas": as duas juntas, sem repetir}."""
+    with _lock:
+        itens = _ler()["itens"]
+    usadas: dict[str, str] = {}
+    for item in itens:
+        nome = _texto(item.get("categoria"))
+        if nome:
+            usadas.setdefault(_chave(nome), nome)
+    todas = dict(usadas)
+    for nome in CATEGORIAS_SUGERIDAS:
+        todas.setdefault(_chave(nome), nome)
+    ordenar = lambda d: [d[k] for k in sorted(d)]                   # noqa: E731
+    return {"usadas": ordenar(usadas), "sugeridas": list(CATEGORIAS_SUGERIDAS), "todas": ordenar(todas)}
+
+
+def registrar_planilha_criada(nome, planilha_id, categoria=CATEGORIA_TURMAS) -> dict | None:
+    """
+    Cadastra a planilha que a automação do Google Sheets acabou de criar (origem "sistema"). Se ela já estiver no
+    cadastro, não duplica e devolve None. A planilha já existe no Google: quem chama não deve falhar por causa daqui.
+    """
+    try:
+        return criar(nome, f"{_PREFIXO_LINK}d/{planilha_id}/edit", categoria=categoria,
+                     observacao="Criada pelo sistema (automação Planilha no Google Sheets).", origem="sistema")
+    except PlanilhaDuplicada:
+        return None

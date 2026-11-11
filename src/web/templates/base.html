@@ -78,6 +78,10 @@
         <span class="nav-item-icon" data-icon="ageCut"></span>
         <span class="nav-item-label">Corte etário</span>
       </div>
+      <div class="nav-item" data-view="planilhas">
+        <span class="nav-item-icon" data-icon="database"></span>
+        <span class="nav-item-label">Planilhas do Drive</span>
+      </div>
 
       <div class="nav-item" data-view="documentos">
         <span class="nav-item-icon" data-icon="files"></span>
@@ -367,6 +371,7 @@
         {% include "menu.html" %}
         {% include "calendario.html" %}
         {% include "corte_etario.html" %}
+        {% include "planilhas.html" %}
         {% include "automacoes.html" %}
         {% include "configuracoes.html" %}
         {% include "primeira_execucao.html" %}
@@ -406,6 +411,7 @@
 <script src="{{ url_for('web.static', filename='js/icons.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/app.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/calendario.js') }}"></script>
+<script src="{{ url_for('web.static', filename='js/planilhas.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/vendor/jspdf.umd.min.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/corte_etario.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/whatsapp.js') }}"></script>

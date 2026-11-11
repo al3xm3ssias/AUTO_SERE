@@ -72,14 +72,23 @@ Cada turma vai para uma aba (mapa padrão da escola em `ABA_PADRAO`; ajuste em `
 O que exige credenciais reais: autorizar de verdade, `--operacao verificar` e `atualizar --simulacao` numa planilha sua, e o 1º `criar`.
 
 
-## Planilhas do Google Drive (lista de links)
+## Planilhas do Drive (cadastro de links)
 
-**Configurações → Credenciais e integrações → Planilhas do Google Drive.** Guarda o **link**, o **nome** e um **id** de cada planilha
-(`config/config_usuario.json` → `google_sheets.planilhas`). O id é um número sequencial só deste cadastro e nunca é reaproveitado, mesmo
-depois de remover uma planilha. Esta tela só guarda links: não fala com o Google nem altera a planilha. Aceita o link completo ou só o
-ID do Google, recusa links que não sejam de planilha do Google e não deixa salvar a mesma planilha duas vezes.
+Tela própria no menu lateral: **Planilhas do Drive**. É um cadastro (como uma tabela de banco de dados) dos links das suas
+planilhas do Google: pareceres do Infantil, turmas, matrícula e as que vierem depois. Só guarda links; não fala com o Google.
 
-* Ao **criar** uma planilha pela automação (não vale para a *Simulação*), ela entra sozinha nessa lista. Se não der para salvar na lista,
-  a criação não é desfeita: o log só avisa.
-* A lista convive com `google_sheets.planilha_id` (a última planilha usada, que a automação e a rotina diária leem): uma não mexe na outra.
-* *Remover* só esquece o link; a planilha no Google não é apagada.
+Cada registro tem: **id** (número automático, nunca reaproveitado), **nome**, **link**, **categoria**, **situação** (ativa/inativa),
+**observação**, origem (cadastrada à mão ou criada pelo sistema) e data da última alteração. A mesma planilha (mesmo ID do Google)
+não entra duas vezes, mesmo com link escrito de outro jeito. Aceita o link completo ou só o ID.
+
+A tela tem busca, filtros por situação e categoria, colunas ordenáveis, "Carregar mais", e ações de copiar link, editar e remover
+(remover só tira o link do cadastro; a planilha no Google não é apagada).
+
+* Ao **criar** uma planilha pela automação (não vale para a *Simulação*), ela é cadastrada sozinha, na categoria "Turmas". Se não
+  der para cadastrar, a criação não é desfeita: o log só avisa.
+* Fica em `dados/planilhas/planilhas.json` (um arquivo só, gravado de forma atômica), e não em `dados/<ano letivo>/`, porque as
+  planilhas atravessam os anos. Funciona também no modo "somente consulta" de um ano anterior.
+* Código: `src/comum/planilhas_registro.py` (regras e armazenamento), `src/web/api/planilhas.py` (API `/web/api/planilhas`),
+  `src/web/templates/planilhas.html` e `src/web/static/js/planilhas.js` (tela).
+* `google_sheets.planilha_id` em `config_usuario.json` continua sendo a "última planilha usada" (lida pela automação e pela rotina
+  diária); uma coisa não mexe na outra.

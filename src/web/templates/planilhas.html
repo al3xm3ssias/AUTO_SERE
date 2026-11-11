@@ -1,0 +1,59 @@
+<section class="section" id="sec-planilhas" data-title="Planilhas do Drive">
+
+  <div class="page-header">
+    <div class="page-header-icon lime"><span data-icon="database"></span></div>
+    <div class="page-header-text">
+      <h1>Planilhas do Drive</h1>
+      <p>Cadastro dos links das planilhas do Google (pareceres, turmas e outras). Só guarda os links, não altera a planilha.</p>
+    </div>
+    <div class="page-header-actions">
+      <button class="btn-primary" id="pl-nova" type="button"><span data-icon="folderPlus"></span> Nova planilha</button>
+    </div>
+  </div>
+
+  <div class="filters-bar">
+    <select id="pl-filtro-status" aria-label="Filtrar por situação">
+      <option value="">Todas as situações</option>
+      <option value="ativa">Ativas</option>
+      <option value="inativa">Inativas</option>
+    </select>
+    <select id="pl-filtro-categoria" aria-label="Filtrar por categoria">
+      <option value="">Todas as categorias</option>
+    </select>
+    <div class="search-box">
+      <span data-icon="search"></span>
+      <input type="text" id="pl-busca" placeholder="Pesquisar por nome, link, categoria…" autocomplete="off">
+    </div>
+  </div>
+
+  <div class="tbl-wrap">
+    <table id="pl-tabela">
+      <thead>
+        <tr>
+          <th data-ordem="id" tabindex="0">ID</th>
+          <th data-ordem="nome" tabindex="0">Nome da planilha</th>
+          <th data-ordem="categoria" tabindex="0">Categoria</th>
+          <th style="cursor:default">Link</th>
+          <th data-ordem="status" tabindex="0">Situação</th>
+          <th data-ordem="atualizado_em" tabindex="0">Atualizada em</th>
+          <th style="cursor:default"></th>
+        </tr>
+      </thead>
+      <tbody id="pl-corpo">
+        <tr><td colspan="7" class="empty">Carregando…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <ul class="pl-legenda" aria-label="Legenda das situações">
+    <li><span class="badge bg-lime">Ativa</span> <span id="pl-leg-ativas">0</span></li>
+    <li><span class="badge bg-muted">Inativa</span> <span id="pl-leg-inativas">0</span></li>
+    <li class="pl-legenda-nota">Inativa = link guardado, mas fora de uso.</li>
+  </ul>
+
+  <div class="pl-rodape">
+    <div id="pl-contagem" style="font-family:var(--mono); font-size:.72rem; color:var(--txt3);"></div>
+    <button class="btn-sm" id="pl-mais" type="button" hidden>Carregar mais</button>
+  </div>
+
+</section>

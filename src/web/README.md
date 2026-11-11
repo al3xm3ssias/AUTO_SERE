@@ -31,13 +31,15 @@ src/web/
 ├── app.py                     # cria o Flask app e registra os blueprints
 ├── api/
 │   ├── rotas.py                # endpoints de API (painel, listas, automações, wizard)
-│   └── calendario.py           # API do calendário letivo (blueprint próprio)
+│   ├── calendario.py           # API do calendário letivo (blueprint próprio)
+│   └── planilhas.py            # API do cadastro Planilhas do Drive (blueprint próprio)
 ├── templates/
 │   ├── base.html                # shell da aplicação: sidebar + topbar + temas
 │   ├── painel.html               # tela "Painel principal"
 │   ├── menu.html                 # inclui as 4 telas de listagem (turmas/alunos/...)
 │   ├── calendario.html           # tela "Calendário letivo"
 │   ├── corte_etario.html         # tela "Corte etário" (turma por mês/ano de nascimento)
+│   ├── planilhas.html            # tela "Planilhas do Drive" (cadastro de links de planilhas)
 │   ├── automacoes.html           # lista de automações + tela de execução
 │   ├── configuracoes.html        # telas de credenciais/config
 │   ├── primeira_execucao.html    # wizard de 1ª execução obrigatória
@@ -50,6 +52,7 @@ src/web/
     ├── js/app.js                  # navegação SPA + todas as chamadas fetch()
     ├── js/calendario.js           # lógica da tela Calendário (IIFE; expõe carregarCalendario)
     ├── js/corte_etario.js         # lógica da tela Corte etário (IIFE; expõe carregarCorteEtario)
+    ├── js/planilhas.js            # lógica da tela Planilhas do Drive (IIFE; expõe carregarPlanilhas)
     └── js/vendor/jspdf.umd.min.js # jsPDF local (exportação do quadro em PDF, funciona offline)
 ```
 

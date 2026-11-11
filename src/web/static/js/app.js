@@ -20,20 +20,6 @@ async function apiGet(path) {
   return res.json();
 }
 
-async function apiDelete(path) {
-  const res = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
-  let dados = null;
-  try {
-    dados = await res.json();
-  } catch (e) {
-    // resposta sem corpo JSON
-  }
-  if (!res.ok) {
-    throw new Error((dados && (dados.erro || dados.mensagem)) || `Erro ao remover ${path}`);
-  }
-  return dados;
-}
-
 async function apiPost(path, body) {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
@@ -293,6 +279,7 @@ const TITULOS = {
   funcionarios: "Funcionários",
   calendario: "Calendário letivo",
   "corte-etario": "Corte etário",
+  planilhas: "Planilhas do Drive",
   encaminhamentos: "Encaminhamentos do SUS",
   "fora-do-raio": "Alunos fora do raio",
   automacoes: "Automações",
@@ -335,6 +322,9 @@ function irPara(view, opts = {}) {
   } else if (view === "corte-etario") {
     // corte_etario.js expõe carregarCorteEtario(); sem esta chamada a tela abre sem a tabela.
     if (window.carregarCorteEtario) window.carregarCorteEtario();
+  } else if (view === "planilhas") {
+    // planilhas.js expõe carregarPlanilhas(); sem esta chamada a tela abre sem a lista.
+    if (window.carregarPlanilhas) window.carregarPlanilhas();
   }
   if (view === "painel") {
     carregarPainel();
@@ -2625,14 +2615,6 @@ const DETALHE_CONFIG = {
       <button class="btn-primary" id="cfg-corte-salvar">Salvar data</button>
       <button class="btn-sm" id="cfg-corte-padrao" style="padding:9px 16px;font-size:.78rem">Usar a data padrão</button>
     </div>`,
-  planilhas_google: `
-    <h4 style="margin-bottom:14px; font-size:.9rem;">Planilhas do Google Drive</h4>
-    <p style="color:var(--txt3); font-size:.82rem; margin-bottom:12px;">Guarde aqui o <b>link</b> e o <b>nome</b> das planilhas. Cada uma recebe um <b>id</b> para ser identificada. Esta tela só guarda os links (não abre nem altera a planilha no Google). As planilhas criadas pelo sistema (Automações → Planilha no Google Sheets → Criar) entram nesta lista sozinhas.</p>
-    <div class="field"><label>Nome da planilha</label><input type="text" id="cfg-plan-nome" placeholder="Turmas 2026" maxlength="250" autocomplete="off"></div>
-    <div class="field"><label>Link da planilha</label><input type="text" id="cfg-plan-link" placeholder="https://docs.google.com/spreadsheets/d/…" autocomplete="off"></div>
-    <div style="margin-bottom:18px;"><button class="btn-primary" id="cfg-plan-salvar">Salvar planilha</button></div>
-    <div id="cfg-plan-status" style="font-family:var(--mono); font-size:.72rem; color:var(--txt3); margin-bottom:8px;">Carregando…</div>
-    <div id="cfg-plan-lista"></div>`,
   pasta_digitalizacao: `
     <h4 style="margin-bottom:14px; font-size:.9rem;">Pasta de digitalização</h4>
     <p style="color:var(--txt3); font-size:.82rem; margin-bottom:12px;">Pasta raiz onde ficam os documentos digitalizados dos alunos (as pastas das turmas). Por padrão é <code>dados/&lt;ano&gt;/DIGITALIZAÇÃO</code>.</p>
@@ -2737,79 +2719,10 @@ function initConfiguracoes() {
       if (row.dataset.config === "data_corte_transferidos") {
         conectarFormDataCorte();
       }
-      if (row.dataset.config === "planilhas_google") {
-        conectarFormPlanilhasGoogle();
-      }
       if (row.dataset.config === "escola") {
         montarFormEscola(document.getElementById("cfg-escola-form"), {});
       }
     });
-  });
-}
-
-async function conectarFormPlanilhasGoogle() {
-  const inNome = document.getElementById("cfg-plan-nome");
-  const inLink = document.getElementById("cfg-plan-link");
-  const status = document.getElementById("cfg-plan-status");
-  const lista = document.getElementById("cfg-plan-lista");
-  const btnSalvar = document.getElementById("cfg-plan-salvar");
-  if (!inNome || !inLink || !status || !lista || !btnSalvar) return;
-
-  const desenhar = (planilhas) => {
-    status.textContent = planilhas.length
-      ? `${planilhas.length} planilha(s) salva(s)`
-      : "Nenhuma planilha salva ainda.";
-    if (!planilhas.length) { lista.innerHTML = ""; return; }
-    const linhas = planilhas.map((p) => `
-      <tr>
-        <td style="font-family:var(--mono);">${_docEsc(p.id)}</td>
-        <td>${_docEsc(p.nome)}</td>
-        <td style="word-break:break-all;"><a href="${_docEsc(p.link)}" target="_blank" rel="noopener noreferrer">${_docEsc(p.link)}</a></td>
-        <td><button class="btn-sm cfg-plan-remover" data-id="${_docEsc(p.id)}" data-nome="${_docEsc(p.nome)}" style="padding:6px 12px;font-size:.74rem">Remover</button></td>
-      </tr>`).join("");
-    lista.innerHTML = `<div class="tbl-wrap"><table>
-      <thead><tr><th>ID</th><th>Nome da planilha</th><th>Link</th><th></th></tr></thead>
-      <tbody>${linhas}</tbody></table></div>`;
-    lista.querySelectorAll(".cfg-plan-remover").forEach((b) => b.addEventListener("click", async () => {
-      if (!confirm(`Tirar "${b.dataset.nome}" da lista? A planilha no Google não é apagada.`)) return;
-      b.disabled = true;
-      try {
-        const resp = await apiDelete(`/configuracoes/planilhas-google/${encodeURIComponent(b.dataset.id)}`);
-        desenhar(resp.planilhas || []);
-        toast(resp.mensagem || "Removida");
-      } catch (e) {
-        b.disabled = false;
-        toast(e.message);
-      }
-    }));
-  };
-
-  try {
-    desenhar((await apiGet("/configuracoes/planilhas-google")).planilhas || []);
-  } catch (e) {
-    status.textContent = "Não foi possível ler as planilhas salvas.";
-  }
-
-  btnSalvar.addEventListener("click", async () => {
-    const nome = inNome.value.trim();
-    const link = inLink.value.trim();
-    if (!nome) { toast("Informe o nome da planilha"); return; }
-    if (!link) { toast("Informe o link da planilha"); return; }
-    const original = btnSalvar.textContent;
-    btnSalvar.disabled = true;
-    btnSalvar.textContent = "Salvando...";
-    try {
-      const resp = await apiPost("/configuracoes/planilhas-google", { nome, link });
-      inNome.value = "";
-      inLink.value = "";
-      desenhar(resp.planilhas || []);
-      toast(resp.mensagem || "Planilha salva");
-    } catch (e) {
-      toast(e.message);
-    } finally {
-      btnSalvar.disabled = false;
-      btnSalvar.textContent = original;
-    }
   });
 }
 

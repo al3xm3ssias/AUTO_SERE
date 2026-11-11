@@ -24,6 +24,7 @@ from src.comum import paths as _paths
 from src.comum import servidor as _servidor
 
 from src.web.api.calendario import calendario_bp
+from src.web.api.planilhas import planilhas_bp
 from src.web.api.rotas import api_bp
 from src.web.api.whatsapp import whatsapp_bp
 
@@ -93,6 +94,7 @@ _RE_PERMITIDAS_EM_CONSULTA = (
     re.compile(r"^/web/api/configuracoes/ano-letivo/backup$"),     # copiar dados não altera nada
     re.compile(r"^/web/api/automacoes/[^/]+/(previa|cancelar)$"),  # prévia só lê; cancelar só encerra
     re.compile(r"^/web/api/whatsapp/webhook$"),                    # evento que o gateway manda para cá (não é ação do usuário)
+    re.compile(r"^/web/api/planilhas(/\d+)?$"),                    # cadastro de planilhas: atravessa os anos letivos, não é dado de um ano
 )
 _METODOS_DE_LEITURA = ("GET", "HEAD", "OPTIONS")
 
@@ -135,6 +137,7 @@ def create_app() -> Flask:
     app.register_blueprint(api_bp, url_prefix="/web/api")
     app.register_blueprint(calendario_bp, url_prefix="/web/api/calendario")
     app.register_blueprint(whatsapp_bp, url_prefix="/web/api/whatsapp")
+    app.register_blueprint(planilhas_bp, url_prefix="/web/api/planilhas")
 
     return app
 
