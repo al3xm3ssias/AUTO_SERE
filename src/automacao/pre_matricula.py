@@ -26,6 +26,20 @@ Pontos de entrada (sem argparse/input(); prontos para virar botões de GUI):
   verificar_pendentes_via_login(...)   somente a etapa 4 (antigo
                                        --somente-pendentes)
 
+Períodos (ano letivo) do portal:
+  O select#anoLetivo do site abre sempre no ÚLTIMO período cadastrado, então o
+  código escolhe o período explicitamente. Há dois "alvos", com dados separados:
+
+    "atual"   -> ano letivo corrente (ex.: 2026): o período contínuo, que é o
+                 de data final mais tardia daquele ano (ex.: 01/12/2025 - 30/11/2026).
+                 Os períodos curtos de 1ª chamada já encerrados são ignorados.
+                 Dados em pre_matricula.json (nome antigo, mantido).
+    "proximo" -> ano letivo seguinte (ex.: 2027): TODOS os períodos desse ano
+                 (1ª chamada + o período aberto que o SME criar depois).
+                 Dados em pre_matricula_<ano>.json (ex.: pre_matricula_2027.json).
+
+  Os pontos de entrada recebem alvo="atual" | "proximo" | "ambos".
+
 Diferenças em relação ao script original:
   - Caminhos vêm de paths.dados_ano_atual() (nada de caminho fixo do Samba).
   - Credenciais e "modo análise" são parâmetros, não globais.
@@ -46,6 +60,7 @@ Diferenças em relação ao script original:
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import csv
 import os
 import re
@@ -105,8 +120,42 @@ class PreMatriculaCorrompidaError(ArquivoJsonCorrompidoError):
 # CAMINHOS (resolvidos na hora do uso, não na importação)
 # ==========================================================
 
+ALVO_ATUAL = "atual"
+ALVO_PROXIMO = "proximo"
+ALVOS_VALIDOS = (ALVO_ATUAL, ALVO_PROXIMO)
+
+# Alvo em uso na execução corrente. ContextVar (e não global) para que cada
+# execução assíncrona tenha o seu, sem precisar repassar o parâmetro por todas as funções.
+_ALVO: contextvars.ContextVar[str] = contextvars.ContextVar("pre_matricula_alvo", default=ALVO_ATUAL)
+
+
+def alvo_atual() -> str:
+    return _ALVO.get()
+
+
+def definir_alvo(alvo: str):
+    """Define o alvo da execução corrente. Devolve o token para _ALVO.reset()."""
+    if alvo not in ALVOS_VALIDOS:
+        raise ValueError(f"alvo inválido: {alvo!r} (use {ALVOS_VALIDOS})")
+    return _ALVO.set(alvo)
+
+
+def _alvos(alvo: str) -> tuple[str, ...]:
+    """'atual' | 'proximo' | 'ambos' -> tupla de alvos, na ordem de execução."""
+    if alvo == "ambos":
+        return (ALVO_PROXIMO, ALVO_ATUAL)
+    if alvo in ALVOS_VALIDOS:
+        return (alvo,)
+    raise ValueError(f"alvo inválido: {alvo!r} (use 'atual', 'proximo' ou 'ambos')")
+
+
+def _ano_alvo() -> int:
+    """Ano letivo do alvo corrente: ano atual (alvo 'atual') ou ano atual + 1 ('proximo')."""
+    return int(paths.ano_atual()) + (1 if alvo_atual() == ALVO_PROXIMO else 0)
+
+
 def _ano() -> str:
-    return str(paths.ano_atual())
+    return str(_ano_alvo())
 
 
 def pasta_base() -> Path:
@@ -114,6 +163,9 @@ def pasta_base() -> Path:
 
 
 def caminho_pre_matricula() -> Path:
+    # Alvo "atual" mantém o nome antigo (não quebra o histórico já gravado).
+    if alvo_atual() == ALVO_PROXIMO:
+        return pasta_base() / f"pre_matricula_{_ano()}.json"
     return pasta_base() / "pre_matricula.json"
 
 
@@ -122,7 +174,10 @@ def caminho_template() -> Path:
 
 
 def caminho_contatos() -> Path:
-    return pasta_base() / f"TEMPLATE_PREENCHIDO_{datetime.now().strftime('%Y-%m-%d')}.csv"
+    data = datetime.now().strftime('%Y-%m-%d')
+    if alvo_atual() == ALVO_PROXIMO:
+        return pasta_base() / f"TEMPLATE_PREENCHIDO_{_ano()}_{data}.csv"
+    return pasta_base() / f"TEMPLATE_PREENCHIDO_{data}.csv"
 
 
 def pasta_screenshots() -> Path:
@@ -158,6 +213,88 @@ def _credenciais_padrao() -> tuple[str, str]:
             "PREMATRICULA_SENHA em credenciais/.env (veja .env.example) e reinicie o sistema."
         )
     return matricula, senha
+
+
+# ==========================================================
+# PERÍODOS (select#anoLetivo)
+# ==========================================================
+
+# Rótulo das opções do site: "2027 (13/11/2026 - 22/11/2026)"
+_RE_PERIODO = re.compile(r"^\s*(\d{4})\s*\(\s*(\d{2}/\d{2}/\d{4})\s*-\s*(\d{2}/\d{2}/\d{4})\s*\)")
+
+
+def _data_br(texto: str):
+    return datetime.strptime(texto, "%d/%m/%Y").date()
+
+
+def parse_periodos(opcoes) -> list[dict]:
+    """
+    [{"value","label"}] do select#anoLetivo -> [{"value","rotulo","ano","inicio","fim"}].
+    Opções fora do padrão "AAAA (dd/mm/aaaa - dd/mm/aaaa)" são ignoradas.
+    """
+    periodos = []
+    for op in opcoes or []:
+        m = _RE_PERIODO.match(op.get("label") or "")
+        if not m or not (op.get("value") or "").strip():
+            continue
+        try:
+            inicio, fim = _data_br(m.group(2)), _data_br(m.group(3))
+        except ValueError:
+            continue
+        periodos.append(
+            {
+                "value": op["value"].strip(),
+                "rotulo": op["label"].strip(),
+                "ano": int(m.group(1)),
+                "inicio": inicio,
+                "fim": fim,
+            }
+        )
+    return periodos
+
+
+def escolher_periodos(opcoes, alvo: str, ano_base: int | None = None) -> list[dict]:
+    """
+    Períodos a coletar para o alvo, em ordem cronológica.
+
+      "atual"   -> só UM: dentre os períodos do ano atual, o de data final mais
+                   tardia (o período contínuo). 1ª chamadas já encerradas ficam de fora.
+      "proximo" -> TODOS os períodos do ano atual + 1 (1ª chamada + o período aberto
+                   que for criado depois).
+
+    Lista vazia se o site ainda não tem período para esse ano.
+    """
+    ano_base = int(paths.ano_atual()) if ano_base is None else ano_base
+    ano_ref = ano_base + (1 if alvo == ALVO_PROXIMO else 0)
+    candidatos = [p for p in parse_periodos(opcoes) if p["ano"] == ano_ref]
+    if not candidatos:
+        return []
+    if alvo == ALVO_PROXIMO:
+        return sorted(candidatos, key=lambda p: (p["inicio"], p["fim"]))
+    escolhido = max(candidatos, key=lambda p: (p["fim"], p["inicio"], int(p["value"]) if p["value"].isdigit() else 0))
+    return [escolhido]
+
+
+async def _selecionar_periodo(page, periodo, analise=False) -> bool:
+    """Seleciona o período no select#anoLetivo e CONFIRMA que ele ficou selecionado."""
+    try:
+        await page.wait_for_selector("select#anoLetivo", timeout=7000)
+        await page.select_option("select#anoLetivo", periodo["value"])
+        try:
+            await page.wait_for_load_state("networkidle", timeout=10000)
+        except PWTimeout:
+            pass
+        await asyncio.sleep(1.0)
+        selecionado = await page.locator("select#anoLetivo").input_value()
+        if selecionado != periodo["value"]:
+            raise RuntimeError(f"o site manteve o valor {selecionado!r}")
+    except Exception as e:
+        print(f"❌ Não consegui selecionar o período {periodo['rotulo']}: {e}")
+        await capturar_tela(page, "coleta", f"falha ao selecionar periodo {periodo['value']}", erro=True, analise=analise)
+        return False
+    print(f"✓ Período selecionado: {periodo['rotulo']} (value={periodo['value']})")
+    await capturar_tela(page, "coleta", f"periodo {periodo['value']} selecionado", analise=analise)
+    return True
 
 
 # ==========================================================
@@ -415,18 +552,23 @@ async def fazer_login(page, matricula, senha, analise=False):
 # ETAPA 1 - COLETA DE INTENÇÕES DE VAGA
 # ==========================================================
 
-async def etapa_coleta(page, analise=False):
-    print("\n" + "=" * 60)
-    print(f"ETAPA 1/4 - COLETA DE INTENÇÕES DE VAGA ({_ano()})")
-    print("=" * 60)
-
+async def _coletar_periodo(page, periodo, analise=False):
+    """
+    Coleta as turmas/alunos de UM período (abre a tela do zero, escolhe o período,
+    depois a escola e percorre as turmas). Devolve {turma: [alunos]} ou None se falhar.
+    """
+    print(f"\n--- Coletando período {periodo['rotulo']} ---")
     if not await navegar_com_retry(page, INTENCOES_URL, pausa_antes=1.0):
         await capturar_tela(page, "coleta", "falha ao abrir tela de intencoes", erro=True, analise=analise)
         return None
-    await capturar_tela(page, "coleta", "tela de intencoes de vaga", analise=analise)
+    if not await _selecionar_periodo(page, periodo, analise=analise):
+        return None
 
     # Selecionar a escola
     try:
+        
+        
+          
         await page.wait_for_selector("input#nomeEscola", timeout=7000)
         await page.click("input#nomeEscola")
         await page.type("input#nomeEscola", NOME_ESCOLA_BUSCA, delay=200)
@@ -583,6 +725,65 @@ async def etapa_coleta(page, analise=False):
             print(f"Erro ao processar linhas da turma '{label}': {e}")
             await capturar_tela(page, "coleta", f"erro processando turma {label}", erro=True, analise=analise)
             resultado["turmas"][label] = []
+
+    return resultado["turmas"]
+
+
+async def etapa_coleta(page, analise=False):
+    alvo = alvo_atual()
+    print("\n" + "=" * 60)
+    print(f"ETAPA 1/4 - COLETA DE INTENÇÕES DE VAGA ({_ano()} - alvo: {alvo})")
+    print("=" * 60)
+
+    if not await navegar_com_retry(page, INTENCOES_URL, pausa_antes=1.0):
+        await capturar_tela(page, "coleta", "falha ao abrir tela de intencoes", erro=True, analise=analise)
+        return None
+    await capturar_tela(page, "coleta", "tela de intencoes de vaga", analise=analise)
+
+    try:
+        await page.wait_for_selector("select#anoLetivo", timeout=7000)
+    except PWTimeout:
+        print("Select de ano letivo (anoLetivo) não encontrado.")
+        await capturar_tela(page, "coleta", "timeout select anoLetivo", erro=True, analise=analise)
+        return None
+    opcoes_ano = await page.eval_on_selector_all(
+        "select#anoLetivo option",
+        "opts => opts.map(o => ({value: o.value, label: o.textContent.trim()}))",
+    )
+
+    periodos = escolher_periodos(opcoes_ano, alvo)
+    if not periodos:
+        # Não cai no período que o site carrega por padrão: seria coletar o ano errado.
+        print(f"⚠️ O portal ainda não tem período cadastrado para {_ano()} (alvo '{alvo}'). Nada a coletar.")
+        print("   Opções vistas no site: " + "; ".join(o["label"] for o in opcoes_ano if o.get("value")))
+        return {
+            "meta": {"url": INTENCOES_URL, "coletado_em": datetime.now().isoformat(), "alvo": alvo, "ano": _ano()},
+            "turmas": {},
+            "sem_periodo": True,
+        }
+
+    print("Períodos que serão coletados: " + "; ".join(p["rotulo"] for p in periodos))
+
+    turmas_total = {}
+    for periodo in periodos:
+        turmas = await _coletar_periodo(page, periodo, analise=analise)
+        if turmas is None:
+            # Nada é gravado: uma coleta parcial faria quem estava no período que falhou
+            # ser marcado como "cancelado" (presunção) na mesclagem.
+            print(f"❌ Falha ao coletar o período {periodo['rotulo']}. Etapa 1 abortada sem gravar.")
+            return None
+        _mesclar_dicts_turmas(turmas_total, turmas)
+
+    resultado = {
+        "meta": {
+            "url": INTENCOES_URL,
+            "coletado_em": datetime.now().isoformat(),
+            "alvo": alvo,
+            "ano": _ano(),
+            "periodos": [p["value"] for p in periodos],
+        },
+        "turmas": turmas_total,
+    }
 
     try:
         pre_matricula = carregar_pre_matricula()
@@ -741,81 +942,121 @@ def _normalizar_maiusculas_aluno(aluno_dados):
                     opcao[campo] = opcao[campo].upper()
 
 
+async def _ler_cadastro_da_pagina(page, cpf):
+    """Lê o resultado já exibido (div#divCadastros) e devolve o dict de cadastro do aluno."""
+    campos = await extrair_dados_cadastro(page)
+    nome_aluno = (
+        await _texto_se_existe(page, "h5#dNomeAluno")
+        or await _texto_se_existe(page, f"span#dNome{SUFIXO_CADASTRO}")
+    )
+
+    aluno_dados = {
+        "cpf": cpf,
+        "nome_aluno": nome_aluno,
+        "data_nascimento": campos["data_nascimento"],
+        "sexo": campos["sexo"],
+        "nome_responsavel": campos["nome_responsavel"],
+        "cpf_responsavel": campos["cpf_responsavel"],
+        "telefone": campos["telefone"],
+        "telefone_2": campos["telefone_2"],
+        "email": campos["email"],
+        # Texto corrido do endereço: mantido porque o CSV de contatos, extrair_cep()
+        # e as telas leem este campo. Os mesmos dados, separados, vêm logo abaixo.
+        "endereco": " ".join(
+            [
+                campos["logradouro"],
+                campos["numero"],
+                campos["complemento"],
+                campos["bairro"],
+                campos["municipio"],
+                campos["uf"],
+                campos["cep"],
+            ]
+        ),
+        "cep": campos["cep"],
+        "logradouro": campos["logradouro"],
+        "numero": campos["numero"],
+        "complemento": campos["complemento"],
+        "bairro": campos["bairro"],
+        "municipio": campos["municipio"],
+        "uf": campos["uf"],
+        "criterios": await page.locator(f"div#dCriterios{SUFIXO_CADASTRO} li").all_inner_texts(),
+        "escolas_escolhidas": await _extrair_escolas_escolhidas(page),
+        "consultado_em": datetime.now().isoformat(timespec="seconds"),
+    }
+
+    _normalizar_maiusculas_aluno(aluno_dados)
+    return aluno_dados
+
+
 async def consultar_cpf(page, cpf, etapa="cadastro", analise=False):
     """
     Consulta um CPF na tela de consulta e devolve o dict de cadastro (mesmo
     formato de pre_matricula.json -> cadastros[cpf]), ou None se não houve
     resultado. `etapa` só rotula os screenshots.
+
+    A tela de consulta também tem o campo "Abertura" (select#anoLetivo), que abre
+    no período mais recente do portal. Por isso o período do alvo corrente é
+    selecionado ANTES de consultar: "atual" -> o período contínuo do ano;
+    "proximo" -> os períodos do ano seguinte, do mais novo para o mais antigo,
+    parando no primeiro em que o CPF aparece. O período usado fica gravado em
+    "periodo_abertura".
     """
     print(f"\nConsultando CPF: {cpf}")
-    if not await navegar_com_retry(page, CONSULTA_URL):
-        await capturar_tela(page, etapa, f"falha ao abrir consulta cpf {cpf}", erro=True, analise=analise)
-        return None
-    await capturar_tela(page, etapa, f"tela de consulta cpf {cpf}", analise=analise)
+    alvo = alvo_atual()
+    periodos = None
+    i = 0
 
-    try:
-        await page.wait_for_selector("input#cpfAluno", timeout=7000)
-        await page.fill("input#cpfAluno", cpf)
+    while True:
+        if not await navegar_com_retry(page, CONSULTA_URL):
+            await capturar_tela(page, etapa, f"falha ao abrir consulta cpf {cpf}", erro=True, analise=analise)
+            return None
+
+        try:
+            await page.wait_for_selector("select#anoLetivo", timeout=7000)
+            if periodos is None:
+                opcoes = await page.eval_on_selector_all(
+                    "select#anoLetivo option",
+                    "opts => opts.map(o => ({value: o.value, label: o.textContent.trim()}))",
+                )
+                periodos = sorted(escolher_periodos(opcoes, alvo), key=lambda p: p["inicio"], reverse=True)
+                if not periodos:
+                    print(f"⚠️ Sem período de {_ano()} (alvo '{alvo}') na consulta; CPF {cpf} não consultado.")
+                    return None
+            periodo = periodos[i]
+            await page.select_option("select#anoLetivo", periodo["value"])
+            if await page.locator("select#anoLetivo").input_value() != periodo["value"]:
+                raise RuntimeError("o site manteve outro valor no campo Abertura")
+            await page.wait_for_selector("input#cpfAluno", timeout=7000)
+            await page.fill("input#cpfAluno", cpf)
+        except Exception as e:
+            print(f"Não consegui preparar a consulta do CPF {cpf} (período/campo CPF): {e}")
+            await capturar_tela(page, etapa, f"falha ao preparar consulta cpf {cpf}", erro=True, analise=analise)
+            return None
+
+        await capturar_tela(page, etapa, f"tela de consulta cpf {cpf} periodo {periodo['value']}", analise=analise)
         await page.keyboard.press("Enter")
-    except PWTimeout:
-        print(f"Campo CPF não encontrado para {cpf}")
-        await capturar_tela(page, etapa, f"timeout campo cpf {cpf}", erro=True, analise=analise)
-        return None
+        ultimo = i == len(periodos) - 1
 
-    try:
-        await page.wait_for_selector("div#divCadastros", timeout=7000)
-        await capturar_tela(page, etapa, f"resultado cpf {cpf}", analise=analise)
-
-        campos = await extrair_dados_cadastro(page)
-        nome_aluno = (
-            await _texto_se_existe(page, "h5#dNomeAluno")
-            or await _texto_se_existe(page, f"span#dNome{SUFIXO_CADASTRO}")
-        )
-
-        aluno_dados = {
-            "cpf": cpf,
-            "nome_aluno": nome_aluno,
-            "data_nascimento": campos["data_nascimento"],
-            "sexo": campos["sexo"],
-            "nome_responsavel": campos["nome_responsavel"],
-            "cpf_responsavel": campos["cpf_responsavel"],
-            "telefone": campos["telefone"],
-            "telefone_2": campos["telefone_2"],
-            "email": campos["email"],
-            # Texto corrido do endereço: mantido porque o CSV de contatos, extrair_cep()
-            # e as telas leem este campo. Os mesmos dados, separados, vêm logo abaixo.
-            "endereco": " ".join(
-                [
-                    campos["logradouro"],
-                    campos["numero"],
-                    campos["complemento"],
-                    campos["bairro"],
-                    campos["municipio"],
-                    campos["uf"],
-                    campos["cep"],
-                ]
-            ),
-            "cep": campos["cep"],
-            "logradouro": campos["logradouro"],
-            "numero": campos["numero"],
-            "complemento": campos["complemento"],
-            "bairro": campos["bairro"],
-            "municipio": campos["municipio"],
-            "uf": campos["uf"],
-            "criterios": await page.locator(f"div#dCriterios{SUFIXO_CADASTRO} li").all_inner_texts(),
-            "escolas_escolhidas": await _extrair_escolas_escolhidas(page),
-            "consultado_em": datetime.now().isoformat(timespec="seconds"),
-        }
-
-        _normalizar_maiusculas_aluno(aluno_dados)
-
-        print(f"✅ Dados coletados para {cpf}")
-        return aluno_dados
-
-    except PWTimeout:
-        print(f"Nenhum resultado encontrado para {cpf}")
-        await capturar_tela(page, etapa, f"timeout resultado cpf {cpf}", erro=True, analise=analise)
-        return None
+        try:
+            await page.wait_for_selector("div#divCadastros", timeout=7000)
+            await capturar_tela(page, etapa, f"resultado cpf {cpf}", analise=analise)
+            aluno_dados = await _ler_cadastro_da_pagina(page, cpf)
+            if not aluno_dados.get("nome_aluno") and not ultimo:
+                print(f"   CPF {cpf} sem dados no período {periodo['rotulo']}; tentando o próximo.")
+                i += 1
+                continue
+            aluno_dados["periodo_abertura"] = periodo["rotulo"]
+            print(f"✅ Dados coletados para {cpf} (período {periodo['rotulo']})")
+            return aluno_dados
+        except PWTimeout:
+            if not ultimo:
+                print(f"   CPF {cpf} não encontrado no período {periodo['rotulo']}; tentando o próximo.")
+                i += 1
+                continue
+            print(f"Nenhum resultado encontrado para {cpf}")
+            await capturar_tela(page, etapa, f"timeout resultado cpf {cpf}", erro=True, analise=analise)
+            return None
 
 
 async def etapa_cadastro(page, dados_prematricula, analise=False):
@@ -1439,6 +1680,41 @@ class _Sessao:
         return False
 
 
+async def _executar_alvo(page, alvo, analise, pular_pendentes):
+    """Etapas 1 -> 2 -> 4 -> 3 para UM alvo, na sessão já logada."""
+    token = definir_alvo(alvo)
+    try:
+        print("\n" + "#" * 60)
+        print(f"# PRÉ-MATRÍCULA {_ano()} (alvo: {alvo})")
+        print("#" * 60)
+
+        dados_prematricula = await etapa_coleta(page, analise=analise)
+        if dados_prematricula is None:
+            print("❌ Etapa 1 falhou. Abortando este alvo.")
+            return {"ok": False, "sem_periodo": False, "resumo_pendentes": None, "arquivo_contatos": None}
+
+        if dados_prematricula.get("sem_periodo"):
+            return {"ok": True, "sem_periodo": True, "resumo_pendentes": None, "arquivo_contatos": None}
+
+        dados_processados = await etapa_cadastro(page, dados_prematricula, analise=analise)
+
+        resumo_pendentes = None
+        if not pular_pendentes:
+            resumo_pendentes = await etapa_verificar_pendentes(page, analise=analise)
+        else:
+            print("\n(Etapa 4 pulada)")
+
+        arquivo_contatos = etapa_contatos(dados_processados, dados_prematricula)
+        return {
+            "ok": True,
+            "sem_periodo": False,
+            "resumo_pendentes": resumo_pendentes,
+            "arquivo_contatos": arquivo_contatos,
+        }
+    finally:
+        _ALVO.reset(token)
+
+
 async def processo_completo_via_login(
     matricula=None,
     senha=None,
@@ -1447,55 +1723,66 @@ async def processo_completo_via_login(
     navegador="chromium",
     headless=True,
     avisar_whatsapp=True,
+    alvo="ambos",
 ):
     """
-    Etapas 1 -> 2 -> 4 -> 3 numa única sessão. `analise=True` salva
-    screenshot de cada etapa (antigo --a); `pular_pendentes=True` pula a
-    Etapa 4 (antigo --pular-pendentes).
+    Etapas 1 -> 2 -> 4 -> 3 numa única sessão, para o(s) alvo(s) pedido(s):
+    "proximo" (ano atual + 1), "atual" (ano atual) ou "ambos" (padrão; o próximo
+    ano primeiro). Cada alvo tem o seu pre_matricula*.json e o seu CSV de contatos.
 
-    Devolve dict {"ok", "resumo_pendentes", "arquivo_contatos"}; "ok" é False
-    se o login ou a Etapa 1 falharem.
+    `analise=True` salva screenshot de cada etapa; `pular_pendentes=True` pula a Etapa 4.
+
+    Devolve {"ok", "resumo_pendentes", "arquivo_contatos", "resultados"}:
+      - "resultados": {alvo: {"ok", "sem_periodo", "resumo_pendentes", "arquivo_contatos"}}
+      - "resumo_pendentes" / "arquivo_contatos": do alvo "atual" (ou do único alvo rodado)
+      - "ok" é False se o login falhar ou a Etapa 1 de algum alvo falhar. Alvo sem período
+        cadastrado no portal ainda (ex.: 2027 antes de a SME abrir) NÃO é falha.
     """
+    alvos = _alvos(alvo)
+
     print("=" * 60)
-    print(f"PROCESSO DE PRÉ-MATRÍCULA - {_ano()}")
+    print(f"PROCESSO DE PRÉ-MATRÍCULA - alvo(s): {', '.join(alvos)}")
     if analise:
         print("Modo de análise ativo: screenshots de cada etapa serão salvos.")
     print("=" * 60)
 
-    resumo_pendentes = None
+    resultados = {}
 
     async with _Sessao(matricula, senha, analise, navegador, headless) as sessao:
         if not sessao.ok:
-            return {"ok": False, "resumo_pendentes": None, "arquivo_contatos": None}
+            return {"ok": False, "resumo_pendentes": None, "arquivo_contatos": None, "resultados": {}}
 
-        dados_prematricula = await etapa_coleta(sessao.page, analise=analise)
-        if dados_prematricula is None:
-            print("❌ Etapa 1 falhou. Abortando processo.")
-            return {"ok": False, "resumo_pendentes": None, "arquivo_contatos": None}
-
-        dados_processados = await etapa_cadastro(sessao.page, dados_prematricula, analise=analise)
-
-        if not pular_pendentes:
-            resumo_pendentes = await etapa_verificar_pendentes(sessao.page, analise=analise)
-        else:
-            print("\n(Etapa 4 pulada)")
-
-    arquivo_contatos = etapa_contatos(dados_processados, dados_prematricula)
+        for a in alvos:
+            resultados[a] = await _executar_alvo(sessao.page, a, analise, pular_pendentes)
 
     # Comunicado de matrícula por WhatsApp (provedor simulado por padrão; nunca quebra o processo).
     avisar_apos_pre_matricula(avisar_whatsapp)
 
     print("\n" + "=" * 60)
-    print("✅ PROCESSO COMPLETO FINALIZADO")
-    if resumo_pendentes is not None:
-        print(
-            f"   Pendentes verificados: {resumo_pendentes['total_pendentes']} | "
-            f"Confirmados: {resumo_pendentes['confirmados']} | "
-            f"Sem resposta: {len(resumo_pendentes['sem_resposta'])}"
-        )
+    for a, r in resultados.items():
+        if r["sem_periodo"]:
+            print(f"   [{a}] sem período cadastrado no portal (nada coletado)")
+        elif not r["ok"]:
+            print(f"   [{a}] ❌ falhou")
+        elif r["resumo_pendentes"] is not None:
+            rp = r["resumo_pendentes"]
+            print(
+                f"   [{a}] ✅ Pendentes verificados: {rp['total_pendentes']} | "
+                f"Confirmados: {rp['confirmados']} | Sem resposta: {len(rp['sem_resposta'])}"
+            )
+        else:
+            print(f"   [{a}] ✅ concluído")
+    ok = all(r["ok"] for r in resultados.values())
+    print("✅ PROCESSO COMPLETO FINALIZADO" if ok else "⚠️ PROCESSO FINALIZADO COM FALHAS")
     print("=" * 60)
 
-    return {"ok": True, "resumo_pendentes": resumo_pendentes, "arquivo_contatos": arquivo_contatos}
+    principal = resultados.get(ALVO_ATUAL) or next(iter(resultados.values()))
+    return {
+        "ok": ok,
+        "resumo_pendentes": principal["resumo_pendentes"],
+        "arquivo_contatos": principal["arquivo_contatos"],
+        "resultados": resultados,
+    }
 
 
 async def completar_json_via_login(
@@ -1507,13 +1794,19 @@ async def completar_json_via_login(
     navegador="chromium",
     headless=True,
     avisar_whatsapp=True,
+    alvo="atual",
 ):
     """
     Antigo --completar_json: lê os relatórios .xlsx (padrão: o mais recente
     "Relatorio_Alunos_Matriculados*.xlsx" / "Relatorio_Intencoes_Vaga*.xlsx"
     na pasta de dados do ano) e consulta o cadastro de cada CPF no site.
+    As planilhas valem para UM alvo ("atual" ou "proximo"; "ambos" não faz sentido
+    aqui): os dados vão para o pre_matricula*.json desse alvo.
     Requer openpyxl. Devolve {cpf: cadastro} ou None.
     """
+    if alvo not in ALVOS_VALIDOS:
+        raise ValueError(f"alvo inválido: {alvo!r} (use 'atual' ou 'proximo')")
+
     caminho_matriculados = caminho_matriculados or arquivo_mais_recente("Relatorio_Alunos_Matriculados*.xlsx")
     caminho_intencoes = caminho_intencoes or arquivo_mais_recente("Relatorio_Intencoes_Vaga*.xlsx")
 
@@ -1527,9 +1820,13 @@ async def completar_json_via_login(
     async with _Sessao(matricula, senha, analise, navegador, headless) as sessao:
         if not sessao.ok:
             return None
-        resultado = await completar_json_a_partir_de_planilhas(
-            sessao.page, caminho_matriculados, caminho_intencoes, analise=analise
-        )
+        token = definir_alvo(alvo)
+        try:
+            resultado = await completar_json_a_partir_de_planilhas(
+                sessao.page, caminho_matriculados, caminho_intencoes, analise=analise
+            )
+        finally:
+            _ALVO.reset(token)
 
     if resultado is not None:
         avisar_apos_pre_matricula(avisar_whatsapp)
@@ -1543,16 +1840,32 @@ async def verificar_pendentes_via_login(
     navegador="chromium",
     headless=True,
     avisar_whatsapp=True,
+    alvo="ambos",
 ):
-    """Antigo --somente-pendentes: roda só a Etapa 4. Devolve o resumo ou None."""
+    """
+    Antigo --somente-pendentes: roda só a Etapa 4 para o(s) alvo(s).
+    Devolve o resumo (alvo único) ou {alvo: resumo} (alvo="ambos"); None se o login falhar.
+    """
+    alvos = _alvos(alvo)
+
+    resumos = {}
     async with _Sessao(matricula, senha, analise, navegador, headless) as sessao:
         if not sessao.ok:
             return None
-        resumo = await etapa_verificar_pendentes(sessao.page, analise=analise)
+        for a in alvos:
+            token = definir_alvo(a)
+            try:
+                if not caminho_pre_matricula().exists():
+                    print(f"[{a}] {caminho_pre_matricula().name} não existe ainda; nada a verificar.")
+                    resumos[a] = {"total_pendentes": 0, "confirmados": 0, "sem_resposta": []}
+                    continue
+                resumos[a] = await etapa_verificar_pendentes(sessao.page, analise=analise)
+            finally:
+                _ALVO.reset(token)
 
     avisar_apos_pre_matricula(avisar_whatsapp)
 
     print("\n" + "=" * 60)
     print("✅ --somente-pendentes FINALIZADO")
     print("=" * 60)
-    return resumo
+    return resumos[alvos[0]] if len(alvos) == 1 else resumos
