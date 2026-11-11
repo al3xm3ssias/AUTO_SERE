@@ -58,5 +58,7 @@ Thumbs.db
 # Cópias dos originais guardadas antes da compressão (podem ser GB)
 dados/**/ORIGINAIS_ANTES_DA_COMPRESSAO/
 
-.zip
+
+# Arquivos compactados
+*.zip
 

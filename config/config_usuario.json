@@ -25,5 +25,7 @@
   },
   "data_corte_transferidos": "18/10/2026",
   "observacao_historico": null,
-  "google_sheets": null
+  "google_sheets": {
+    "planilha_id": "1En0lZvYSwvzrR3bcRHlzknO41kSFRTKp536wndtgl0Y"
+  }
 }
