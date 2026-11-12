@@ -39,6 +39,14 @@ async function apiPost(path, body) {
   return dados;
 }
 
+async function apiDelete(path) {
+  const res = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
+  let dados = null;
+  try { dados = await res.json(); } catch (e) { /* sem corpo JSON */ }
+  if (!res.ok) throw new Error((dados && (dados.erro || dados.mensagem)) || `Erro ao apagar ${path}`);
+  return dados;
+}
+
 /* ---------- Tema ---------- */
 
 function aplicarTema(tema) {
@@ -1833,7 +1841,9 @@ function abrirAutomacao(chave, nome) {
   abrirSubgrupoDaAutomacao(chave);
   ligarControlesExecucao();
   _execResetar();
+  carregarConfigScript(chave);
   carregarFlagsAutomacao(chave);
+  carregarHistoricoScript(chave);
   sincronizarExecucao(chave);
 }
 
@@ -2341,6 +2351,7 @@ async function _execConsultar(chave, avisarAoTerminar) {
   }
   _execParar();
   _execEstadoBotao("ocioso");
+  carregarHistoricoScript(chave, true);          // a execução que acabou já está gravada no histórico
   if (!avisarAoTerminar) return;
   if (s.status === "concluido") toast("Automação concluída");
   else if (s.status === "cancelado") toast("Execução cancelada");
@@ -2446,6 +2457,190 @@ function ligarControlesExecucao() {
   }
   const exec = _execBotao();
   if (exec) exec.onclick = _execAoClicar;
+  const atualizar = document.getElementById("btn-historico-atualizar");
+  if (atualizar) atualizar.onclick = () => carregarHistoricoScript(automacaoAtual, true);
+  const limpar = document.getElementById("btn-historico-limpar");
+  if (limpar) limpar.onclick = apagarHistoricoScript;
+}
+
+/* ---------- Tela única da automação: Configurações do script + Histórico ---------- */
+/* Sem abas: em "Executar" ficam as opções da execução; logo abaixo, o mapa das configurações do script
+   (GET /automacoes/<chave>/configuracao) e o histórico do que deu certo e errado (GET .../historico). */
+
+function _fmtQuando(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(iso || "");
+  return m ? `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}` : "—";
+}
+
+function _fmtDuracao(seg) {
+  seg = Number(seg) || 0;
+  if (seg < 60) return `${seg} s`;
+  const m = Math.floor(seg / 60), r = seg % 60;
+  if (m < 60) return r ? `${m} min ${r} s` : `${m} min`;
+  return `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+
+const _HIST_ETIQUETAS = {
+  ok: ["bg-lime", "Concluída"],
+  parcial: ["bg-amber", "Concluída com erros"],
+  falhou: ["bg-rose", "Falhou"],
+  cancelado: ["bg-muted", "Cancelada"],
+};
+
+function _histBadge(resultado) {
+  const [classe, texto] = _HIST_ETIQUETAS[resultado] || ["bg-muted", resultado || "—"];
+  return `<span class="badge ${classe}">${texto}</span>`;
+}
+
+function _irParaConfiguracao(tela) {
+  document.querySelector('.nav-item[data-view="configuracoes"]')?.click();
+  setTimeout(() => document.querySelector(`.config-row[data-config="${tela}"]`)?.click(), 150);
+}
+
+async function carregarConfigScript(chave) {
+  const exec = document.getElementById("cfg-execucao");
+  const sist = document.getElementById("cfg-sistema");
+  if (!exec || !sist) return;
+  exec.innerHTML = '<p class="script-vazio">Carregando…</p>';
+  sist.innerHTML = "";
+  let c;
+  try {
+    c = await apiGet(`/automacoes/${chave}/configuracao`);
+  } catch (e) {
+    if (chave !== automacaoAtual) return;
+    exec.innerHTML = '<p class="script-vazio">Não foi possível carregar as configurações deste script.</p>';
+    return;
+  }
+  if (chave !== automacaoAtual) return;
+
+  const chips = [
+    ...(c.opcoes_da_execucao || []).map((o) => `<span class="cfg-chip">${escaparHtml(o.rotulo)}</span>`),
+    ...(c.campos_proprios || []).map((o) => `<span class="cfg-chip extra">${escaparHtml(o.rotulo)}</span>`),
+  ];
+  exec.innerHTML = `
+    <h3>Escolhido a cada execução</h3>
+    ${chips.length
+      ? `<div class="cfg-chips">${chips.join("")}</div>
+         <div class="campo-ajuda">${c.confirma_antes ? "Pede confirmação antes de executar, porque altera dados no SERE." : "Roda direto ao clicar em Executar tarefa."}</div>`
+      : `<p class="script-vazio">Este script não pede nada: é só clicar em Executar tarefa.</p>`}`;
+
+  const linhas = (c.sistema || []).map((i) => `
+    <div class="cfg-linha" data-config-id="${escaparHtml(i.id)}">
+      <span class="cfg-ponto${i.definida ? "" : " falta"}" title="${i.definida ? "Configurada" : "Falta configurar"}"></span>
+      <div class="cfg-linha-txt">
+        <div class="cfg-linha-nome">${escaparHtml(i.rotulo)}</div>
+        <div class="cfg-linha-valor${i.definida ? "" : " falta"}">${escaparHtml(i.valor)}</div>
+        <div class="cfg-linha-desc">${escaparHtml(i.descricao)}</div>
+      </div>
+      ${i.tela ? `<button class="btn-sm" type="button" data-tela="${escaparHtml(i.tela)}">Alterar</button>` : ""}
+    </div>`).join("");
+  sist.innerHTML = `
+    <h3>O que o sistema guarda e este script usa</h3>
+    ${linhas || '<p class="script-vazio">Este script não depende de nenhuma configuração do sistema.</p>'}`;
+  sist.querySelectorAll("button[data-tela]").forEach((b) => {
+    b.addEventListener("click", () => _irParaConfiguracao(b.dataset.tela));
+  });
+}
+
+function _histLista(titulo, itens, total, classe) {
+  const extra = total > itens.length ? `<li>… e mais ${total - itens.length}</li>` : "";
+  return `
+    <div class="hist-col ${classe}">
+      <h4>${titulo} (${total})</h4>
+      ${itens.length ? `<ul>${itens.map((t) => `<li>${escaparHtml(t)}</li>`).join("")}${extra}</ul>`
+                     : `<p class="script-vazio">Nada registrado.</p>`}
+    </div>`;
+}
+
+function _histFmtOpcoes(opcoes) {
+  const partes = Object.entries(opcoes || {})
+    .filter(([, v]) => v !== "" && v !== null && v !== false && !(Array.isArray(v) && !v.length))
+    .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : (v === true ? "sim" : v)}`);
+  return partes.length ? partes.join(" · ") : "padrão (nada marcado)";
+}
+
+async function _abrirExecucaoHistorico(det, chave, id) {
+  const corpo = det.querySelector(".hist-corpo");
+  if (!det.open || corpo.dataset.carregado) return;
+  corpo.innerHTML = '<p class="script-vazio">Carregando…</p>';
+  try {
+    const r = await apiGet(`/automacoes/${chave}/historico/${encodeURIComponent(id)}`);
+    if (chave !== automacaoAtual) return;
+    const t = r.totais || {};
+    corpo.dataset.carregado = "1";
+    corpo.innerHTML = `
+      ${r.erro ? `<div class="campo-ajuda" style="color:var(--rose)">Parou com erro: ${escaparHtml(r.erro)}</div>` : ""}
+      <div class="hist-colunas">
+        ${_histLista("✔ Deu certo", r.deu_certo || [], t.deu_certo || 0, "certo")}
+        ${_histLista("✖ Deu errado", r.deu_errado || [], t.deu_errado || 0, "errado")}
+      </div>
+      ${(r.avisos || []).length ? `<div class="hist-avisos">${_histLista("⚠ Avisos", r.avisos, t.avisos || 0, "aviso")}</div>` : ""}
+      <div class="hist-opcoes"><b>Opções usadas:</b> ${escaparHtml(_histFmtOpcoes(r.opcoes))}</div>
+      ${(r.log || []).length ? `<details class="hist-log"><summary>Ver o fim do registro (${r.log.length} linhas)</summary><pre>${escaparHtml(r.log.join("\n"))}</pre></details>` : ""}`;
+  } catch (e) {
+    corpo.innerHTML = `<p class="script-vazio">${escaparHtml(e.message)}</p>`;
+  }
+}
+
+async function carregarHistoricoScript(chave, manterAbertas) {
+  const alvo = document.getElementById("historico-script-corpo");
+  if (!alvo) return;
+  const abertas = manterAbertas
+    ? new Set(Array.from(alvo.querySelectorAll("details.hist-item[open]")).map((d) => d.dataset.id)) : new Set();
+  if (!manterAbertas) alvo.innerHTML = '<p class="script-vazio">Carregando…</p>';
+  let h;
+  try {
+    h = await apiGet(`/automacoes/${chave}/historico`);
+  } catch (e) {
+    if (chave === automacaoAtual) alvo.innerHTML = '<p class="script-vazio">Não foi possível carregar o histórico.</p>';
+    return;
+  }
+  if (chave !== automacaoAtual) return;
+  const limpar = document.getElementById("btn-historico-limpar");
+  const r = h.resumo || {};
+  if (limpar) limpar.disabled = !r.total;
+  if (!(h.execucoes || []).length) {
+    alvo.innerHTML = '<p class="script-vazio">Ainda não há execuções registradas. Depois da primeira, o resultado aparece aqui.</p>';
+    return;
+  }
+  const resumo = `
+    <div class="hist-resumo">
+      <span class="badge bg-cyan">${r.total} execução(ões)</span>
+      ${r.ok ? `<span class="badge bg-lime">${r.ok} sem erros</span>` : ""}
+      ${r.parcial ? `<span class="badge bg-amber">${r.parcial} com erros</span>` : ""}
+      ${r.falhou ? `<span class="badge bg-rose">${r.falhou} falhou</span>` : ""}
+      ${r.cancelado ? `<span class="badge bg-muted">${r.cancelado} cancelada(s)</span>` : ""}
+    </div>`;
+  const itens = h.execucoes.map((e) => {
+    const t = e.totais || {};
+    return `
+      <details class="hist-item" data-id="${escaparHtml(e.id)}"${abertas.has(e.id) ? " open" : ""}>
+        <summary>
+          <span class="hist-quando">${_fmtQuando(e.iniciado_em)}</span>
+          ${_histBadge(e.resultado)}
+          <span class="hist-meta">✔ ${t.deu_certo || 0} · ✖ ${t.deu_errado || 0}${t.avisos ? ` · ⚠ ${t.avisos}` : ""} · ${_fmtDuracao(e.duracao_s)}</span>
+        </summary>
+        <div class="hist-corpo"></div>
+      </details>`;
+  }).join("");
+  alvo.innerHTML = resumo + itens;
+  alvo.querySelectorAll("details.hist-item").forEach((d) => {
+    d.addEventListener("toggle", () => _abrirExecucaoHistorico(d, chave, d.dataset.id));
+    if (d.open) _abrirExecucaoHistorico(d, chave, d.dataset.id);
+  });
+}
+
+async function apagarHistoricoScript() {
+  const chave = automacaoAtual;
+  if (!chave) return;
+  if (!window.confirm("Apagar o histórico desta automação?\n\nSó o histórico some: nada do que ela gerou ou enviou é tocado.")) return;
+  try {
+    const r = await apiDelete(`/automacoes/${chave}/historico`);
+    toast(r.mensagem || "Histórico apagado");
+    carregarHistoricoScript(chave);
+  } catch (e) {
+    toast(e.message);
+  }
 }
 
 /* ---------- Flags (opções) de cada automação ---------- */
@@ -2496,6 +2691,8 @@ async function carregarFlagsAutomacao(chave) {
   document.getElementById("flags-automacao-auto")?.remove();
   const fixo = document.getElementById("flags-automacao");
   if (fixo) fixo.innerHTML = "";
+  const blocoFlags = document.getElementById("cfg-flags");      // some quando o script não tem opções guardadas
+  if (blocoFlags) blocoFlags.hidden = true;
 
   let dados;
   try {
@@ -2508,13 +2705,11 @@ async function carregarFlagsAutomacao(chave) {
   const cont = _flagsContainer();
   if (!cont) return;
   if (!dados.flags || !dados.flags.length) {
-    if (cont.id === "flags-automacao") {
-      cont.innerHTML = `<p style="color:var(--txt3);font-size:.82rem;">Esta automação não tem opções configuráveis.</p>`;
-    } else {
-      cont.remove();
-    }
+    if (cont.id === "flags-automacao") cont.innerHTML = "";
+    else cont.remove();
     return;
   }
+  if (blocoFlags) blocoFlags.hidden = false;
 
   const modos = dados.flags.filter((f) => f.grupo === "modo");
   const outras = dados.flags.filter((f) => f.grupo !== "modo");

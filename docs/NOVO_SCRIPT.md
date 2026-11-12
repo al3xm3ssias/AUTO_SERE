@@ -106,3 +106,18 @@ um seletor de pasta que o script ignora engana quem usa.
 Todas as automações **implementadas** passam pelo registro (23). As 4 que ainda respondem "não implementada" (pareceres,
 agendador, avisos) ficam fora até existirem; os campos delas, por enquanto, estão em
 `CAMPOS_AUTOMACAO` (`app.js`). Quando uma for implementada: registre e apague a entrada antiga.
+
+
+## Configurações e histórico na tela do script
+
+A tela de cada automação não tem abas: abaixo de **Executar** aparecem **Configurações do script** e **Histórico**.
+
+- **Configurações do sistema que o script lê:** declare em `registrar(Script(..., configs=("ano_letivo", "credenciais_sere", ...)))`
+  ou acrescente a linha em `CONFIGS_DOS_SCRIPTS` (`src/comum/registro_scripts.py`). Os ids válidos estão em
+  `CATALOGO` (`src/comum/configuracoes_scripts.py`). Configuração nova do sistema = uma entrada nesse catálogo
+  (rótulo, como ler o valor, linha da tela Configurações onde se altera). Script sem mapa reprova em
+  `tests/test_historico_configuracao.py`.
+- **Opções da execução e flags:** continuam vindo de `recursos`, `extras` e `flags_automacao`; a tela as lista sozinha.
+- **Histórico:** é gravado automaticamente ao fim de cada execução em `dados/<ano>/historico_automacoes/<chave>.jsonl`
+  (últimas 100). "Deu certo" = linhas do log com ✅ ✔ [OK]; "deu errado" = ❌ [ERRO] (e a exceção, se o script caiu);
+  avisos = ⚠. Para o histórico ficar útil, o script deve marcar o resultado de cada item com esses símbolos.

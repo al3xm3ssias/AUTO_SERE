@@ -51,6 +51,8 @@ from src.comum import escola as _escola
 from src.comum import entrada_usuario as _entrada
 from src.comum import opcoes_execucao as _opcoes
 from src.comum import registro_scripts as _registro
+from src.comum import historico_execucoes as _historico
+from src.comum import configuracoes_scripts as _cfgs
 from src.comum.registros_aluno import casar_com_turmas, registro_principal
 
 api_bp = Blueprint("api", __name__)
@@ -1158,9 +1160,15 @@ _EXECUCOES: dict[str, dict[str, Any]] = {}
 _EXECUCOES_LOCK = threading.Lock()
 
 
+# Opções (payload) do pedido de execução, guardadas até a execução ser registrada: vão para o histórico.
+_OPCOES_PENDENTES: dict[str, dict] = {}
+
+
 def _registrar_execucao(chave: str, execucao: Optional[ExecucaoEmBackground] = None) -> dict:
     """Cria (ou substitui) o registro de execução de uma automação."""
     registro = {
+        "chave": chave,
+        "opcoes": _OPCOES_PENDENTES.pop(chave, None),
         "execucao": execucao,
         "logs": [],
         "status": StatusExecucao.EXECUTANDO.value,
@@ -1191,16 +1199,46 @@ def _observar_execucao(registro: dict, execucao: ExecucaoEmBackground) -> None:
     """Espera a execução terminar (em thread própria) e copia status/resultado/erro para o registro."""
     def _observar():
         execucao.aguardar()
+        status_final = execucao.status.value
         with _EXECUCOES_LOCK:
             registro["terminou_t"] = time.time()
-            registro["status"] = execucao.status.value
             registro["resultado"] = execucao.resultado
             if execucao.erro:
                 registro["erro"] = "".join(
                     traceback.format_exception_only(type(execucao.erro), execucao.erro)
                 ).strip()
+        # O histórico é gravado ANTES de o status virar "concluído": quando a tela percebe o fim e recarrega o
+        # histórico, a execução que acabou já está lá.
+        _guardar_no_historico(registro, status_final)
+        with _EXECUCOES_LOCK:
+            registro["status"] = status_final
 
     threading.Thread(target=_observar, daemon=True).start()
+
+
+def _nome_da_automacao(chave: str) -> str:
+    for item in AUTOMACOES_DISPONIVEIS:
+        if item["chave"] == chave:
+            return item["nome"]
+    return chave
+
+
+def _guardar_no_historico(registro: dict, status: str) -> None:
+    """Grava a execução que acabou no histórico da automação. Nunca derruba a execução: falha aqui só vai para o log."""
+    chave = registro.get("chave")
+    if not chave or _registro.obter(chave) is None:          # só automações da lista (o assistente usa chaves "wizard_*")
+        return
+    try:
+        with _EXECUCOES_LOCK:
+            logs = list(registro["logs"])
+            erro = registro["erro"]
+            iniciado_t, terminou_t = registro["iniciado_t"], registro["terminou_t"] or time.time()
+            opcoes = registro.get("opcoes")
+        _historico.salvar(_dados_dir(), _historico.montar_registro(
+            chave, _nome_da_automacao(chave), status=status, logs=logs, erro=erro,
+            iniciado_t=iniciado_t, terminou_t=terminou_t, opcoes=opcoes))
+    except Exception:                                         # noqa: BLE001 — o histórico é um extra
+        traceback.print_exc()
 
 
 def _rodar_funcao_sincrona_em_thread(chave: str, funcao, *args, **kwargs) -> None:
@@ -1479,9 +1517,11 @@ def automacoes_executar(chave):
         if script is None:
             return jsonify({"erro": f"Automação '{chave}' não encontrada"}), 404
         # Todas as automações passam pelo registro: opções compartilhadas + execução do plano.
+        _OPCOES_PENDENTES[chave] = dict(payload)       # vai para o histórico quando a execução for registrada
         _executar_registrado(script, chave, payload, turmas_completas)
 
     except ImportError as exc:       # inclui ModuleNotFoundError e "cannot import name ..."
+        _OPCOES_PENDENTES.pop(chave, None)
         return jsonify({
             "status": "erro",
             "mensagem": f"Módulo da automação '{chave}' não pôde ser carregado: {exc}",
@@ -1489,6 +1529,7 @@ def automacoes_executar(chave):
     except ValueError as exc:
         # Pré-requisito de configuração faltando (ex.: pasta de digitalização,
         # unidade escolar, credenciais) — erro esperado, não um bug.
+        _OPCOES_PENDENTES.pop(chave, None)
         return jsonify({"status": "erro", "mensagem": str(exc)}), 400
 
     return jsonify({
@@ -1557,6 +1598,75 @@ def automacoes_cancelar(chave):
     execucao.cancelar()
     _entrada.cancelar_pendente(chave)      # a caixa de pergunta (se aberta) deixa de valer
     return jsonify({"status": "ok", "mensagem": "Cancelamento solicitado. Encerrando…"})
+
+
+# ============================================================
+# TELA ÚNICA DA AUTOMAÇÃO — configurações do script + histórico
+# ============================================================
+# A tela de cada automação (Automações → <script>) não tem mais abas: em "Executar" ficam as opções da
+# execução, as "Configurações do script" (flags + o que o sistema guarda e o script lê) e o "Histórico"
+# (o que deu certo e o que deu errado em cada execução, gravado em dados/<ano>/historico_automacoes).
+
+_NOMES_RECURSOS = {
+    "turma": "Turma", "situacao": "Matriculados / transferidos", "cgm": "CGM",
+    "teste": "Modo de teste", "erros": "Reprocessar só o que deu erro", "debug": "Modo debug (análise)",
+}
+
+
+@api_bp.route("/automacoes/<string:chave>/configuracao")
+def automacoes_configuracao(chave):
+    """
+    Mapa padrão das configurações individuais do script: o que se escolhe a cada execução (recursos e campos
+    próprios), as opções guardadas (flags) e as configurações do sistema que ele lê (com o valor atual).
+    """
+    script = _registro.obter(chave)
+    if script is None:
+        return jsonify({"erro": f"Automação '{chave}' não encontrada"}), 404
+    return jsonify({
+        "chave": chave,
+        "nome": _nome_da_automacao(chave),
+        "opcoes_da_execucao": [{"id": r, "rotulo": _NOMES_RECURSOS.get(r, r)} for r in script.recursos],
+        "campos_proprios": [{"id": c.get("nome") or c.get("id"), "rotulo": c.get("label") or c.get("nome") or ""}
+                            for c in script.extras()],
+        "confirma_antes": script.confirmar,
+        "flags": _estado_flags(chave)["flags"],
+        "sistema": _cfgs.descrever(script.configs or ()),
+    })
+
+
+@api_bp.route("/automacoes/<string:chave>/historico")
+def automacoes_historico(chave):
+    """Últimas execuções da automação (mais nova primeiro, só o resumo) e os totais para o cabeçalho."""
+    if _registro.obter(chave) is None:
+        return jsonify({"erro": f"Automação '{chave}' não encontrada"}), 404
+    try:
+        limite = max(1, min(int(request.args.get("limite", 30)), _historico.MAX_EXECUCOES))
+    except ValueError:
+        limite = 30
+    pasta = _dados_dir()
+    return jsonify({"chave": chave, "execucoes": _historico.listar(pasta, chave, limite),
+                    "resumo": _historico.estatisticas(pasta, chave)})
+
+
+@api_bp.route("/automacoes/<string:chave>/historico/<string:id_execucao>")
+def automacoes_historico_detalhe(chave, id_execucao):
+    """Uma execução completa: o que deu certo, o que deu errado, avisos, opções usadas e o fim do log."""
+    if _registro.obter(chave) is None:
+        return jsonify({"erro": f"Automação '{chave}' não encontrada"}), 404
+    registro = _historico.obter(_dados_dir(), chave, id_execucao)
+    if registro is None:
+        return jsonify({"erro": "Execução não encontrada no histórico."}), 404
+    return jsonify(registro)
+
+
+@api_bp.route("/automacoes/<string:chave>/historico", methods=["DELETE"])
+def automacoes_historico_limpar(chave):
+    """Apaga o histórico desta automação (só o histórico: nada do que ela gerou é tocado)."""
+    if _registro.obter(chave) is None:
+        return jsonify({"erro": f"Automação '{chave}' não encontrada"}), 404
+    apagadas = _historico.limpar(_dados_dir(), chave)
+    return jsonify({"status": "ok", "apagadas": apagadas,
+                    "mensagem": f"Histórico apagado ({apagadas} execução(ões))."})
 
 
 # ============================================================

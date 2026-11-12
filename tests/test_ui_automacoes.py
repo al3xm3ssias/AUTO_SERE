@@ -53,7 +53,9 @@ def pagina(tmp_path, monkeypatch):
 
 def _abrir(pg, chave):
     pg.click("#toggle-automacoes")                                    # abre o grupo "Automações" do menu
-    pg.click(f'#sub-automacoes .nav-subitem[data-auto="{chave}"]')
+    # dispatch_event: o item pode estar rolado para baixo de outro grupo do menu em janelas baixas; o clique do usuário
+    # chega ao mesmo handler.
+    pg.locator(f'#sub-automacoes .nav-subitem[data-auto="{chave}"]').dispatch_event("click")
     pg.wait_for_selector("#automacoes-execucao", state="visible")
 
 
@@ -192,3 +194,55 @@ def test_pareceres_digitalizados_mostra_os_campos_de_e_mail_so_quando_ha_e_mail(
     assert estado() == {"campo-email-teste": False, "campo-email-assunto": True, "campo-email-mensagem": True}
     assert "Parecer descritivo de $ALUNO" in pg.eval_on_selector("#campo-email-assunto", "e => e.value")
     assert "$RESPONSAVEL" in pg.eval_on_selector("#campo-email-mensagem", "e => e.value")
+
+
+# ───────────────── tela única: sem abas, com configurações do script e histórico ─────────────────
+
+def test_tela_da_automacao_nao_tem_abas_e_mostra_configuracoes_e_historico(pagina):
+    _abrir(pagina, "transferidos_gerar")
+    assert pagina.locator("#automacoes-execucao .tab-btn").count() == 0
+    assert pagina.locator("#automacoes-execucao .tabs").count() == 0
+    pagina.wait_for_selector("#cfg-sistema .cfg-linha")
+    assert pagina.locator("#secao-config-script").is_visible()
+    texto = pagina.inner_text("#secao-config-script").casefold()          # os subtítulos são exibidos em maiúsculas (CSS)
+    for esperado in ("Escolhido a cada execução", "Login do SERE", "Data de corte dos transferidos",
+                     "Pasta de digitalização", "Modo de teste"):
+        assert esperado.casefold() in texto, esperado
+    pagina.wait_for_selector("#historico-script-corpo .script-vazio")
+    assert "Ainda não há execuções" in pagina.inner_text("#historico-script-corpo")
+    assert pagina.locator("#btn-executar-tarefa").is_visible()              # o Executar continua na mesma tela
+
+
+def test_opcoes_guardadas_do_script_ficam_dentro_das_configuracoes(pagina):
+    _abrir(pagina, "analisa_sere")
+    pagina.wait_for_selector("#cfg-flags:not([hidden]) input[data-flag]")
+    assert pagina.locator("#secao-config-script #flags-automacao").count() == 1
+    # a próxima automação não tem flags guardadas: o bloco some
+    pagina.click("#btn-voltar-automacoes")
+    pagina.locator('#sub-automacoes .nav-subitem[data-auto="turmas"]').dispatch_event("click")
+    pagina.wait_for_selector("#cfg-sistema .cfg-linha")
+    assert pagina.locator("#cfg-flags").is_hidden()
+
+
+def test_historico_mostra_o_que_deu_certo_e_o_que_deu_errado(pagina, monkeypatch):
+    import src.automacao.turmas as turmas_mod
+
+    async def coleta_com_falha():
+        print("✅ 5A coletada")
+        print("❌ 5B não abriu")
+
+    monkeypatch.setattr(turmas_mod, "coletar_turmas_e_alunos_via_login", coleta_com_falha)
+    _abrir(pagina, "turmas")
+    pagina.click("#btn-executar-tarefa")
+    pagina.wait_for_selector("#historico-script-corpo .hist-item", timeout=15000)
+    item = pagina.locator("#historico-script-corpo .hist-item").first
+    assert "Concluída com erros" in item.inner_text()
+    item.locator("summary").click()
+    pagina.wait_for_selector("#historico-script-corpo .hist-col.certo li")
+    assert "5A coletada" in pagina.inner_text("#historico-script-corpo .hist-col.certo")
+    assert "5B não abriu" in pagina.inner_text("#historico-script-corpo .hist-col.errado")
+
+    pagina.once("dialog", lambda d: d.accept())
+    pagina.click("#btn-historico-limpar")
+    pagina.wait_for_selector("#historico-script-corpo .script-vazio")
+    assert pagina.locator("#historico-script-corpo .hist-item").count() == 0

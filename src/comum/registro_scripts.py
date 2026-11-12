@@ -17,7 +17,7 @@ Aqui não há Flask nem rede; as funções pesadas (Playwright etc.) só são im
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Optional
 
 from src.comum.opcoes_execucao import (RECURSO_CGM, RECURSO_DEBUG, RECURSO_ERROS, RECURSO_SITUACAO,
@@ -51,6 +51,9 @@ class Script:
     validar_extras: Optional[Callable[[dict], None]] = None    # levanta ValueError com mensagem pronta
     turmas_de: Optional[Callable[[], list[str]]] = None        # fonte própria de nomes de turma (rematrícula)
     previa: Optional[Callable[[dict], str]] = None             # texto da prévia (ex.: "4 destinatários"); ValueError = aviso na tela
+    # Configurações do SISTEMA que o script lê (ids de src/comum/configuracoes_scripts.CATALOGO): aparecem na tela do
+    # script, em "Configurações do script". () = não depende de nenhuma; None = ainda não mapeado (os testes recusam).
+    configs: Optional[tuple[str, ...]] = None
 
     @property
     def usa_turmas_json(self) -> bool:
@@ -1161,3 +1164,69 @@ registrar(Script("cruzamento", (), _plano_sync("src.relatorios.cruzar_documentos
 registrar(Script("mascara", (), _plano_sync("src.relatorios.mascarar", "main")))
 registrar(Script("coleta_emails", (), _plano_sync("src.automacao.coleta_emails", "coletar_escolas_municipais")))
 registrar(Script("backup", (), _plano_sync("src.comum.backup", "executar_backup")))
+
+
+# ───────────────────── mapa das configurações de cada script ─────────────────────
+# Quais configurações do sistema (src/comum/configuracoes_scripts.CATALOGO) cada script lê. A tela do script
+# mostra exatamente esta lista, junto das opções da execução e das flags. Script novo: declare `configs=(...)` em
+# `registrar(Script(...))` — ou acrescente a linha aqui — e rode os testes (tests/test_historico_configuracao.py
+# confere que todo script registrado está mapeado e que só usa ids que existem no catálogo).
+_ANO, _SERE, _RCO, _PRE, _MAIL = "ano_letivo", "credenciais_sere", "credenciais_rco", "credenciais_prematricula", "email_envio"
+_ESC, _DIG, _MOD, _CORTE, _OBS = "escola", "pasta_digitalizacao", "pasta_modelos", "data_corte_transferidos", "observacao_historico"
+_CGM, _PLAN, _GOOG, _RAIO = "cgm_upload", "planilhas_drive", "google_credenciais", "raio_cep"
+
+CONFIGS_DOS_SCRIPTS: dict[str, tuple[str, ...]] = {
+    # coletas do SERE
+    "turmas": (_ANO, _SERE, _ESC),
+    "alunos": (_ANO, _SERE),
+    "funcionarios": (_ANO, _SERE),
+    "vinculos": (_ANO, _SERE, _ESC),
+    "sus": (_ANO,),                                   # o formulário do SISREG é público: sem login
+    "cep": (_ANO, _ESC, _RAIO),
+    "coleta_emails": (_ANO, _ESC),
+    # documentos dos alunos no SERE
+    "gerar_pastas": (_ANO, _DIG),
+    "analisa_pasta": (_ANO, _DIG),
+    "analisa_sere": (_ANO, _SERE, _CGM),
+    "documentos": (_ANO, _SERE),
+    "limpeza": (_ANO, _SERE),
+    "validar": (_ANO, _SERE),
+    "aluno": (_ANO, _SERE, _DIG, _CGM),
+    "espec": (_ANO, _SERE, _DIG),
+    "cruzamento": (_ANO,),
+    "comprimir": (_ANO, _DIG),
+    "mapear_pastas": (_ANO, _ESC, _DIG),
+    "mascara": (_ANO,),
+    # rematrícula e pré-matrícula
+    "gerar_chaves": (_ANO, _SERE, _ESC),
+    "rematricula": (_ANO, _SERE, _ESC),
+    "prematricula_completa": (_ANO, _PRE, _ESC),
+    # transferidos
+    "transferidos_fila": (_ANO, _CORTE, _ESC),
+    "transferidos_gerar": (_ANO, _SERE, _CORTE, _OBS, _DIG, _ESC),
+    "transferidos": (_ANO, _SERE, _CORTE, _DIG, _ESC),
+    "pareceres_transferidos": (_ANO, _SERE, _CORTE, _ESC),
+    # pareceres
+    "pareceres_digitalizados": (_ANO, _SERE, _ESC, _MAIL),
+    "parecer_fund": (_ANO, _ESC, _MOD),
+    "parecer_rco": (_ANO, _RCO),
+    "parecer_planilha": (_ANO, _ESC, _PLAN, _GOOG),
+    "base_abc": (_ANO, _SERE, _ESC),
+    # planilhas, avisos e utilitários
+    "sheets": (_ANO, _ESC, _PLAN, _GOOG),
+    "planilha_modelo": (_ANO, _PLAN, _GOOG),
+    "avisos": (_ANO, _ESC, _MAIL),
+    "termos": (_ANO, _ESC, _MOD),
+    "compara_anos": (_ANO, _ESC),
+    "backup": (_ANO,),
+}
+
+
+def _aplicar_mapa_de_configs() -> None:
+    for chave, ids in CONFIGS_DOS_SCRIPTS.items():
+        script = REGISTRO.get(chave)
+        if script is not None and script.configs is None:        # o que o script declarou ele mesmo vale mais
+            REGISTRO[chave] = replace(script, configs=tuple(ids))
+
+
+_aplicar_mapa_de_configs()
