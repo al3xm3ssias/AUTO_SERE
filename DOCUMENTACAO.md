@@ -19,6 +19,7 @@ automações, arquivos lidos e gravados, regras de negócio, particularidades e 
 | [`documentacao/Documentos.md`](documentacao/Documentos.md) | Análise, validação, upload, limpeza, compressão, cruzamento SERE × pasta |
 | [`documentacao/Funcionarios.md`](documentacao/Funcionarios.md) | Coleta básica/completa, vínculos (SERE × RH × holerite), termos de ciência |
 | [`documentacao/PreMatricula_Rematricula.md`](documentacao/PreMatricula_Rematricula.md) | Pré-matrícula (4 etapas), regras de negócio, rematrícula, bugs abertos |
+| [`documentacao/Planilhas.md`](documentacao/Planilhas.md) | Gerenciador centralizado de planilhas (modelos, plataformas, finalidades) |
 | [`documentacao/Pareceres.md`](documentacao/Pareceres.md) | Parecer do Fundamental (Word + QR) e do Infantil (RCO/RCDIG) |
 | [`documentacao/Comunicacao.md`](documentacao/Comunicacao.md) | Avisos por e-mail, coleta de e-mails das escolas, estado do envio real |
 | [`documentacao/WhatsApp.md`](documentacao/WhatsApp.md) | Provedores, travas, comunicado de matrícula, API, o que falta (item 7b) |

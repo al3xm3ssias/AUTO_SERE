@@ -8,9 +8,12 @@ e as funções genéricas de src/comum/google_sheets.py.
     turmas.py ─► turmas.json ─► sincronizar_turmas() ─► uma ABA por turma na planilha do Google
 
 Operações (`executar_planilha_google`):
-    criar      cria uma planilha NOVA (uma aba por turma, com cabeçalhos) e já a preenche
-    atualizar  atualiza uma planilha que já existe (ID ou link)
+    criar      cria uma planilha NOVA (uma aba por turma, com cabeçalhos), já a preenche e a cadastra
+    atualizar  atualiza a planilha das turmas que o GERENCIADOR (src/comum/planilhas_gerenciador.py) aponta: a vigente
+               da finalidade "Planilha das Turmas", ou a que o usuário escolheu entre as cadastradas
     verificar  só confere o acesso e lista as abas (não grava nada)
+
+Esta automação NÃO guarda link, ID nem caminho de planilha: tudo vem do gerenciador (ver `localizar_planilha`).
 
 Layout de cada aba (colunas A–L; quem manda é a coluna C, o CGM):
     A Nº · B CPF* · C CGM · D SUS* · E Nome · F D.N. · G Idade* · H Sexo · I Status (M/T) · J Data de matrícula ·
@@ -276,18 +279,36 @@ def sincronizar_turmas(turmas: dict, planilha: str, *, turmas_selecionadas=None,
 
 def _salvar_no_cadastro(info: dict) -> None:
     """
-    Cadastra a planilha recém-criada na tela "Planilhas do Drive" (nome, link e id). A planilha já existe no Google:
-    se não der para cadastrar, só avisa (o ID continua guardado como "última usada" nas Configurações).
+    Cadastra a planilha recém-criada no gerenciador, como "Planilha das Turmas" (modelo planilha_turmas). Se já existe
+    uma ativa, a nova entra INATIVA: o que está em uso não troca sozinho (ative em 'Planilhas do Drive'). A planilha já
+    existe no Google: se não der para cadastrar, só avisa.
     """
-    from src.comum import planilhas_registro
+    from src.comum import planilhas_gerenciador as gp, planilhas_registro
     from src.comum.arquivos_json import ArquivoJsonCorrompidoError
     try:
-        item = planilhas_registro.registrar_planilha_criada(info.get("titulo") or "Planilha", info["id"])
+        ja_ha_ativa = bool(gp.candidatas(gp.FINALIDADE_PLANILHA_TURMAS))
+        item = planilhas_registro.registrar_planilha_criada(
+            info.get("titulo") or "Planilha", info["id"], finalidade=gp.FINALIDADE_PLANILHA_TURMAS,
+            status="inativa" if ja_ha_ativa else "ativa", modelo="planilha_turmas", modelo_versao=1)
     except (ValueError, OSError, ArquivoJsonCorrompidoError) as exc:
         log.warning("  ⚠ A planilha foi criada, mas não deu para cadastrá-la em 'Planilhas do Drive': %s", exc)
         return
     if item:
         log.info("  Cadastrada em 'Planilhas do Drive' (id %s).", item["id"])
+        if item["status"] == "inativa":
+            log.warning("  Já havia uma planilha das turmas ativa; esta ficou INATIVA. Ative-a em 'Planilhas do Drive' para trocar.")
+
+
+def localizar_planilha(planilha_cadastro="") -> "object":
+    """
+    A planilha das turmas a usar, vinda SÓ do gerenciador: a escolhida (id do cadastro) ou a vigente. Só Google
+    (esta automação grava célula a célula pela API do Google). SheetsValidacaoErro com a explicação se não houver.
+    """
+    from src.comum import planilhas_gerenciador as gp
+    try:
+        return gp.resolver(gp.FINALIDADE_PLANILHA_TURMAS, id_item=planilha_cadastro or None, plataformas=["google_sheets"])
+    except (gp.PlanilhaNaoCadastrada, gp.PlanilhaAmbigua, LookupError, ValueError) as exc:
+        raise gs.SheetsValidacaoErro(str(exc)) from exc
 
 
 def _imprimir_resumo(r: Resumo, simulacao: bool) -> None:
@@ -320,16 +341,15 @@ def descrever_sincronizacao(turmas: dict, turmas_selecionadas=None) -> str:
     return f"{matr + transf} aluno(s) em {n_turmas} turma(s): {matr} matriculado(s) e {transf} transferido(s) (os dois grupos entram)."
 
 
-def executar_planilha_google(operacao: str, planilha: str = "", nome: str = "", turmas: dict | None = None,
-                             turmas_selecionadas=None, simulacao: bool = False) -> dict:
+def executar_planilha_google(operacao: str, nome: str = "", turmas: dict | None = None,
+                             turmas_selecionadas=None, simulacao: bool = False, planilha_cadastro="") -> dict:
     """
-    criar     → cria a planilha `nome` (uma aba por turma escolhida, com cabeçalhos) e preenche com os alunos;
-                guarda o ID para a próxima vez.
-    atualizar → sincroniza a planilha `planilha` (ID ou link; vazio = a última usada).
-    verificar → confere acesso e abas (não grava).
+    criar     → cria a planilha `nome` (uma aba por turma escolhida, com cabeçalhos), preenche com os alunos e a cadastra
+                no gerenciador como "Planilha das Turmas".
+    atualizar → sincroniza a planilha das turmas do gerenciador (`planilha_cadastro` = id escolhido; vazio = a vigente).
+    verificar → confere acesso e abas dessa mesma planilha (não grava).
     Com `simulacao`, lê e mostra o que mudaria sem gravar nem criar nada. Falha (exceção) se algo não deu certo.
     """
-    from src.comum import configuracao
     if operacao not in OPERACOES:
         raise gs.SheetsValidacaoErro(f"Operação '{operacao}' desconhecida: use {', '.join(OPERACOES)}.")
     turmas = turmas or {}
@@ -337,16 +357,14 @@ def executar_planilha_google(operacao: str, planilha: str = "", nome: str = "", 
     alvo = list(turmas_selecionadas) if turmas_selecionadas else list(turmas)
 
     # Pedidos inválidos são recusados ANTES de autenticar (nada de navegador à toa).
+    planilha = None
     if operacao == "criar":
         if not str(nome or "").strip():
             raise gs.SheetsValidacaoErro("Informe o nome da nova planilha.")
         if not alvo:
             raise gs.SheetsValidacaoErro("Nenhuma turma para colocar na planilha: execute primeiro a automação 'Turmas'.")
     else:
-        planilha = planilha or configuracao.planilha_google_id()
-        if not planilha:
-            raise gs.SheetsValidacaoErro("Informe o link ou o ID da planilha.")
-        gs.extrair_id_planilha(planilha)
+        planilha = localizar_planilha(planilha_cadastro).planilha_id
         if operacao == "atualizar" and not turmas:
             raise gs.SheetsValidacaoErro("Ainda não existe turmas.json: execute primeiro a automação 'Turmas'.")
 
@@ -365,7 +383,6 @@ def executar_planilha_google(operacao: str, planilha: str = "", nome: str = "", 
             planilha = None
         else:
             info = gs.criar_planilha(nome, {aba: CABECALHOS for aba in abas}, servico=servico)
-            configuracao.definir_planilha_google(info["id"])
             log.info("✓ Planilha criada: %s", info["titulo"])
             log.info("  Link: %s", info["url"])
             _salvar_no_cadastro(info)
@@ -378,9 +395,7 @@ def executar_planilha_google(operacao: str, planilha: str = "", nome: str = "", 
     else:
         resumo = sincronizar_turmas(turmas, planilha, turmas_selecionadas=alvo, simulacao=simulacao, servico=servico, mapa=mapa)
         _imprimir_resumo(resumo, simulacao)
-        if not simulacao:
-            configuracao.definir_planilha_google(gs.extrair_id_planilha(planilha))
-        resultado = {"id": gs.extrair_id_planilha(planilha), "resumo": resumo}
+        resultado = {"id": planilha, "resumo": resumo}
 
     if resultado["resumo"].erros:
         raise gs.SheetsErro(f"Concluído com {len(resultado['resumo'].erros)} problema(s): " + "; ".join(resultado["resumo"].erros))

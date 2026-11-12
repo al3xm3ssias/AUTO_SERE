@@ -60,7 +60,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from src.automacao import parecer_rco as _rco
-from src.comum import google_auth, google_sheets as gs, paths, planilhas_registro as registro, qr_seguro
+from src.comum import google_auth, google_sheets as gs, paths, planilhas_gerenciador as gerenciador, qr_seguro
 from src.comum.execucao_gui import verificar_cancelamento
 
 CHAVE = "parecer_planilha"
@@ -96,23 +96,50 @@ def rotulo_bimestre(valor) -> str:
     return BIMESTRES[m.group(1)]
 
 
-def planilhas_do_cadastro() -> list[dict]:
-    """As planilhas ativas do cadastro 'Planilhas do Drive' para pareceres do Infantil. ValueError com mensagem pronta."""
-    itens = registro.planilhas_da_finalidade(registro.FINALIDADE_PARECER_INFANTIL)
-    if not itens:
-        raise ValueError(
-            "Nenhuma planilha de pareceres do Infantil está ativa no cadastro. Abra 'Planilhas do Drive', cadastre cada "
-            "planilha com a finalidade 'Pareceres do Infantil' e a turma dela, e deixe-a Ativa.")
-    vistas: dict[str, dict] = {}
-    for item in itens:
-        chave = str(item.get("turma") or "").casefold()
+def _dict_da_planilha(ref) -> dict:
+    return {"id": ref.id, "nome": ref.nome, "turma": ref.turma, "planilha_id": ref.planilha_id, "link": ref.link,
+            "plataforma": ref.plataforma}
+
+
+def planilhas_do_cadastro(planilha_id=None, turmas=None) -> list[dict]:
+    """
+    As planilhas de pareceres do Infantil a usar, vindas SÓ do gerenciador (planilhas_gerenciador.py).
+      planilha_id   a que o usuário escolheu entre as cadastradas (vale exatamente ela, mesmo inativa)
+      turmas        (opcional) só as dessas turmas; sem isso, todas as ativas
+    A planilha dos pareceres é EXTERNA (vem pronta da Secretaria) e hoje só é lida no Google Sheets.
+    ValueError com mensagem pronta.
+    """
+    turmas = [t for t in (turmas or []) if str(t).strip()]
+    gp = gerenciador
+    try:
+        if planilha_id not in (None, ""):
+            ref = gp.resolver(gp.FINALIDADE_PARECER_INFANTIL, id_item=planilha_id, plataformas=["google_sheets"])
+            if turmas and ref.turma.casefold() not in {str(t).strip().casefold() for t in turmas}:
+                raise ValueError(f"A planilha '{ref.nome}' é da turma '{ref.turma}', que não está entre as turmas escolhidas.")
+            return [_dict_da_planilha(ref)]
+        refs = gp.candidatas(gp.FINALIDADE_PARECER_INFANTIL)
+        if not refs:
+            raise gp.PlanilhaNaoCadastrada(gp._mensagem_sem_planilha(gp.FINALIDADE_PARECER_INFANTIL, ""))
+    except gp.PlanilhaNaoCadastrada as exc:
+        raise ValueError(str(exc)) from exc
+    if turmas:
+        escolhidas = {str(t).strip().casefold() for t in turmas}
+        refs = [r for r in refs if r.turma.casefold() in escolhidas]
+        if not refs:
+            raise ValueError("Nenhuma planilha de pareceres do Infantil ativa para as turmas escolhidas: " + ", ".join(turmas) + ".")
+    vistas: dict[str, object] = {}
+    for ref in refs:
+        chave = ref.turma.casefold()
         if not chave:
-            raise ValueError(f"A planilha '{item.get('nome')}' (id {item.get('id')}) está sem turma no cadastro 'Planilhas do Drive'.")
+            raise ValueError(f"A planilha '{ref.nome}' (id {ref.id}) está sem turma no cadastro 'Planilhas do Drive'.")
         if chave in vistas:
-            raise ValueError(f"A turma '{item['turma']}' tem duas planilhas ativas ('{vistas[chave]['nome']}' e '{item['nome']}'). "
-                             "Deixe uma delas inativa em 'Planilhas do Drive'.")
-        vistas[chave] = item
-    return itens
+            raise ValueError(f"A turma '{ref.turma}' tem duas planilhas ativas ('{vistas[chave].nome}' e '{ref.nome}'). "
+                             "Escolha uma delas ou deixe a outra inativa em 'Planilhas do Drive'.")
+        vistas[chave] = ref
+        if ref.plataforma != "google_sheets":
+            raise ValueError(f"A planilha '{ref.nome}' está em {ref.plataforma}: a geração de pareceres em PDF só trabalha "
+                             "com Google Sheets por enquanto.")
+    return [_dict_da_planilha(r) for r in refs]
 
 
 def _situacao(aluno: dict) -> str:
@@ -144,7 +171,7 @@ def alunos_da_turma(turmas: dict, turma: str) -> list[dict]:
              "turma": nome_real} for a in alunos]
 
 
-def validar_pedido(bimestre) -> None:
+def validar_pedido(bimestre, planilha_id=None, turmas_escolhidas=None) -> None:
     """Tudo o que dá para conferir ANTES de falar com o Google (ValueError = mensagem pronta)."""
     rotulo_bimestre(bimestre)
     if not google_auth.credenciais_configuradas():
@@ -152,7 +179,7 @@ def validar_pedido(bimestre) -> None:
             "As credenciais do Google ainda não foram configuradas (arquivo credenciais/google_credentials.json). "
             "O passo a passo está em docs/GOOGLE_SHEETS.md.")
     turmas = _rco.carregar_turmas()
-    for planilha in planilhas_do_cadastro():
+    for planilha in planilhas_do_cadastro(planilha_id, turmas_escolhidas):
         if not alunos_da_turma(turmas, planilha["turma"]):
             raise ValueError(f"Nenhum aluno Matriculado na turma '{planilha['turma']}' em turmas.json.")
 
@@ -340,17 +367,19 @@ def _processar_planilha(planilha: dict, turmas: dict, *, servico, creds, rotulo:
 
 
 def gerar_pareceres_infantil_planilha(bimestre, *, modo_teste: bool = False, substituir: bool = False, interativo: bool = True,
+                                      planilha_id=None, turmas=None,
                                       abrir: Optional[Callable] = None, http_get: Optional[Callable] = None,
                                       dormir: Callable = time.sleep, espera_s: float = ESPERA_ATUALIZACAO_S) -> dict:
     """
-    Gera os pareceres do Infantil IV/V a partir das planilhas ativas do cadastro. Devolve
+    Gera os pareceres do Infantil IV/V a partir da planilha escolhida entre as cadastradas (`planilha_id`) ou, sem escolha,
+    das ativas (filtradas pelas `turmas` pedidas, se houver). Só usa o que o gerenciador de planilhas aponta. Devolve
     {"total", "gerados", "pulados", "falhas": [{"turma","nome","motivo"}], "pasta"}.
     ValueError se faltar algo (bimestre, credenciais, planilha no cadastro, turmas.json); SheetsErro se o Google recusar.
     """
     rotulo = rotulo_bimestre(bimestre)
-    validar_pedido(bimestre)
-    planilhas = planilhas_do_cadastro()
-    turmas = _rco.carregar_turmas()
+    validar_pedido(bimestre, planilha_id, turmas)
+    planilhas = planilhas_do_cadastro(planilha_id, turmas)
+    turmas = _rco.carregar_turmas()                       # a partir daqui `turmas` é o turmas.json (o filtro já foi aplicado)
     ano = str(paths.ano_atual())
     destino_base = _rco.pasta_destino(ano, rotulo)
     destino_base.mkdir(parents=True, exist_ok=True)

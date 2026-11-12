@@ -325,13 +325,14 @@ def etapa_alunos(ctx: Ctx) -> int:
 def etapa_planilha(ctx: Ctx) -> int:
     if _precisa_de_mudanca(ctx, "planilha") is None:
         return 0
-    from src.comum.configuracao import planilha_google_id
-    planilha = planilha_google_id()
-    if not planilha:
-        log.error("Nenhuma planilha configurada: informe o link em Automações → Google Sheets uma vez pela tela.")
-        _marcar(ctx, "planilha", ok=False, erro="sem planilha configurada")
+    from src.automacao.sincroniza_sheets import localizar_planilha
+    try:
+        localizar_planilha()                                          # a vigente no gerenciador de planilhas
+    except ValueError as exc:
+        log.error("%s", exc)
+        _marcar(ctx, "planilha", ok=False, erro="sem planilha das turmas ativa no cadastro")
         return 1
-    rc = _executar(ctx, "planilha", [["sheets", "--operacao", "atualizar", "--planilha", planilha, "--confirmo"]])[0]
+    rc = _executar(ctx, "planilha", [["sheets", "--operacao", "atualizar", "--confirmo"]])[0]
     _marcar(ctx, "planilha", ok=rc == 0, codigo=rc)
     return 0 if rc == 0 else 1
 

@@ -69,3 +69,7 @@ pastas, então o resultado fica junto.
 - **[não validado]** no Google real: a exportação em PDF e o tempo de recálculo (ajustar `ESPERA_ATUALIZACAO_S` se o
   parecer sair com o aluno anterior).
 
+
+
+## Planilha do Infantil e o gerenciador de planilhas
+A planilha de pareceres vem pronta da Secretaria e é cadastrada em *Planilhas do Drive* (finalidade `parecer_infantil`, uma por turma). O formulário `parecer_planilha` deixa escolher a planilha cadastrada e a(s) turma(s). Ver `documentacao/Planilhas.md`.

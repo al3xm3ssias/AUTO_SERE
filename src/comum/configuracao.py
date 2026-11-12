@@ -62,7 +62,7 @@ _PADRAO: dict[str, Any] = {
     "flags_automacoes": {},
     "data_corte_transferidos": None,      # "dd/mm/aaaa"; None = 22/06 do ano letivo (ver data_corte_transferidos)
     "observacao_historico": None,         # último texto usado na etapa "Alterar" do histórico de transferidos
-    "google_sheets": None,                # {"planilha_id", "mapa_abas", "planilhas": [...], "proximo_id"} (ver google_sheets_config)
+    "google_sheets": None,                # {"mapa_abas"} (ver google_sheets_config); as planilhas ficam em planilhas_gerenciador
 }
 
 
@@ -375,7 +375,7 @@ def definir_observacao_historico(texto) -> None:
 # ─────────────────────────────────────────────────────────────────────────
 # Google Sheets (planilha das turmas)
 # ─────────────────────────────────────────────────────────────────────────
-# Só o que NÃO é segredo fica aqui: o ID da última planilha usada e, se o usuário quiser, um mapa
+# Só o que NÃO é segredo fica aqui: se o usuário quiser, um mapa
 # {nome da turma no turmas.json: nome da aba na planilha} que complementa/substitui o padrão da escola
 # (src/automacao/sincroniza_sheets.py). Credenciais e token ficam em credenciais/ (ver src/comum/google_auth.py).
 
@@ -384,99 +384,23 @@ def google_sheets_config() -> dict:
     return dict(bruto) if isinstance(bruto, dict) else {}
 
 
-def planilha_google_id() -> str:
-    """ID da planilha usada por último (já vem preenchida na tela); vazio = nenhuma."""
-    return str(google_sheets_config().get("planilha_id") or "")
-
-
-def definir_planilha_google(planilha_id: str) -> None:
-    configuracao = carregar_configuracao()
-    atual = dict(configuracao.get("google_sheets") or {})
-    atual["planilha_id"] = str(planilha_id or "").strip()
-    configuracao["google_sheets"] = atual
-    _salvar_configuracao(configuracao)
-
-
-# ── Planilhas salvas (lista de links do Google Drive, pedido do usuário em 10/11/2026) ──────────────────
-# Cada item: {"id": 1, "nome": "Turmas 2026", "link": "https://docs.google.com/spreadsheets/d/…/edit",
-#             "planilha_id": "<ID do Google, tirado do link>"}.
-# O "id" é só um identificador deste cadastro (número sequencial, nunca reaproveitado, mesmo depois de remover).
-# Convive com "planilha_id" (a última planilha usada, lida pela automação e pela rotina diária): não se mexe nele aqui.
-
-_PREFIXO_LINK_PLANILHA = "https://docs.google.com/spreadsheets/"
-LIMITE_NOME_PLANILHA = 250
-
-
-def _montar_planilha(nome, link) -> tuple[str, str, str]:
-    """(nome, link, ID do Google) já validados. ValueError com mensagem pronta se nome ou link não servirem."""
-    from src.comum.google_sheets import extrair_id_planilha            # import tardio: não carrega o Google à toa
-    nome = " ".join(str(nome or "").split())
-    if not nome:
-        raise ValueError("Informe o nome da planilha.")
-    if len(nome) > LIMITE_NOME_PLANILHA:
-        raise ValueError(f"Nome da planilha muito longo (máximo {LIMITE_NOME_PLANILHA} caracteres).")
-    bruto = str(link or "").strip()
-    pid = extrair_id_planilha(bruto)                                  # SheetsValidacaoErro (é ValueError) com a explicação
-    if "/" in bruto and not bruto.startswith(_PREFIXO_LINK_PLANILHA):  # só links do Google Sheets (o link vira botão na tela)
-        raise ValueError("O link precisa ser de uma planilha do Google (começa com https://docs.google.com/spreadsheets/).")
-    if "/" not in bruto:                                              # veio só o ID: monta o link completo
-        bruto = f"{_PREFIXO_LINK_PLANILHA}d/{pid}/edit"
-    return nome, bruto, pid
-
-
-def planilhas_google() -> list[dict]:
-    """Planilhas salvas, na ordem em que foram salvas (cópias: alterar o resultado não altera a configuração)."""
-    itens = google_sheets_config().get("planilhas")
-    return [dict(i) for i in itens if isinstance(i, dict)] if isinstance(itens, list) else []
-
-
-def adicionar_planilha_google(nome, link) -> dict:
+def esquecer_planilha_google_legada() -> None:
     """
-    Salva uma planilha na lista (nome + link) e devolve o item com o id novo. ValueError com mensagem pronta se o
-    nome/link forem inválidos ou se aquela planilha (mesmo ID do Google) já estiver salva.
+    Remove daqui o antigo "ID da última planilha usada". As planilhas (e a vigente de cada uso) vivem só no cadastro
+    central (src/comum/planilhas_gerenciador.py → dados/planilhas/planilhas.json); este bloco guarda apenas o mapa
+    de abas (`mapa_abas`). Chamado pela migração do gerenciador, depois de levar o ID para o cadastro.
     """
-    nome, link, pid = _montar_planilha(nome, link)
     configuracao = carregar_configuracao()
     bloco = dict(configuracao.get("google_sheets") or {})
-    itens = [i for i in (bloco.get("planilhas") or []) if isinstance(i, dict)]
-    repetida = next((i for i in itens if i.get("planilha_id") == pid), None)
-    if repetida:
-        raise ValueError(f"Esta planilha já está salva como '{repetida.get('nome')}' (id {repetida.get('id')}).")
-    usados = [int(i["id"]) for i in itens if str(i.get("id", "")).isdigit()]
-    novo_id = max(int(bloco.get("proximo_id") or 1), max(usados, default=0) + 1)
-    item = {"id": novo_id, "nome": nome, "link": link, "planilha_id": pid}
-    bloco["planilhas"] = itens + [item]
-    bloco["proximo_id"] = novo_id + 1
-    configuracao["google_sheets"] = bloco
-    _salvar_configuracao(configuracao)
-    return dict(item)
+    mudou = False
+    for chave in ("planilha_id", "planilhas", "proximo_id"):
+        if chave in bloco:
+            bloco.pop(chave)
+            mudou = True
+    if mudou:
+        configuracao["google_sheets"] = bloco
+        _salvar_configuracao(configuracao)
 
-
-def remover_planilha_google(id_item) -> dict:
-    """Tira da lista a planilha de id `id_item` (só esquece o link; a planilha no Google não é tocada). Devolve o item removido."""
-    configuracao = carregar_configuracao()
-    bloco = dict(configuracao.get("google_sheets") or {})
-    itens = [i for i in (bloco.get("planilhas") or []) if isinstance(i, dict)]
-    alvo = next((i for i in itens if str(i.get("id")) == str(id_item).strip()), None)
-    if alvo is None:
-        raise ValueError(f"Não há planilha salva com o id {id_item}.")
-    bloco["planilhas"] = [i for i in itens if i is not alvo]
-    configuracao["google_sheets"] = bloco
-    _salvar_configuracao(configuracao)
-    return dict(alvo)
-
-
-def registrar_planilha_criada(nome, link) -> dict | None:
-    """
-    Guarda na lista a planilha que o sistema acabou de criar. Se ela já estiver na lista, não duplica (devolve None).
-    Como a planilha JÁ existe no Google, um problema aqui não deve derrubar quem chamou: ver sincroniza_sheets.
-    """
-    try:
-        return adicionar_planilha_google(nome, link)
-    except ValueError as exc:
-        if "já está salva" in str(exc):
-            return None
-        raise
 
 
 # ─────────────────────────────────────────────────────────────────────────

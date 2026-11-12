@@ -580,13 +580,24 @@ _OPERACOES_SHEETS = [
 ]
 
 
+def _opcoes_planilha(finalidade: str, vazio: str) -> list[dict]:
+    """Opções de um seletor de planilha: a 1ª (valor vazio) é a vigente; depois, as cadastradas para o uso."""
+    from src.comum import planilhas_gerenciador as gp
+    try:
+        cadastradas = gp.opcoes_para_formulario(finalidade)
+    except Exception:                                                     # cadastro ilegível: a tela abre, a execução explica
+        cadastradas = []
+    return [{"valor": "", "texto": vazio}] + cadastradas
+
+
 def _extras_sheets() -> list[dict]:
-    from src.comum.configuracao import planilha_google_id
+    from src.comum.planilhas_gerenciador import FINALIDADE_PLANILHA_TURMAS
     return [
         {"tipo": "select", "id": "campo-operacao-sheets", "nome": "operacao", "label": "Operação", "semVazio": True,
          "padrao": "atualizar", "opcoes": _OPERACOES_SHEETS},
-        {"tipo": "texto", "id": "campo-planilha-sheets", "nome": "planilha", "label": "Link ou ID da planilha",
-         "padrao": planilha_google_id(), "placeholder": "https://docs.google.com/spreadsheets/d/…",
+        {"tipo": "select", "id": "campo-planilha-sheets", "nome": "planilha_cadastro", "label": "Planilha das turmas (cadastrada)",
+         "semVazio": True, "padrao": "", "opcoes": _opcoes_planilha(FINALIDADE_PLANILHA_TURMAS, "A planilha ativa (a vigente)"),
+         "descricao": "Vem de 'Planilhas do Drive'. Para usar outra, cadastre-a lá (finalidade 'Planilha das Turmas') ou ative-a.",
          "visivelSe": {"campo": "campo-operacao-sheets", "valor": "atualizar|verificar"}},
         {"tipo": "texto", "id": "campo-nome-sheets", "nome": "nome_planilha", "label": "Nome da nova planilha",
          "placeholder": "Turmas 2026", "visivelSe": {"campo": "campo-operacao-sheets", "valor": "criar"}},
@@ -596,8 +607,7 @@ def _extras_sheets() -> list[dict]:
 
 
 def _validar_sheets(p: dict) -> None:
-    from src.automacao.sincroniza_sheets import OPERACOES
-    from src.comum import configuracao, google_sheets as gs
+    from src.automacao.sincroniza_sheets import OPERACOES, localizar_planilha
     operacao = str(p.get("operacao") or "atualizar")
     if operacao not in OPERACOES:
         raise ValueError(f"Operação '{operacao}' desconhecida: use {', '.join(OPERACOES)}.")
@@ -605,10 +615,7 @@ def _validar_sheets(p: dict) -> None:
         if not str(p.get("nome_planilha") or "").strip():
             raise ValueError("Informe o nome da nova planilha.")
         return
-    alvo = str(p.get("planilha") or "").strip() or configuracao.planilha_google_id()
-    if not alvo:
-        raise ValueError("Informe o link ou o ID da planilha.")
-    gs.extrair_id_planilha(alvo)                                          # SheetsValidacaoErro (é ValueError) com a explicação
+    localizar_planilha(p.get("planilha_cadastro"))                       # SheetsValidacaoErro (é ValueError) com a explicação
 
 
 def _previa_sheets(p: dict) -> str:
@@ -629,7 +636,8 @@ def _plano_sheets(o, p, tj, ctx) -> Plano:
     operacao = str(p.get("operacao") or "atualizar")
     alvo = list(o.turmas) or list(tj)
     return Plano("sync", executar_planilha_google, {
-        "operacao": operacao, "planilha": str(p.get("planilha") or "").strip(), "nome": str(p.get("nome_planilha") or "").strip(),
+        "operacao": operacao, "planilha_cadastro": str(p.get("planilha_cadastro") or "").strip(),
+        "nome": str(p.get("nome_planilha") or "").strip(),
         "turmas": tj, "turmas_selecionadas": alvo, "simulacao": bool(p.get("simulacao"))},
         f"[OPÇÕES] Google Sheets — {operacao}: {descrever_sincronizacao(tj, alvo)}")
 
@@ -737,9 +745,14 @@ def _plano_parecer_rco(o, p, tj, ctx) -> Plano:
 
 def _extras_parecer_planilha() -> list[dict]:
     from src.automacao.parecer_planilha import BIMESTRES
+    from src.comum.planilhas_gerenciador import FINALIDADE_PARECER_INFANTIL
     return [
         {"tipo": "select", "id": "campo-bimestre-planilha", "nome": "bimestre", "label": "Bimestre",
          "opcoes": [{"valor": k, "texto": v} for k, v in BIMESTRES.items()]},
+        {"tipo": "select", "id": "campo-planilha-parecer", "nome": "planilha_cadastro", "label": "Planilha de pareceres (cadastrada)",
+         "semVazio": True, "padrao": "", "opcoes": _opcoes_planilha(FINALIDADE_PARECER_INFANTIL, "Todas as ativas (uma por turma)"),
+         "descricao": "A planilha vem pronta da Secretaria e é cadastrada em 'Planilhas do Drive'. Escolha uma para gerar só "
+                      "dela; use o filtro de turma abaixo para limitar as turmas."},
         {"tipo": "caixa", "id": "campo-substituir-planilha", "nome": "substituir", "label": "Substituir pareceres que já existem",
          "descricao": "Por padrão um parecer já gerado é mantido. Marque só para refazer do zero."},
     ]
@@ -747,13 +760,65 @@ def _extras_parecer_planilha() -> list[dict]:
 
 def _validar_parecer_planilha(p: dict) -> None:
     from src.automacao import parecer_planilha
-    parecer_planilha.validar_pedido(p.get("bimestre"))
+    parecer_planilha.validar_pedido(p.get("bimestre"), p.get("planilha_cadastro") or None, p.get("turmas") or None)
 
 
 def _plano_parecer_planilha(o, p, tj, ctx) -> Plano:
     from src.automacao.parecer_planilha import gerar_pareceres_infantil_planilha
     return Plano("sync", gerar_pareceres_infantil_planilha, {
-        "bimestre": p.get("bimestre"), "modo_teste": o.modo_teste, "substituir": bool(p.get("substituir", False))})
+        "bimestre": p.get("bimestre"), "modo_teste": o.modo_teste, "substituir": bool(p.get("substituir", False)),
+        "planilha_id": str(p.get("planilha_cadastro") or "").strip() or None, "turmas": list(o.turmas) or None})
+
+
+# ── Planilha a partir de um modelo (Chamada, Turmas, Listagem, IMC) ──────────────────────────────────
+
+def _extras_planilha_modelo() -> list[dict]:
+    from src.comum import planilhas_gerenciador as gp
+    return [
+        {"tipo": "select", "id": "campo-modelo-planilha", "nome": "modelo", "label": "Modelo", "semVazio": True,
+         "padrao": "chamada", "opcoes": [{"valor": m["chave"], "texto": f"{m['nome']} — {m['descricao']}"} for m in gp.modelos_disponiveis()]},
+        {"tipo": "select", "id": "campo-plataforma-planilha", "nome": "plataforma", "label": "Criar em", "semVazio": True,
+         "padrao": "google_sheets",
+         "opcoes": [{"valor": p["valor"], "texto": p["nome"] + (f" — indisponível: {p['indisponivel']}" if p["indisponivel"] else "")}
+                    for p in gp.plataformas_disponiveis()]},
+        {"tipo": "texto", "id": "campo-nome-planilha-modelo", "nome": "nome_planilha", "label": "Nome da planilha (opcional)",
+         "placeholder": "em branco = nome do modelo + turma + ano"},
+        {"tipo": "caixa", "id": "campo-vigente-planilha", "nome": "tornar_vigente", "label": "Passar a usar a nova planilha",
+         "descricao": "Se já existe uma planilha ativa para este uso, a nova fica inativa. Marque para trocar já (a antiga fica inativa)."},
+    ]
+
+
+def _validar_planilha_modelo(p: dict) -> None:
+    from src.comum import planilhas_gerenciador as gp, planilhas_modelos as pm, planilhas_plataformas as plat
+    m = pm.modelo(str(p.get("modelo") or ""))
+    motivo = plat.plataforma(p.get("plataforma") or "google_sheets").disponivel()
+    if motivo:
+        raise ValueError(motivo)
+    turmas = [t for t in (p.get("turmas") or []) if str(t).strip()]
+    if m.uma_turma and len(turmas) != 1:
+        raise ValueError(f"O modelo '{m.nome}' é de uma turma: escolha exatamente uma turma no filtro de turmas.")
+
+
+def _plano_planilha_modelo(o, p, tj, ctx) -> Plano:
+    from src.comum import planilhas_gerenciador as gp
+    modelo = str(p.get("modelo") or "")
+    _validar_planilha_modelo({**p, "turmas": list(o.turmas)})
+    escolhidas = list(o.turmas)
+    return Plano("sync", _executar_planilha_modelo, {
+        "modelo": modelo, "plataforma": str(p.get("plataforma") or "google_sheets"), "nome": str(p.get("nome_planilha") or "").strip(),
+        "turma": escolhidas[0] if escolhidas else "", "turmas_selecionadas": escolhidas,
+        "tornar_vigente": bool(p.get("tornar_vigente", False))},
+        f"[OPÇÕES] Planilha a partir do modelo '{modelo}' ({p.get('plataforma') or 'google_sheets'})")
+
+
+def _executar_planilha_modelo(modelo, plataforma, nome="", turma="", turmas_selecionadas=(), tornar_vigente=False) -> dict:
+    from src.comum import planilhas_gerenciador as gp
+    r = gp.criar_de_modelo(modelo, plataforma, nome=nome, turma=turma, turmas_selecionadas=turmas_selecionadas,
+                           tornar_vigente=tornar_vigente)
+    print(f"✓ Planilha criada: {r['destino']}")
+    for aviso in r["avisos"]:
+        print(f"  ⚠ {aviso}")
+    return r
 
 
 def _extras_parecer_fund() -> list[dict]:
@@ -1033,7 +1098,11 @@ registrar(Script("parecer_rco", (_TE,), _plano_parecer_rco, validar_extras=_vali
                  ajuda_teste="Baixa só o parecer do primeiro aluno do Infantil IV/V, para você conferir o login, o código "
                              "de verificação e a pasta antes de rodar todos."))
 
-registrar(Script("parecer_planilha", (_TE,), _plano_parecer_planilha, validar_extras=_validar_parecer_planilha,
+registrar(Script("planilha_modelo", (_T,), _plano_planilha_modelo, validar_extras=_validar_planilha_modelo,
+                 extras=_extras_planilha_modelo,
+                 ajuda_teste="Não se aplica: a automação só cria uma planilha nova e a cadastra em 'Planilhas do Drive'."))
+
+registrar(Script("parecer_planilha", (_T, _TE), _plano_parecer_planilha, validar_extras=_validar_parecer_planilha,
                  extras=_extras_parecer_planilha,
                  ajuda_teste="Gera só o parecer do primeiro aluno de cada planilha do Infantil, para você conferir o acesso ao "
                              "Google, o PDF e a pasta antes de gerar todos."))

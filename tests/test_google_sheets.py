@@ -625,6 +625,12 @@ def test_mapa_de_abas_da_escola_e_configuravel():
 
 # ─── executar_planilha_google: criar / atualizar / verificar ───
 
+def cadastrar_vigente(link=URL, **kw):
+    """A planilha das turmas vive só no gerenciador (cadastro): é de lá que a automação a pega."""
+    from src.comum import planilhas_registro as pr
+    return pr.criar("Turmas 2026", link, finalidade="planilha_turmas", **kw)
+
+
 @pytest.fixture()
 def servico_falso(monkeypatch):
     caixa = {}
@@ -642,33 +648,53 @@ def test_executar_criar_cria_estrutura_preenche_e_guarda_o_id(servico_falso):
     assert fake.criada["sheets"] == [{"properties": {"title": "1º ANO"}}]
     g = fake.grades["1º ANO"]
     assert g[0] == sh.CABECALHOS and g[1][_col("E")] == "MARIA"
-    assert configuracao.planilha_google_id() == r["id"]
+    from src.comum import planilhas_registro as pr
+    assert [i["planilha_id"] for i in pr.listar()["itens"]] == [r["id"]]
 
 
 def test_executar_criar_simulado_nao_cria_nada(servico_falso):
     servico_falso["fake"] = fake = nova()
     sh.executar_planilha_google("criar", nome="X", turmas={TURMA: [aluno(1, "1000001", "M")]}, simulacao=True)
-    assert not hasattr(fake, "criada") and fake.grades == {} and configuracao.planilha_google_id() == ""
+    from src.comum import planilhas_registro as pr
+    assert not hasattr(fake, "criada") and fake.grades == {} and pr.listar()["total"] == 0
 
 
-def test_executar_atualizar_usa_planilha_lembrada_e_falha_se_houver_problema(servico_falso):
+def test_executar_atualizar_usa_a_vigente_do_gerenciador_e_falha_se_houver_problema(servico_falso):
     servico_falso["fake"] = planilha_com(linha(1, "1000001", "MARIA"))
-    configuracao.definir_planilha_google(ID)
+    cadastrar_vigente()
     r = sh.executar_planilha_google("atualizar", turmas={TURMA: [aluno(1, "1000001", "MARIA")]})
-    assert r["resumo"].sem_mudanca == 1
+    assert r["resumo"].sem_mudanca == 1 and r["id"] == ID
     with pytest.raises(gs.SheetsErro, match="1 problema"):                     # aba não existe → resultado parcial + falha
-        sh.executar_planilha_google("atualizar", planilha=URL, turmas={"9º Ano": [aluno(1, "2000001", "X")]})
+        sh.executar_planilha_google("atualizar", turmas={"9º Ano": [aluno(1, "2000001", "X")]})
 
 
-def test_executar_atualizar_lembra_o_id_digitado(servico_falso):
-    servico_falso["fake"] = planilha_com()
-    sh.executar_planilha_google("atualizar", planilha=URL, turmas={TURMA: []})
-    assert configuracao.planilha_google_id() == ID
+def test_executar_atualizar_sem_planilha_cadastrada_explica_o_caminho(servico_falso):
+    with pytest.raises(gs.SheetsValidacaoErro, match="Planilhas do Drive"):
+        sh.executar_planilha_google("atualizar", turmas={TURMA: []})
+
+
+def test_executar_atualizar_usa_a_planilha_escolhida_no_cadastro(servico_falso):
+    from src.comum import planilhas_registro as pr
+    servico_falso["fake"] = planilha_com(linha(1, "1000001", "MARIA"))
+    cadastrar_vigente(status="inativa")                                         # guardada, mas fora de uso
+    r = sh.executar_planilha_google("atualizar", planilha_cadastro=pr.listar()["itens"][0]["id"],
+                                    turmas={TURMA: [aluno(1, "1000001", "MARIA")]})
+    assert r["id"] == ID
+
+
+def test_executar_atualizar_recusa_planilha_que_nao_e_do_google(servico_falso, tmp_path):
+    from src.comum import planilhas_registro as pr
+    arquivo = tmp_path / "turmas.xlsx"
+    arquivo.write_bytes(b"x")
+    pr.criar("Local", caminho=str(arquivo), plataforma="xlsx", finalidade="planilha_turmas")
+    with pytest.raises(gs.SheetsValidacaoErro, match="só trabalha com Google Sheets"):
+        sh.executar_planilha_google("atualizar", turmas={TURMA: []})
 
 
 def test_executar_verificar_nao_grava(servico_falso):
     servico_falso["fake"] = fake = planilha_com(linha(1, "1000001", "MARIA"))
-    info = sh.executar_planilha_google("verificar", planilha=ID)
+    cadastrar_vigente()
+    info = sh.executar_planilha_google("verificar")
     assert info["abas"] == ["1º ANO"] and _escritas(fake) == []
 
 
@@ -677,9 +703,8 @@ def test_pedido_invalido_e_recusado_antes_de_autenticar(monkeypatch):
         raise AssertionError("não deveria autenticar")
     monkeypatch.setattr(gs, "abrir_servico", nao_deve)
     for kw in ({"operacao": "criar", "nome": " ", "turmas": {TURMA: []}},
-               {"operacao": "atualizar", "turmas": {TURMA: []}},
-               {"operacao": "atualizar", "planilha": "lixo", "turmas": {TURMA: []}},
-               {"operacao": "apagar", "planilha": ID}):
+               {"operacao": "atualizar", "turmas": {TURMA: []}},                 # nenhuma planilha cadastrada
+               {"operacao": "apagar"}):
         with pytest.raises(gs.SheetsValidacaoErro):
             sh.executar_planilha_google(**kw)
 
@@ -694,7 +719,16 @@ def test_planilha_criada_e_cadastrada_em_planilhas_do_drive(servico_falso):
     assert len(itens) == 1
     assert itens[0]["id"] == 1 and itens[0]["nome"] == "Turmas 2026" and itens[0]["origem"] == "sistema"
     assert itens[0]["planilha_id"] == r["id"] and itens[0]["link"].endswith("/edit") and itens[0]["categoria"] == "Turmas"
-    assert configuracao.planilha_google_id() == r["id"]                       # a "última usada" continua funcionando
+    assert itens[0]["finalidade"] == "planilha_turmas" and itens[0]["status"] == "ativa"      # já é a vigente
+
+
+def test_planilha_criada_com_outra_ativa_entra_inativa(servico_falso):
+    from src.comum import planilhas_registro as pr
+    cadastrar_vigente()
+    servico_falso["fake"] = nova()
+    sh.executar_planilha_google("criar", nome="Turmas 2027", turmas={TURMA: [aluno(1, "1000001", "MARIA")]})
+    ativas = pr.planilhas_da_finalidade("planilha_turmas")
+    assert [i["planilha_id"] for i in ativas] == [ID]                          # o que estava em uso não mudou sozinho
 
 
 def test_criar_simulado_nao_cadastra_nada(servico_falso):
@@ -712,7 +746,7 @@ def test_falha_ao_cadastrar_nao_derruba_a_criacao(servico_falso, monkeypatch):
         raise OSError("disco cheio")
     monkeypatch.setattr(pr, "registrar_planilha_criada", quebra)
     r = sh.executar_planilha_google("criar", nome="X", turmas={TURMA: [aluno(1, "1000001", "M")]})
-    assert r["resumo"].adicionados == 1 and configuracao.planilha_google_id() == r["id"]
+    assert r["resumo"].adicionados == 1 and r["id"]
 
 
 # ═════════════════════════ encaixe no sistema ═════════════════════════
@@ -742,25 +776,26 @@ def test_script_registrado_com_confirmacao_e_na_lista():
     assert s.confirmar and "turma" in s.recursos
     assert any(i["chave"] == "sheets" for i in rotas.AUTOMACOES_DISPONIVEIS)
     nomes = {c["nome"] for c in s.extras()}
-    assert {"operacao", "planilha", "nome_planilha", "simulacao"} <= nomes
+    assert {"operacao", "planilha_cadastro", "nome_planilha", "simulacao"} <= nomes
 
 
 def test_rota_executar_monta_o_plano(ctx):
     c, planos = ctx
-    r = _post(c, "executar", operacao="atualizar", planilha=URL, turmas=["1º Ano Integral A"], simulacao=True, confirmado=True)
+    cadastrar_vigente()
+    r = _post(c, "executar", operacao="atualizar", turmas=["1º Ano Integral A"], simulacao=True, confirmado=True)
     assert r.status_code in (200, 202), r.get_json()
     chave, plano = planos[0]
     assert chave == "sheets" and plano.tipo == "sync" and plano.funcao is sh.executar_planilha_google
-    assert plano.kwargs["operacao"] == "atualizar" and plano.kwargs["planilha"] == URL and plano.kwargs["simulacao"] is True
+    assert plano.kwargs["operacao"] == "atualizar" and plano.kwargs["planilha_cadastro"] == "" and plano.kwargs["simulacao"] is True
     assert plano.kwargs["turmas_selecionadas"] == ["1º Ano Integral A"]
     assert "2 aluno(s) em 1 turma(s): 1 matriculado(s) e 1 transferido(s)" in plano.log_inicial
 
 
 @pytest.mark.parametrize("payload,trecho", [
-    ({"operacao": "atualizar", "planilha": ""}, "Informe o link ou o ID"),
-    ({"operacao": "atualizar", "planilha": "lixo"}, "Planilha não reconhecida"),
+    ({"operacao": "atualizar"}, "Planilhas do Drive"),                      # nenhuma planilha cadastrada
+    ({"operacao": "atualizar", "planilha_cadastro": "999"}, "Não há planilha cadastrada com o id 999"),
     ({"operacao": "criar", "nome_planilha": " "}, "nome da nova planilha"),
-    ({"operacao": "apagar", "planilha": ID}, "desconhecida"),
+    ({"operacao": "apagar"}, "desconhecida"),
 ])
 def test_rota_executar_recusa_pedido_invalido_com_mensagem(ctx, payload, trecho):
     c, planos = ctx
@@ -770,7 +805,8 @@ def test_rota_executar_recusa_pedido_invalido_com_mensagem(ctx, payload, trecho)
 
 def test_previa_conta_matriculados_e_transferidos(ctx):
     c, _ = ctx
-    r = _post(c, "previa", operacao="atualizar", planilha=ID, turmas=[])
+    cadastrar_vigente()
+    r = _post(c, "previa", operacao="atualizar", turmas=[])
     assert r.status_code == 200
     assert "3 aluno(s) em 2 turma(s): 2 matriculado(s) e 1 transferido(s)" in r.get_json()["texto"]
 
@@ -783,7 +819,8 @@ def test_cli_lista_e_simula_sem_chamar_o_google(monkeypatch, capsys):
         raise AssertionError("simulação não pode autenticar")
     monkeypatch.setattr(gs, "abrir_servico", nao_deve)
     assert cli.main(["listar"]) == 0 and "sheets" in capsys.readouterr().out
-    assert cli.main(["sheets", "--planilha", URL, "--simular"]) == 0
+    cadastrar_vigente()
+    assert cli.main(["sheets", "--simular"]) == 0
     assert "executar_planilha_google" in capsys.readouterr().out
     assert cli.main(["sheets", "--operacao", "criar", "--simular"]) == 2          # falta o nome
     assert "nome da nova planilha" in capsys.readouterr().err

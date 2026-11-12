@@ -15,17 +15,24 @@ Um registro (linha da tabela):
     planilha_id   ID do Google tirado do link — é ÚNICO: a mesma planilha não entra duas vezes
     observacao    anotação livre (opcional, até 500 caracteres)
     status        "ativa" | "inativa" (inativa = guardada, mas fora de uso)
-    finalidade    para que o SISTEMA usa a planilha: "" (só guardada) | "parecer_infantil" (planilha dos pareceres do
-                  Infantil, preenchida pelas professoras; lida pela automação parecer_planilha)
-    turma         turma a que a planilha pertence (nome como em turmas.json); obrigatória quando há finalidade
-    origem        "manual" (cadastrada na tela) | "sistema" (criada pela automação do Google Sheets)
+    finalidade    para que o SISTEMA usa a planilha: "" (só guardada) | parecer_infantil | planilha_turmas | chamada |
+                  listagem_alunos | imc (ver FINALIDADES_INFO). É por ela que os módulos acham a planilha vigente
+    turma         turma a que a planilha pertence (nome como em turmas.json); obrigatória nas finalidades "por turma"
+    plataforma    "google_sheets" | "xlsx" | "ods" (planilhas_plataformas.py; registro antigo sem o campo = google_sheets)
+    caminho       arquivo no computador (xlsx/ods); vazio no Google
+    referencia    chave ÚNICA da planilha: ID do Google ou caminho absoluto do arquivo (a mesma não entra duas vezes)
+    externa       True = recebida pronta da Secretaria (não nasce de modelo). Decidido pela finalidade (parecer_infantil)
+    modelo        chave do modelo (planilhas_modelos.py) de que a planilha foi criada; vazio = cadastrada/externa
+    natureza      calculada: "externa" | "criada_de_modelo" | "cadastrada"
+    origem        "manual" (cadastrada na tela) | "sistema" (criada pelo sistema a partir de um modelo ou da automação do Google)
     criado_em / atualizado_em   data e hora locais ISO (aaaa-mm-ddThh:mm:ss)
 
 Regra de banco: para cada finalidade + turma só pode haver UMA planilha ativa (a vigente). Para trocar de planilha
 (outro ano, outro bimestre) deixe a antiga inativa e cadastre/ative a nova; as automações pegam sempre a ativa.
 
 Operações (CRUD): criar, obter, atualizar, remover, listar (busca, filtros, ordenação e paginação), resumo, categorias.
-Esta camada só guarda links: NÃO fala com o Google, então não precisa de credenciais.
+Esta camada só guarda referências: NÃO fala com o Google, então não precisa de credenciais. Quem localiza e cria
+planilhas para os módulos é planilhas_gerenciador.py (o ponto de entrada do resto do sistema).
 
 Por que fica em dados/planilhas/ e não em dados/<ano letivo>/: as planilhas atravessam os anos letivos (as "futuras"
 também), e trocar o ano em Configurações não pode esconder nem bloquear o cadastro.
@@ -49,8 +56,21 @@ ORIGENS = ("manual", "sistema")
 CATEGORIA_PADRAO = "Outras"
 CATEGORIA_TURMAS = "Turmas"
 FINALIDADE_PARECER_INFANTIL = "parecer_infantil"
-FINALIDADES = {FINALIDADE_PARECER_INFANTIL: "Pareceres do Infantil"}        # valor → nome na tela
-CATEGORIAS_SUGERIDAS = (CATEGORIA_TURMAS, "Pareceres do Infantil", "Pareceres do Fundamental", "Matrícula",
+FINALIDADE_PLANILHA_TURMAS = "planilha_turmas"
+FINALIDADE_CHAMADA = "chamada"
+FINALIDADE_LISTAGEM_ALUNOS = "listagem_alunos"
+FINALIDADE_IMC = "imc"
+# Para que o sistema usa cada planilha. por_turma: há uma planilha vigente POR TURMA (senão, uma só para a escola);
+# externa: a planilha vem pronta da Secretaria (nunca nasce de modelo); modelo vem de planilhas_modelos.py.
+FINALIDADES_INFO = {
+    FINALIDADE_PARECER_INFANTIL: {"nome": "Pareceres do Infantil", "por_turma": True, "externa": True},
+    FINALIDADE_PLANILHA_TURMAS: {"nome": "Planilha das Turmas (movimentação dos alunos)", "por_turma": False, "externa": False},
+    FINALIDADE_CHAMADA: {"nome": "Chamada", "por_turma": True, "externa": False},
+    FINALIDADE_LISTAGEM_ALUNOS: {"nome": "Listagem dos Alunos", "por_turma": False, "externa": False},
+    FINALIDADE_IMC: {"nome": "IMC", "por_turma": False, "externa": False},
+}
+FINALIDADES = {k: v["nome"] for k, v in FINALIDADES_INFO.items()}        # valor → nome na tela
+CATEGORIAS_SUGERIDAS = (CATEGORIA_TURMAS, "Pareceres do Infantil", "Pareceres do Fundamental", "Chamada", "IMC", "Matrícula",
                         "Funcionários", CATEGORIA_PADRAO)
 
 LIMITE_NOME = 250
@@ -61,7 +81,7 @@ ORDENS = ("id", "nome", "categoria", "status", "atualizado_em")
 LIMITE_PAGINA_PADRAO = 20
 LIMITE_PAGINA_MAXIMO = 200
 
-CAMPOS_EDITAVEIS = ("nome", "link", "categoria", "observacao", "status", "finalidade", "turma")   # mesma ordem de _limpar
+CAMPOS_EDITAVEIS = ("nome", "link", "categoria", "observacao", "status", "finalidade", "turma", "plataforma", "caminho")
 _PREFIXO_LINK = "https://docs.google.com/spreadsheets/"
 
 _lock = threading.RLock()                      # leitura-alteração-gravação de uma só vez (a API é multithread)
@@ -105,7 +125,7 @@ def _ler() -> dict:
     arquivo = _arquivo()
     existia = arquivo.exists()
     bruto = carregar_json(arquivo, dict, dict)
-    itens = [i for i in bruto["itens"] if isinstance(i, dict)] if isinstance(bruto.get("itens"), list) else []
+    itens = [normalizar_item(i) for i in bruto["itens"] if isinstance(i, dict)] if isinstance(bruto.get("itens"), list) else []
     ids = [int(i["id"]) for i in itens if str(i.get("id", "")).isdigit()]
     tabela = {"versao": VERSAO_ESQUEMA, "proximo_id": max(_inteiro(bruto.get("proximo_id"), 1), max(ids, default=0) + 1),
               "itens": itens}
@@ -114,8 +134,24 @@ def _ler() -> dict:
     return tabela
 
 
+def normalizar_item(item: dict) -> dict:
+    """Completa um registro antigo (só Google, sem os campos novos) sem alterar o que ele já tinha."""
+    item = dict(item)
+    item.setdefault("plataforma", "google_sheets")
+    item.setdefault("caminho", "")
+    if not item.get("referencia"):
+        item["referencia"] = item.get("planilha_id") or item.get("caminho") or ""
+    info = FINALIDADES_INFO.get(item.get("finalidade") or "", {})
+    item["externa"] = bool(item.get("externa") or info.get("externa"))
+    item.setdefault("modelo", "")
+    item.setdefault("modelo_versao", 0)
+    item["natureza"] = "externa" if item["externa"] else ("criada_de_modelo" if item["modelo"] else "cadastrada")
+    return item
+
+
 def _gravar(tabela: dict) -> None:
-    salvar_json_atomico(_arquivo(), {"versao": VERSAO_ESQUEMA, "proximo_id": tabela["proximo_id"], "itens": tabela["itens"]})
+    itens = [{k: v for k, v in i.items() if k != "natureza"} for i in tabela["itens"]]       # natureza é calculada
+    salvar_json_atomico(_arquivo(), {"versao": VERSAO_ESQUEMA, "proximo_id": tabela["proximo_id"], "itens": itens})
 
 
 def _importar_da_configuracao(tabela: dict) -> None:
@@ -164,21 +200,15 @@ def _chave(texto) -> str:
     return " ".join(sem.casefold().split())
 
 
-def _validar_link(link) -> tuple[str, str]:
-    """(link, ID do Google). Aceita o link completo ou só o ID (e então monta o link). ValueError com mensagem pronta."""
-    from .google_sheets import extrair_id_planilha                    # import tardio: não carrega o Google à toa
-    bruto = str(link or "").strip()
-    pid = extrair_id_planilha(bruto)                                  # SheetsValidacaoErro (é ValueError) explica o formato
-    if re.search(r"\s", bruto):
-        raise ValueError("O link não pode ter espaços.")
-    if "/" in bruto:
-        if not bruto.startswith(_PREFIXO_LINK):                       # o link vira botão na tela: só links do Google Sheets
-            raise ValueError("O link precisa ser de uma planilha do Google (começa com https://docs.google.com/spreadsheets/).")
-        return bruto, pid
-    return f"{_PREFIXO_LINK}d/{pid}/edit", pid
+def _referencia(plataforma, link, caminho, conferir=True) -> dict:
+    """{plataforma, referencia, link, caminho, planilha_id} validados pela plataforma (ValueError com mensagem pronta)."""
+    from . import planilhas_plataformas as plat
+    p = plat.plataforma(plataforma)
+    return {"plataforma": p.nome, **p.referencia(link=link, caminho=caminho, conferir=conferir)}
 
 
-def _limpar(nome, link, categoria, observacao, status, finalidade="", turma="") -> dict:
+def _limpar(nome, link, categoria, observacao, status, finalidade="", turma="", plataforma="google_sheets", caminho="",
+            conferir_arquivo=True) -> dict:
     nome = _texto(nome)
     if not nome:
         raise ValueError("Informe o nome da planilha.")
@@ -195,18 +225,18 @@ def _limpar(nome, link, categoria, observacao, status, finalidade="", turma="") 
         raise ValueError("Situação inválida: use 'ativa' ou 'inativa'.")
     finalidade = _texto(finalidade).casefold()
     if finalidade and finalidade not in FINALIDADES:
-        raise ValueError(f"Finalidade inválida: use {' ou '.join(FINALIDADES)} (ou deixe em branco).")
+        raise ValueError(f"Finalidade inválida: use {', '.join(FINALIDADES)} (ou deixe em branco).")
     turma = _texto(turma)
-    if finalidade:
+    if finalidade and FINALIDADES_INFO[finalidade]["por_turma"]:
         if not turma:
             raise ValueError("Informe a turma desta planilha (o nome igual ao de turmas.json).")
         if len(turma) > LIMITE_TURMA:
             raise ValueError(f"Nome da turma muito longo (máximo {LIMITE_TURMA} caracteres).")
     else:
-        turma = ""                                                    # turma só faz sentido com finalidade
-    link, pid = _validar_link(link)
-    return {"nome": nome, "categoria": categoria, "link": link, "planilha_id": pid, "observacao": observacao,
-            "status": status, "finalidade": finalidade, "turma": turma}
+        turma = ""                                                    # turma só faz sentido nas finalidades por turma
+    ref = _referencia(plataforma, link, caminho, conferir=conferir_arquivo)
+    return {"nome": nome, "categoria": categoria, "observacao": observacao, "status": status, "finalidade": finalidade,
+            "turma": turma, **ref}
 
 
 def _achar(itens: list[dict], id_item) -> tuple[int, dict]:
@@ -217,9 +247,11 @@ def _achar(itens: list[dict], id_item) -> tuple[int, dict]:
     raise PlanilhaNaoEncontrada(f"Não há planilha cadastrada com o id {alvo}.")
 
 
-def _conferir_unica(itens: list[dict], planilha_id: str, ignorar_id=None) -> None:
+def _conferir_unica(itens: list[dict], campos: dict, ignorar_id=None) -> None:
+    """A mesma planilha (plataforma + referência: ID do Google ou caminho do arquivo) não entra duas vezes."""
     for item in itens:
-        if item.get("planilha_id") == planilha_id and item.get("id") != ignorar_id:
+        if (item.get("referencia") == campos["referencia"] and item.get("plataforma") == campos["plataforma"]
+                and item.get("id") != ignorar_id):
             raise PlanilhaDuplicada(f"Esta planilha já está cadastrada como '{item.get('nome')}' (id {item.get('id')}).")
 
 
@@ -237,20 +269,25 @@ def _conferir_vigente_unica(itens: list[dict], campos: dict, ignorar_id=None) ->
 
 # ───────────────────────────── operações ───────────────────────────────────────
 
-def criar(nome, link, categoria="", observacao="", status="ativa", origem="manual", finalidade="", turma="") -> dict:
+def criar(nome, link="", categoria="", observacao="", status="ativa", origem="manual", finalidade="", turma="",
+          plataforma="google_sheets", caminho="", modelo="", modelo_versao=0) -> dict:
     """
     Cadastra uma planilha e devolve o registro (com o id novo). ValueError se algum dado for inválido; PlanilhaDuplicada
     se já existir; PlanilhaEmConflito se já houver outra ativa para a mesma finalidade e turma.
+    Google: informe `link` (link ou ID). Excel/LibreOffice: informe `caminho` (o arquivo precisa existir).
     """
-    campos = _limpar(nome, link, categoria, observacao, status, finalidade, turma)
+    campos = _limpar(nome, link, categoria, observacao, status, finalidade, turma, plataforma, caminho)
     if origem not in ORIGENS:
         raise ValueError(f"Origem inválida: use {' ou '.join(ORIGENS)}.")
+    if modelo and FINALIDADES_INFO.get(campos["finalidade"], {}).get("externa"):
+        raise ValueError("Planilha externa (recebida pronta) não nasce de modelo.")
     with _lock:
         tabela = _ler()
-        _conferir_unica(tabela["itens"], campos["planilha_id"])
+        _conferir_unica(tabela["itens"], campos)
         _conferir_vigente_unica(tabela["itens"], campos)
         agora = _agora()
-        item = {"id": tabela["proximo_id"], **campos, "origem": origem, "criado_em": agora, "atualizado_em": agora}
+        item = normalizar_item({"id": tabela["proximo_id"], **campos, "origem": origem, "modelo": str(modelo or ""),
+                                "modelo_versao": int(modelo_versao or 0), "criado_em": agora, "atualizado_em": agora})
         tabela["itens"].append(item)
         tabela["proximo_id"] += 1
         _gravar(tabela)
@@ -263,22 +300,46 @@ def obter(id_item) -> dict:
 
 
 def atualizar(id_item, **campos) -> dict:
-    """Altera só os campos informados (nome, link, categoria, observacao, status, finalidade, turma). id, origem e criado_em não mudam."""
+    """
+    Altera só os campos informados (nome, link, caminho, plataforma, categoria, observacao, status, finalidade, turma):
+    é assim que se SUBSTITUI a planilha de um uso por outra sem mexer no código. id, origem e criado_em não mudam.
+    """
     desconhecidos = sorted(set(campos) - set(CAMPOS_EDITAVEIS))
     if desconhecidos:
         raise ValueError(f"Campo(s) que não podem ser alterados: {', '.join(desconhecidos)}.")
     with _lock:
         tabela = _ler()
         posicao, atual = _achar(tabela["itens"], id_item)
-        novos = _limpar(*(campos.get(c, atual.get(c)) for c in CAMPOS_EDITAVEIS))
-        _conferir_unica(tabela["itens"], novos["planilha_id"], ignorar_id=atual["id"])
+        mudou_arquivo = any(k in campos for k in ("link", "caminho", "plataforma"))
+        novos = _limpar(*(campos.get(c, atual.get(c)) for c in CAMPOS_EDITAVEIS), conferir_arquivo=mudou_arquivo)
+        _conferir_unica(tabela["itens"], novos, ignorar_id=atual["id"])
         _conferir_vigente_unica(tabela["itens"], novos, ignorar_id=atual["id"])
-        if all(str(atual.get(k) or "") == v for k, v in novos.items()):
+        if all(str(atual.get(k) or "") == str(v) for k, v in novos.items()):
             return dict(atual)                                         # nada mudou: não mexe na data
-        item = {**atual, **novos, "atualizado_em": _agora()}
+        item = normalizar_item({**atual, **novos, "atualizado_em": _agora()})
         tabela["itens"][posicao] = item
         _gravar(tabela)
         return dict(item)
+
+
+def ativar(id_item) -> dict:
+    """
+    Torna esta planilha a VIGENTE da sua finalidade (e turma): deixa inativas as outras ativas do mesmo uso e ativa esta,
+    de uma vez só. É a troca de planilha (outro ano, outro bimestre) sem editar nada. Sem finalidade, só ativa.
+    """
+    with _lock:
+        tabela = _ler()
+        posicao, alvo = _achar(tabela["itens"], id_item)
+        agora = _agora()
+        if alvo.get("finalidade"):
+            for i, outro in enumerate(tabela["itens"]):
+                if (outro["id"] != alvo["id"] and outro.get("status") == "ativa" and outro.get("finalidade") == alvo["finalidade"]
+                        and _chave(outro.get("turma")) == _chave(alvo.get("turma"))):
+                    tabela["itens"][i] = {**outro, "status": "inativa", "atualizado_em": agora}
+        if alvo.get("status") != "ativa":
+            tabela["itens"][posicao] = alvo = {**alvo, "status": "ativa", "atualizado_em": agora}
+        _gravar(tabela)
+        return dict(alvo)
 
 
 def remover(id_item) -> dict:
@@ -303,7 +364,7 @@ def _numero(valor, nome: str, minimo: int, maximo: int | None = None) -> int:
 
 
 def listar(q="", status="", categoria="", ordem="id", direcao="asc", limite=LIMITE_PAGINA_PADRAO, inicio=0,
-           finalidade="") -> dict:
+           finalidade="", plataforma="", turma="") -> dict:
     """
     Consulta com busca, filtros, ordenação e paginação (o "Carregar mais" da tela pede a página seguinte com `inicio`).
     `q` procura (sem acento nem maiúsculas) em id, nome, categoria, link e observação.
@@ -314,7 +375,9 @@ def listar(q="", status="", categoria="", ordem="id", direcao="asc", limite=LIMI
         raise ValueError("Situação inválida: use 'ativa' ou 'inativa'.")
     finalidade = _texto(finalidade).casefold()
     if finalidade and finalidade not in FINALIDADES:
-        raise ValueError(f"Finalidade inválida: use {' ou '.join(FINALIDADES)}.")
+        raise ValueError(f"Finalidade inválida: use {', '.join(FINALIDADES)}.")
+    plataforma = _texto(plataforma).casefold()
+    turma_f = _chave(turma)
     ordem = _texto(ordem).casefold() or "id"
     if ordem not in ORDENS:
         raise ValueError(f"Ordenação inválida: use {', '.join(ORDENS)}.")
@@ -335,7 +398,11 @@ def listar(q="", status="", categoria="", ordem="id", direcao="asc", limite=LIMI
             continue
         if finalidade and item.get("finalidade") != finalidade:
             continue
-        if busca and busca not in _chave(" ".join(str(item.get(c, "")) for c in ("id", "nome", "categoria", "link", "observacao", "turma"))):
+        if plataforma and item.get("plataforma") != plataforma:
+            continue
+        if turma_f and _chave(item.get("turma")) != turma_f:
+            continue
+        if busca and busca not in _chave(" ".join(str(item.get(c, "")) for c in ("id", "nome", "categoria", "link", "caminho", "observacao", "turma"))):
             continue
         achados.append(item)
 
@@ -351,7 +418,7 @@ def listar(q="", status="", categoria="", ordem="id", direcao="asc", limite=LIMI
 def planilhas_da_finalidade(finalidade: str) -> list[dict]:
     """As planilhas ATIVAS (vigentes) com essa finalidade, por turma. É o que as automações consultam."""
     if finalidade not in FINALIDADES:
-        raise ValueError(f"Finalidade inválida: use {' ou '.join(FINALIDADES)}.")
+        raise ValueError(f"Finalidade inválida: use {', '.join(FINALIDADES)}.")
     with _lock:
         itens = _ler()["itens"]
     ativas = [dict(i) for i in itens if i.get("finalidade") == finalidade and i.get("status") == "ativa"]
@@ -382,13 +449,15 @@ def categorias() -> dict:
     return {"usadas": ordenar(usadas), "sugeridas": list(CATEGORIAS_SUGERIDAS), "todas": ordenar(todas)}
 
 
-def registrar_planilha_criada(nome, planilha_id, categoria=CATEGORIA_TURMAS) -> dict | None:
+def registrar_planilha_criada(nome, planilha_id, categoria=CATEGORIA_TURMAS, finalidade="", turma="", status="ativa",
+                              modelo="", modelo_versao=0, plataforma="google_sheets", caminho="") -> dict | None:
     """
-    Cadastra a planilha que a automação do Google Sheets acabou de criar (origem "sistema"). Se ela já estiver no
-    cadastro, não duplica e devolve None. A planilha já existe no Google: quem chama não deve falhar por causa daqui.
+    Cadastra a planilha que o sistema acabou de criar (origem "sistema"). Se ela já estiver no cadastro, não duplica e
+    devolve None. A planilha já existe: quem chama não deve falhar por causa daqui.
     """
     try:
-        return criar(nome, f"{_PREFIXO_LINK}d/{planilha_id}/edit", categoria=categoria,
-                     observacao="Criada pelo sistema (automação Planilha no Google Sheets).", origem="sistema")
+        return criar(nome, f"{_PREFIXO_LINK}d/{planilha_id}/edit" if planilha_id else "", categoria=categoria,
+                     observacao="Criada pelo sistema.", origem="sistema", finalidade=finalidade, turma=turma, status=status,
+                     plataforma=plataforma, caminho=caminho, modelo=modelo, modelo_versao=modelo_versao)
     except PlanilhaDuplicada:
         return None

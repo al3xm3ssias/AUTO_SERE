@@ -9,7 +9,7 @@ e linha de comando).
 | `src/comum/google_auth.py` | Credenciais: OAuth ou conta de serviço, token, caminhos (`credenciais/`) |
 | `src/comum/google_sheets.py` | Funções genéricas: `verificar_planilha`, `criar_planilha`, `ler_intervalo`, `atualizar_intervalo(s)`, `anexar_linhas` |
 | `src/automacao/sincroniza_sheets.py` | Regra das turmas: `turmas.json` → abas (`sincronizar_turmas`, `executar_planilha_google`) |
-| `registro_scripts.py` (`sheets`) | Opções da tela/CLI; `configuracao.py` guarda o ID da última planilha |
+| `registro_scripts.py` (`sheets`) | Opções da tela/CLI; a planilha vem do gerenciador (`planilhas_gerenciador.py`), não da configuração |
 
 ## 1. Escolha da autenticação
 
@@ -46,9 +46,9 @@ Segurança: `credenciais/google_*.json` e `credenciais/*token*.json` estão no `
 **Linha de comando** (mesmas opções da tela):
 
 ```
-python -m src.comum.cli sheets --operacao verificar --planilha "<link ou ID>"
-python -m src.comum.cli sheets --operacao atualizar --planilha "<link ou ID>" --simulacao --confirmo
-python -m src.comum.cli sheets --operacao atualizar --planilha "<link ou ID>" --turma 3 --confirmo
+python -m src.comum.cli sheets --operacao verificar                      # usa a planilha ativa do cadastro
+python -m src.comum.cli sheets --operacao atualizar --simulacao --confirmo
+python -m src.comum.cli sheets --operacao atualizar --planilha_cadastro 7 --turma 3 --confirmo   # 7 = id em Planilhas do Drive
 python -m src.comum.cli sheets --operacao criar --nome-planilha "Turmas 2026" --confirmo
 ```
 (`--simular` só mostra o plano e não autentica; `--simulacao` autentica, lê a planilha e mostra o que seria gravado.)
@@ -93,5 +93,7 @@ A tela tem busca, filtros por situação e categoria, colunas ordenáveis, "Carr
   planilhas atravessam os anos. Funciona também no modo "somente consulta" de um ano anterior.
 * Código: `src/comum/planilhas_registro.py` (regras e armazenamento), `src/web/api/planilhas.py` (API `/web/api/planilhas`),
   `src/web/templates/planilhas.html` e `src/web/static/js/planilhas.js` (tela).
-* `google_sheets.planilha_id` em `config_usuario.json` continua sendo a "última planilha usada" (lida pela automação e pela rotina
-  diária); uma coisa não mexe na outra.
+* O antigo `google_sheets.planilha_id` ("última planilha usada") foi aposentado: na primeira vez, o gerenciador leva esse ID para o
+  cadastro como a "Planilha das Turmas" vigente e o remove de `config_usuario.json` (só `mapa_abas` fica lá). A automação e a rotina
+  diária usam a planilha **ativa** do cadastro, ou a escolhida no formulário. Uma planilha criada pela automação, havendo já uma ativa,
+  entra **inativa** (use "Usar esta" para trocar). Ver `documentacao/Planilhas.md`.

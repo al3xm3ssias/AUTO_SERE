@@ -1754,6 +1754,7 @@ const ICONES_AUTOMACAO = {
   parecer_fund: "certificate",
   parecer_rco: "certificate",
   parecer_planilha: "certificate",
+  planilha_modelo: "database",
   pareceres_digitalizados: "certificate",
   transferidos_fila: "transfer",
   transferidos_gerar: "transfer",

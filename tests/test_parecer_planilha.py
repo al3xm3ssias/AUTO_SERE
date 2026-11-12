@@ -439,8 +439,10 @@ def test_api_cadastra_com_finalidade_e_responde_conflito_409(amb):
 
 def test_api_finalidades_traz_as_turmas_do_infantil(amb):
     d = create_app().test_client().get("/web/api/planilhas/finalidades").get_json()
-    assert d["finalidades"] == [{"valor": FIN, "nome": "Pareceres do Infantil"}]
-    assert d["turmas"] == ["INFANTIL 4 Integral A", "INFANTIL 5 Integral A"]
+    assert d["finalidades"][0] == {"valor": FIN, "nome": "Pareceres do Infantil", "por_turma": True, "externa": True}
+    assert {"planilha_turmas", "chamada", "listagem_alunos", "imc"} <= {f["valor"] for f in d["finalidades"]}
+    assert {"google_sheets", "xlsx", "ods"} == {p["valor"] for p in d["plataformas"]}
+    assert {"INFANTIL 4 Integral A", "INFANTIL 5 Integral A"} <= set(d["turmas"])
 
 
 def test_api_finalidades_sem_turmas_json_devolve_lista_vazia(amb):
@@ -495,14 +497,15 @@ def test_extras_da_tela():
     extras = reg.obter("parecer_planilha").extras()
     sel = next(e for e in extras if e["tipo"] == "select")
     assert sel["nome"] == "bimestre" and [o["valor"] for o in sel["opcoes"]] == ["1", "3"]
+    assert any(e["tipo"] == "select" and e["nome"] == "planilha_cadastro" for e in extras)
     assert any(e["tipo"] == "caixa" and e["nome"] == "substituir" for e in extras)
-    assert reg.obter("parecer_planilha").recursos == ("teste",)
+    assert reg.obter("parecer_planilha").recursos == ("turma", "teste")
 
 
 def test_plano():
     plano = reg.obter("parecer_planilha").planejar(Opcoes(modo_teste=True), {"bimestre": "3", "substituir": True}, {}, {})
     assert plano.tipo == "sync" and plano.funcao is pp.gerar_pareceres_infantil_planilha
-    assert plano.kwargs == {"bimestre": "3", "modo_teste": True, "substituir": True}
+    assert plano.kwargs == {"bimestre": "3", "modo_teste": True, "substituir": True, "planilha_id": None, "turmas": None}
 
 
 def test_executar_sem_bimestre_da_400(web):
