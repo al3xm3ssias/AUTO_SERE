@@ -301,6 +301,15 @@ async def _selecionar_periodo(page, periodo, analise=False) -> bool:
 # PERSISTÊNCIA DO pre_matricula.json
 # ==========================================================
 
+CHAVE_VINCULO = "vinculo_base_abc"      # gravada por consulta_base_abc.py; recoletar um aluno não pode apagá-la
+
+
+def _herdar_vinculo(antigo, novo) -> None:
+    """Leva o vínculo da Base ABC do registro antigo para o novo (a coleta troca o registro inteiro)."""
+    if isinstance(antigo, dict) and isinstance(novo, dict) and antigo.get(CHAVE_VINCULO) and CHAVE_VINCULO not in novo:
+        novo[CHAVE_VINCULO] = antigo[CHAVE_VINCULO]
+
+
 def _base_vazia() -> dict:
     return {"atualizado_em": None, "turmas_intencao": {}, "cadastros": {}}
 
@@ -374,6 +383,7 @@ def mesclar_turmas_intencao(turmas_antigas, turmas_novas):
             aluno_atualizado = dict(aluno_novo)
             aluno_atualizado["presente_na_ultima_coleta"] = True
             aluno_atualizado["coletado_em"] = coletado_em      # permite decidir "a última tentativa" depois
+            _herdar_vinculo(existentes.get(chave), aluno_atualizado)
             existentes[chave] = aluno_atualizado
 
         for chave, aluno_antigo in existentes.items():
@@ -1080,6 +1090,8 @@ async def etapa_cadastro(page, dados_prematricula, analise=False):
             resultados[cpf] = aluno_dados
 
     pre_matricula = carregar_pre_matricula()
+    for cpf, novo in resultados.items():
+        _herdar_vinculo(pre_matricula["cadastros"].get(cpf), novo)
     pre_matricula["cadastros"].update(resultados)
     salvar_pre_matricula(pre_matricula)
 
@@ -1182,6 +1194,7 @@ async def etapa_verificar_pendentes(page, dados_pre_matricula=None, analise=Fals
             sem_resposta.append(cpf)
             continue
 
+        _herdar_vinculo(cadastros.get(cpf), aluno_dados)
         cadastros[cpf] = aluno_dados
 
         opcoes = (aluno_dados.get("escolas_escolhidas") or {}).get("opcoes", [])

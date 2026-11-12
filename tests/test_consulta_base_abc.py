@@ -664,3 +664,157 @@ def test_desempate_pelo_nome_identico(amb):
             {"cgm": "2", "nome": "JOAO PEDROSO", "nasc": D(2015, 1, 1), "mae": "ANA", "historico": []}]
     resumo, _ = _rodar(NavTabelaReal(base), "Joao Pedro 01/01/2015")
     assert len(resumo.encontrados) == 1 and _lido()[0]["cgm"] == "1" and "idêntico" in _lido()[0]["observacao"]
+
+# ───────────── vínculo: CGM + aluno + turma/escola de origem + situação ─────────────
+
+def _h(ano, escola, curso, serie, resultado):
+    return {"ano": ano, "municipio": "PG", "escola": escola, "curso": curso, "serie": serie, "resultado": resultado}
+
+
+def _vinculo(consulta, historico, cad=CAD, ano=2026):
+    return cb.montar_registro(consulta, cb.Resultado("encontrado", cad), historico, ano_referencia=ano)["vinculo"]
+
+
+def test_ano_vigente_vincula_cgm_turma_escola_e_situacao():
+    v = _vinculo(cb.Consulta(nome="Claudio Alex", nascimento=D(2015, 3, 12), mae="Maria"),
+                 [_h(2025, "ESC A", "ENSINO FUNDAMENTAL", "3", "Aprovado"), _h(2026, "AMADEU", "ENSINO FUNDAMENTAL", "1", "Matriculado")])
+    assert v == {"periodo": "ano_vigente", "ano_referencia": 2026, "nome": "CLAUDIO ALEX MENDES DE SOUZA", "cgm": "1025059227",
+                 "turma": "1º Ano do Ensino Fundamental", "escola": "AMADEU", "situacao": "Matriculado", "status": "ok"}
+
+
+def test_ano_vigente_transferido_tambem_e_ok():
+    v = _vinculo(cb.Consulta(nome="Claudio Alex", nascimento=D(2015, 3, 12)), [_h(2026, "AMADEU", "ENSINO FUNDAMENTAL", "1", "Transferido")])
+    assert v["status"] == "ok" and v["situacao"] == "Transferido"
+
+
+def test_pre_matricula_vem_da_turma_do_ano_vigente_e_aceita_desistente_e_reprovado():
+    c = cb.Consulta(nome="Claudio Alex", nascimento=D(2015, 3, 12), origem="pre_matricula")
+    for resultado in ("Matriculado", "Transferido", "Desistente", "Reprovado"):
+        v = _vinculo(c, [_h(2026, "AMADEU", "EDUC INFANTIL", "4", resultado)])
+        assert (v["periodo"], v["turma"], v["escola"], v["situacao"], v["status"]) == ("pre_matricula", "Infantil IV", "AMADEU", resultado, "ok")
+
+
+def test_desistente_no_ano_vigente_fora_da_pre_matricula_pede_conferencia():
+    v = _vinculo(cb.Consulta(nome="Claudio Alex", nascimento=D(2015, 3, 12)), [_h(2026, "AMADEU", "EDUC INFANTIL", "4", "Desistente")])
+    assert v["status"] == "verificar" and "Desistente" in v["motivo"]
+
+
+def test_outra_situacao_e_gravada_mas_marcada_para_verificar():
+    c = cb.Consulta(nome="Claudio Alex", nascimento=D(2015, 3, 12), origem="pre_matricula")
+    v = _vinculo(c, [_h(2026, "AMADEU", "EDUC INFANTIL", "4", "Aprovado")])
+    assert (v["situacao"], v["turma"], v["escola"], v["status"]) == ("Aprovado", "Infantil IV", "AMADEU", "verificar")
+    assert "fora do esperado" in v["motivo"]
+
+
+def test_sem_linha_do_ano_vigente_ou_sem_resultado_ou_sem_cgm_pede_conferencia():
+    c = cb.Consulta(nome="Claudio Alex", nascimento=D(2015, 3, 12), origem="pre_matricula")
+    assert "não tem linha de 2026" in _vinculo(c, [_h(2025, "ESC A", "ENSINO FUNDAMENTAL", "3", "Aprovado")])["motivo"]
+    assert "sem resultado" in _vinculo(c, [_h(2026, "AMADEU", "EDUC INFANTIL", "4", "")])["motivo"]
+    sem_cgm = _vinculo(c, [_h(2026, "AMADEU", "EDUC INFANTIL", "4", "Matriculado")], cad={**CAD, "cgm": ""})
+    assert sem_cgm["status"] == "verificar" and "sem CGM" in sem_cgm["motivo"]
+
+
+def test_varias_linhas_no_ano_vale_a_matriculada_e_duas_matriculadas_pedem_conferencia():
+    c = cb.Consulta(nome="Claudio Alex", nascimento=D(2015, 3, 12))
+    v = _vinculo(c, [_h(2026, "ESC VELHA", "ENSINO FUNDAMENTAL", "1", "Transferido"), _h(2026, "AMADEU", "ENSINO FUNDAMENTAL", "1", "Matriculado")])
+    assert (v["escola"], v["situacao"], v["status"]) == ("AMADEU", "Matriculado", "ok")
+    dupla = _vinculo(c, [_h(2026, "ESC A", "ENSINO FUNDAMENTAL", "1", "Matriculado"), _h(2026, "ESC B", "ENSINO FUNDAMENTAL", "1", "Matriculado")])
+    assert dupla["status"] == "verificar" and "mais de uma matrícula" in dupla["motivo"]
+
+
+def test_quem_nao_foi_encontrado_nao_tem_vinculo():
+    r = cb.montar_registro(cb.Consulta(nome="Fulano de Tal", nascimento=D(2015, 3, 12)), cb.Resultado("nao_encontrado", motivo="x"))
+    assert "vinculo" not in r
+
+
+def test_vinculo_vai_para_o_arquivo_e_o_resumo_lista_o_que_verificar(amb):
+    c = cb.Consulta(nome="Claudio Alex Mendes de Souza", nascimento=D(2015, 3, 12), origem="pre_matricula")
+    resumo = cb.ResumoBaseAbc()
+    r = cb.montar_registro(c, cb.Resultado("encontrado", CAD), [_h(2026, "AMADEU", "EDUC INFANTIL", "4", "Aprovado")])
+    cb.atualizar_consolidado(r)
+    assert _lido()[0]["vinculo"]["status"] == "verificar"
+    assert "verificar" in resumo.como_dict()
+
+
+# ───────────── vínculo gravado de volta em pre_matricula.json e pre_matricula_<ano+1>.json ─────────────
+
+def _cad_pre(nome, cpf, situacao="MATRICULADO"):
+    return {"cpf": cpf, "tr_id": "T" + cpf, "nome_aluno": nome, "nome_responsavel": "RITA LIMA",
+            "escolas_escolhidas": {"opcoes": [{"escola": "ESCOLA ALVO", "situacao": situacao}]}}
+
+
+def _escrever(amb, nome_arq, dados):
+    (amb / "dados" / "2026" / nome_arq).write_text(json.dumps(dados), encoding="utf-8")
+
+
+def _ler(amb, nome_arq):
+    return json.loads((amb / "dados" / "2026" / nome_arq).read_text(encoding="utf-8"))
+
+
+def test_le_o_arquivo_do_ano_e_o_do_proximo_cada_um_com_a_sua_regra(amb):
+    _escrever(amb, "pre_matricula.json", {"cadastros": {"111": _cad_pre("ANA CLARA LIMA", "111")}})
+    _escrever(amb, "pre_matricula_2027.json", {"cadastros": {"222": _cad_pre("BRUNO SOUZA PINTO", "222")}})
+    por_nome = {c.nome: c for c in cb.consultas_da_pre_matricula_arquivo("matriculados")}
+    assert por_nome["ANA CLARA LIMA"].destinos == (("pre_matricula.json", "cadastros", "111", "", "ano_vigente"),)
+    assert por_nome["BRUNO SOUZA PINTO"].destinos == (("pre_matricula_2027.json", "cadastros", "222", "", "pre_matricula"),)
+    assert "111" not in repr(por_nome["ANA CLARA LIMA"]) and "222" not in repr(por_nome["BRUNO SOUZA PINTO"])
+
+
+def test_so_o_arquivo_do_proximo_ano_ja_basta(amb):
+    _escrever(amb, "pre_matricula_2027.json", {"cadastros": {"222": _cad_pre("BRUNO SOUZA PINTO", "222")}})
+    assert _nomes(cb.consultas_da_pre_matricula_arquivo("matriculados")) == ["BRUNO SOUZA PINTO"]
+
+
+def test_mesma_pessoa_nos_dois_arquivos_e_uma_busca_com_dois_destinos(amb):
+    _escrever(amb, "pre_matricula.json", {"cadastros": {"111": _cad_pre("ANA CLARA LIMA", "111")}})
+    _escrever(amb, "pre_matricula_2027.json", {"cadastros": {"111": _cad_pre("ANA CLARA LIMA", "111")}})
+    [c] = cb.consultas_da_pre_matricula_arquivo("matriculados")
+    assert [d[0] for d in c.destinos] == ["pre_matricula.json", "pre_matricula_2027.json"]
+
+
+def test_vinculo_e_gravado_no_cadastro_de_cada_arquivo_com_a_regra_do_arquivo(amb):
+    _escrever(amb, "pre_matricula.json", {"atualizado_em": "X", "cadastros": {"111": _cad_pre("CLAUDIO ALEX MENDES DE SOUZA", "111")}})
+    _escrever(amb, "pre_matricula_2027.json", {"atualizado_em": "X", "cadastros": {"111": _cad_pre("CLAUDIO ALEX MENDES DE SOUZA", "111")}})
+    [c] = cb.consultas_da_pre_matricula_arquivo("matriculados")
+    resumo = cb.ResumoBaseAbc()
+    historico = [_h(2026, "AMADEU", "EDUC INFANTIL", "4", "Desistente")]
+    registro = cb.montar_registro(c, cb.Resultado("encontrado", CAD), historico, ano_referencia=2026)
+    for destino in c.destinos:
+        resumo.vinculos.append((destino, cb.montar_vinculo(c, registro["nome"], registro["cgm"], historico, 2026, periodo=destino[4])))
+    assert cb.gravar_vinculos_pre_matricula(resumo.vinculos, log=lambda *_: None) == 2
+    atual = _ler(amb, "pre_matricula.json")["cadastros"]["111"]["vinculo_base_abc"]
+    proximo = _ler(amb, "pre_matricula_2027.json")["cadastros"]["111"]["vinculo_base_abc"]
+    assert (atual["periodo"], atual["status"]) == ("ano_vigente", "verificar")        # Desistente não vale no ano vigente
+    assert (proximo["periodo"], proximo["status"]) == ("pre_matricula", "ok")         # e vale na pré-matrícula do próximo ano
+    assert proximo["cgm"] == "1025059227" and proximo["turma"] == "Infantil IV" and proximo["consultado_em"]
+    assert _ler(amb, "pre_matricula.json")["atualizado_em"] == "X"                    # só a chave do vínculo foi tocada
+
+
+def test_vinculo_de_quem_so_esta_na_fila_vai_para_o_item_da_turma(amb):
+    fila = {"turmas_intencao": {"Infantil IV": [{"nome": "CLAUDIO ALEX MENDES DE SOUZA", "cpf": "333", "tr_id": "T3"}]}}
+    _escrever(amb, "pre_matricula_2027.json", fila)
+    [c] = cb.consultas_da_pre_matricula_arquivo("pendentes")
+    assert c.destinos == (("pre_matricula_2027.json", "turmas_intencao", "333", "Infantil IV", "pre_matricula"),)
+    v = cb.montar_vinculo(c, "X Y", "9", [_h(2026, "AMADEU", "EDUC INFANTIL", "4", "Matriculado")], 2026)
+    assert cb.gravar_vinculos_pre_matricula([(c.destinos[0], v)], log=lambda *_: None) == 1
+    assert _ler(amb, "pre_matricula_2027.json")["turmas_intencao"]["Infantil IV"][0]["vinculo_base_abc"]["status"] == "ok"
+
+
+def test_arquivo_ilegivel_nao_e_sobrescrito_na_gravacao(amb):
+    arq = amb / "dados" / "2026" / "pre_matricula_2027.json"
+    arq.write_text("{ quebrado", encoding="utf-8")
+    destino = ("pre_matricula_2027.json", "cadastros", "111", "", "pre_matricula")
+    msgs = []
+    assert cb.gravar_vinculos_pre_matricula([(destino, {"status": "ok"})], log=msgs.append) == 0
+    assert arq.read_text(encoding="utf-8") == "{ quebrado" and msgs
+
+
+def test_recoletar_o_aluno_na_pre_matricula_nao_apaga_o_vinculo():
+    from src.automacao import pre_matricula as pm
+    antigo = {"nome_aluno": "A B", "vinculo_base_abc": {"status": "ok"}}
+    novo = {"nome_aluno": "A B"}
+    pm._herdar_vinculo(antigo, novo)
+    assert novo["vinculo_base_abc"] == {"status": "ok"}
+    turmas = pm.mesclar_turmas_intencao({"T": [{"cpf": "1", "nome": "A B", "vinculo_base_abc": {"status": "ok"}}]},
+                                        {"T": [{"cpf": "1", "nome": "A B"}]})
+    assert turmas["T"][0]["vinculo_base_abc"] == {"status": "ok"}
