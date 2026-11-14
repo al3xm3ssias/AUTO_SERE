@@ -736,7 +736,7 @@ def test_vinculo_vai_para_o_arquivo_e_o_resumo_lista_o_que_verificar(amb):
     assert "verificar" in resumo.como_dict()
 
 
-# ───────────── vínculo gravado de volta em pre_matricula.json e pre_matricula_<ano+1>.json ─────────────
+# ───────────── vínculo gravado de volta em pre_matricula.json e previsao_alunos_<ano+1>.json ─────────────
 
 def _cad_pre(nome, cpf, situacao="MATRICULADO"):
     return {"cpf": cpf, "tr_id": "T" + cpf, "nome_aluno": nome, "nome_responsavel": "RITA LIMA",
@@ -753,28 +753,28 @@ def _ler(amb, nome_arq):
 
 def test_le_o_arquivo_do_ano_e_o_do_proximo_cada_um_com_a_sua_regra(amb):
     _escrever(amb, "pre_matricula.json", {"cadastros": {"111": _cad_pre("ANA CLARA LIMA", "111")}})
-    _escrever(amb, "pre_matricula_2027.json", {"cadastros": {"222": _cad_pre("BRUNO SOUZA PINTO", "222")}})
+    _escrever(amb, "previsao_alunos_2027.json", {"cadastros": {"222": _cad_pre("BRUNO SOUZA PINTO", "222")}})
     por_nome = {c.nome: c for c in cb.consultas_da_pre_matricula_arquivo("matriculados")}
     assert por_nome["ANA CLARA LIMA"].destinos == (("pre_matricula.json", "cadastros", "111", "", "ano_vigente"),)
-    assert por_nome["BRUNO SOUZA PINTO"].destinos == (("pre_matricula_2027.json", "cadastros", "222", "", "pre_matricula"),)
+    assert por_nome["BRUNO SOUZA PINTO"].destinos == (("previsao_alunos_2027.json", "cadastros", "222", "", "pre_matricula"),)
     assert "111" not in repr(por_nome["ANA CLARA LIMA"]) and "222" not in repr(por_nome["BRUNO SOUZA PINTO"])
 
 
 def test_so_o_arquivo_do_proximo_ano_ja_basta(amb):
-    _escrever(amb, "pre_matricula_2027.json", {"cadastros": {"222": _cad_pre("BRUNO SOUZA PINTO", "222")}})
+    _escrever(amb, "previsao_alunos_2027.json", {"cadastros": {"222": _cad_pre("BRUNO SOUZA PINTO", "222")}})
     assert _nomes(cb.consultas_da_pre_matricula_arquivo("matriculados")) == ["BRUNO SOUZA PINTO"]
 
 
 def test_mesma_pessoa_nos_dois_arquivos_e_uma_busca_com_dois_destinos(amb):
     _escrever(amb, "pre_matricula.json", {"cadastros": {"111": _cad_pre("ANA CLARA LIMA", "111")}})
-    _escrever(amb, "pre_matricula_2027.json", {"cadastros": {"111": _cad_pre("ANA CLARA LIMA", "111")}})
+    _escrever(amb, "previsao_alunos_2027.json", {"cadastros": {"111": _cad_pre("ANA CLARA LIMA", "111")}})
     [c] = cb.consultas_da_pre_matricula_arquivo("matriculados")
-    assert [d[0] for d in c.destinos] == ["pre_matricula.json", "pre_matricula_2027.json"]
+    assert [d[0] for d in c.destinos] == ["pre_matricula.json", "previsao_alunos_2027.json"]
 
 
 def test_vinculo_e_gravado_no_cadastro_de_cada_arquivo_com_a_regra_do_arquivo(amb):
     _escrever(amb, "pre_matricula.json", {"atualizado_em": "X", "cadastros": {"111": _cad_pre("CLAUDIO ALEX MENDES DE SOUZA", "111")}})
-    _escrever(amb, "pre_matricula_2027.json", {"atualizado_em": "X", "cadastros": {"111": _cad_pre("CLAUDIO ALEX MENDES DE SOUZA", "111")}})
+    _escrever(amb, "previsao_alunos_2027.json", {"atualizado_em": "X", "cadastros": {"111": _cad_pre("CLAUDIO ALEX MENDES DE SOUZA", "111")}})
     [c] = cb.consultas_da_pre_matricula_arquivo("matriculados")
     resumo = cb.ResumoBaseAbc()
     historico = [_h(2026, "AMADEU", "EDUC INFANTIL", "4", "Desistente")]
@@ -783,7 +783,7 @@ def test_vinculo_e_gravado_no_cadastro_de_cada_arquivo_com_a_regra_do_arquivo(am
         resumo.vinculos.append((destino, cb.montar_vinculo(c, registro["nome"], registro["cgm"], historico, 2026, periodo=destino[4])))
     assert cb.gravar_vinculos_pre_matricula(resumo.vinculos, log=lambda *_: None) == 2
     atual = _ler(amb, "pre_matricula.json")["cadastros"]["111"]["vinculo_base_abc"]
-    proximo = _ler(amb, "pre_matricula_2027.json")["cadastros"]["111"]["vinculo_base_abc"]
+    proximo = _ler(amb, "previsao_alunos_2027.json")["cadastros"]["111"]["vinculo_base_abc"]
     assert (atual["periodo"], atual["status"]) == ("ano_vigente", "verificar")        # Desistente não vale no ano vigente
     assert (proximo["periodo"], proximo["status"]) == ("pre_matricula", "ok")         # e vale na pré-matrícula do próximo ano
     assert proximo["cgm"] == "1025059227" and proximo["turma"] == "Infantil IV" and proximo["consultado_em"]
@@ -792,18 +792,18 @@ def test_vinculo_e_gravado_no_cadastro_de_cada_arquivo_com_a_regra_do_arquivo(am
 
 def test_vinculo_de_quem_so_esta_na_fila_vai_para_o_item_da_turma(amb):
     fila = {"turmas_intencao": {"Infantil IV": [{"nome": "CLAUDIO ALEX MENDES DE SOUZA", "cpf": "333", "tr_id": "T3"}]}}
-    _escrever(amb, "pre_matricula_2027.json", fila)
+    _escrever(amb, "previsao_alunos_2027.json", fila)
     [c] = cb.consultas_da_pre_matricula_arquivo("pendentes")
-    assert c.destinos == (("pre_matricula_2027.json", "turmas_intencao", "333", "Infantil IV", "pre_matricula"),)
+    assert c.destinos == (("previsao_alunos_2027.json", "turmas_intencao", "333", "Infantil IV", "pre_matricula"),)
     v = cb.montar_vinculo(c, "X Y", "9", [_h(2026, "AMADEU", "EDUC INFANTIL", "4", "Matriculado")], 2026)
     assert cb.gravar_vinculos_pre_matricula([(c.destinos[0], v)], log=lambda *_: None) == 1
-    assert _ler(amb, "pre_matricula_2027.json")["turmas_intencao"]["Infantil IV"][0]["vinculo_base_abc"]["status"] == "ok"
+    assert _ler(amb, "previsao_alunos_2027.json")["turmas_intencao"]["Infantil IV"][0]["vinculo_base_abc"]["status"] == "ok"
 
 
 def test_arquivo_ilegivel_nao_e_sobrescrito_na_gravacao(amb):
-    arq = amb / "dados" / "2026" / "pre_matricula_2027.json"
+    arq = amb / "dados" / "2026" / "previsao_alunos_2027.json"
     arq.write_text("{ quebrado", encoding="utf-8")
-    destino = ("pre_matricula_2027.json", "cadastros", "111", "", "pre_matricula")
+    destino = ("previsao_alunos_2027.json", "cadastros", "111", "", "pre_matricula")
     msgs = []
     assert cb.gravar_vinculos_pre_matricula([(destino, {"status": "ok"})], log=msgs.append) == 0
     assert arq.read_text(encoding="utf-8") == "{ quebrado" and msgs

@@ -74,9 +74,11 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from src.comum import paths
+from src.comum import previsao as _previsao
 from src.comum.arquivos_json import carregar_json, salvar_json_atomico
+from src.comum import navegador as _navegador
 
-ARQUIVO_PRE_ATUAL = "pre_matricula.json"      # alvo "atual" da coleta (ano vigente); o do próximo ano é pre_matricula_<ano+1>.json
+ARQUIVO_PRE_ATUAL = "pre_matricula.json"      # alvo "atual" da coleta (ano vigente); o do próximo ano é previsao_alunos_<ano+1>.json
 NOME_ARQUIVO = "buscas_base.json"
 LIMITE_VERIFICAR = 5                      # candidatos a conferir abrindo o cadastro
 CAMPOS_REGISTRO = ("ano", "municipio", "escola", "curso", "serie", "resultado")   # colunas da tabela de histórico do SERE
@@ -376,13 +378,14 @@ def _pasta_e_ano(ano: Optional[str]) -> tuple[Path, int]:
 
 def consultas_da_pre_matricula_arquivo(quais: str = "matriculados", ano: Optional[str] = None) -> list[Consulta]:
     """
-    Lê dados/<ano>/pre_matricula.json (alvo "atual": regra do ano vigente) e dados/<ano>/pre_matricula_<ano+1>.json (alvo
-    "proximo": regra de pré-matrícula do ano seguinte). Basta um dos dois existir. ValueError com a mensagem pronta se
-    nenhum existe ou se algum não pode ser lido.
+    Lê dados/<ano>/pre_matricula.json (alvo "atual": regra do ano vigente) e dados/<ano>/previsao_alunos_<ano+1>.json (alvo
+    "proximo": regra de pré-matrícula do ano seguinte; um pre_matricula_<ano+1>.json de antes é renomeado antes de ler).
+    Basta um dos dois existir. ValueError com a mensagem pronta se nenhum existe ou se algum não pode ser lido.
     """
     pasta, ano_n = _pasta_e_ano(ano)
+    _previsao.migrar_nome_antigo(pasta, ano_n + 1)
     listas = []
-    for nome_arq in (ARQUIVO_PRE_ATUAL, f"pre_matricula_{ano_n + 1}.json"):
+    for nome_arq in (ARQUIVO_PRE_ATUAL, _previsao.nome_arquivo(ano_n + 1)):
         caminho = pasta / nome_arq
         if not caminho.exists():
             continue
@@ -665,7 +668,7 @@ _SITUACAO_POR_PREFIXO = (("MATRICULAD", "Matriculado"), ("CURSANDO", "Matriculad
 
 
 def periodo_da_consulta(consulta: Consulta) -> str:
-    """Pelo arquivo de onde veio (pre_matricula.json = ano vigente; pre_matricula_<ano+1>.json = pré-matrícula do próximo ano);
+    """Pelo arquivo de onde veio (pre_matricula.json = ano vigente; previsao_alunos_<ano+1>.json = pré-matrícula do próximo ano);
     sem arquivo: aluno da pré-matrícula = período de pré-matrícula; digitado = ano letivo vigente."""
     if consulta.destinos:
         return consulta.destinos[0][4]
@@ -1193,7 +1196,7 @@ async def _entrar_e_ir_para_a_consulta(page) -> None:
 async def _sessao_sere(mostrar_navegador: bool = False):
     from src.automacao import sere_2026 as s
     async with s.async_playwright() as p:
-        browser = await p.firefox.launch(headless=not mostrar_navegador)
+        browser = await _navegador.lancar(p, "firefox", True, forcar_mostrar=mostrar_navegador)
         page = await browser.new_page()
         try:
             await _entrar_e_ir_para_a_consulta(page)

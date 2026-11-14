@@ -54,6 +54,10 @@
         <span class="nav-item-icon" data-icon="clipboard"></span>
         <span class="nav-item-label">Pré matrícula</span>
       </div>
+      <div class="nav-item" data-view="previsao">
+        <span class="nav-item-icon" data-icon="users"></span>
+        <span class="nav-item-label">Previsão {{ (ano_letivo | int) + 1 }}</span>
+      </div>
       <div class="nav-item" data-view="transferidos">
         <span class="nav-item-icon" data-icon="transfer"></span>
         <span class="nav-item-label">Transferidos</span>
@@ -379,6 +383,7 @@
         {% include "menu.html" %}
         {% include "calendario.html" %}
         {% include "corte_etario.html" %}
+        {% include "previsao.html" %}
         {% include "planilhas.html" %}
         {% include "automacoes.html" %}
         {% include "configuracoes.html" %}
@@ -422,6 +427,7 @@
 <script src="{{ url_for('web.static', filename='js/planilhas.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/vendor/jspdf.umd.min.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/corte_etario.js') }}"></script>
+<script src="{{ url_for('web.static', filename='js/previsao.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/whatsapp.js') }}"></script>
 <script>
   // Service worker (necessário para o Chrome oferecer "Instalar"). Falha silenciosa.

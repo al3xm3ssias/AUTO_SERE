@@ -72,6 +72,7 @@ from playwright.async_api import async_playwright
 from src.comum.credenciais import LOGIN, SENHA
 from src.comum import paths as _paths
 from src.comum.sere_api import URL, navegar_censo_escolar
+from src.comum import navegador as _navegador
 
 if not LOGIN or not SENHA:
     raise ValueError("Configure LOGIN e SENHA em credenciais/.env (ver .env.example)")
@@ -604,7 +605,7 @@ async def coletar_servidores_via_login(modo: str) -> list[dict]:
     if modo not in ("basico", "completo"):
         raise ValueError(f"modo deve ser 'basico' ou 'completo', recebido: {modo!r}")
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await _navegador.lancar(p, "chromium", True)
         try:
             page = await browser.new_page()
 

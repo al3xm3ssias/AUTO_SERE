@@ -36,9 +36,19 @@ Períodos (ano letivo) do portal:
                  Dados em pre_matricula.json (nome antigo, mantido).
     "proximo" -> ano letivo seguinte (ex.: 2027): TODOS os períodos desse ano
                  (1ª chamada + o período aberto que o SME criar depois).
-                 Dados em pre_matricula_<ano>.json (ex.: pre_matricula_2027.json).
+                 Dados em previsao_alunos_<ano>.json (ex.: previsao_alunos_2027.json; antes se
+                 chamava pre_matricula_<ano>.json, renomeado sozinho na 1ª leitura/gravação).
+                 É a base do módulo "Previsão <ano>" (rematriculados + alunos novos).
 
   Os pontos de entrada recebem alvo="atual" | "proximo" | "ambos".
+
+Cadastro refeito para OUTRA escola:
+  Se a consulta por CPF (…/prematricula/consulta_cpf/consultar) mostrar
+  "Nenhum aluno cadastrado com esse CPF para as escolas que esse usuário tem
+  acesso." (div#naoencontrado), o responsável refez o cadastro para outra escola.
+    - Etapa 4: o aluno pendente é gravado como CANCELADO (motivo
+      "CADASTRO REFEITO PARA OUTRA ESCOLA"), deixando de ser re-consultado.
+    - Etapa 2: o CPF é apenas ignorado (não entra em "cadastros" nem nos contatos).
 
 Diferenças em relação ao script original:
   - Caminhos vêm de paths.dados_ano_atual() (nada de caminho fixo do Samba).
@@ -74,11 +84,13 @@ from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
 from src.automacao.comunicado_matricula import avisar_apos_pre_matricula
 from src.comum import paths
+from src.comum import previsao as _previsao
 from src.comum.arquivos_json import (
     ArquivoJsonCorrompidoError,
     carregar_json,
     salvar_json_atomico,
 )
+from src.comum import navegador as _navegador
 
 
 # ==========================================================
@@ -96,6 +108,15 @@ NOME_ESCOLA_ALVO = "Judith Macedo Silveira"
 # É uma PRESUNÇÃO (o site não informa o motivo), não uma confirmação.
 SITUACAO_PRESUNTIVA = "Cancelado"
 MOTIVO_PRESUNTIVO = "CANCELADO VIA SISTEMA/RESPONSAVEL"
+
+# Mensagem do portal (div#naoencontrado em …/consulta_cpf/consultar) quando o
+# responsável refez o cadastro para OUTRA escola. Aqui isso é cancelamento REAL.
+MENSAGEM_SEM_CADASTRO = (
+    "Nenhum aluno cadastrado com esse CPF para as escolas que esse usuário tem acesso."
+)
+_TRECHO_SEM_CADASTRO = "Nenhum aluno cadastrado com esse CPF"   # trecho usado na detecção por texto
+SITUACAO_CANCELADO = "Cancelado"
+MOTIVO_OUTRA_ESCOLA = "CADASTRO REFEITO PARA OUTRA ESCOLA"
 
 COLUNAS_CONTATOS_PADRAO = [
     "Name Prefix", "First Name", "Middle Name", "Last Name", "Name Suffix",
@@ -164,8 +185,11 @@ def pasta_base() -> Path:
 
 def caminho_pre_matricula() -> Path:
     # Alvo "atual" mantém o nome antigo (não quebra o histórico já gravado).
+    # Alvo "proximo" -> previsao_alunos_<ano>.json; um pre_matricula_<ano>.json de antes é renomeado aqui
+    # (os.replace, conteúdo intacto) para que a coleta continue de onde parou em vez de começar do zero.
     if alvo_atual() == ALVO_PROXIMO:
-        return pasta_base() / f"pre_matricula_{_ano()}.json"
+        _previsao.migrar_nome_antigo(pasta_base(), _ano())
+        return _previsao.caminho_previsao_alunos(pasta_base(), _ano())
     return pasta_base() / "pre_matricula.json"
 
 
@@ -576,9 +600,6 @@ async def _coletar_periodo(page, periodo, analise=False):
 
     # Selecionar a escola
     try:
-        
-        
-          
         await page.wait_for_selector("input#nomeEscola", timeout=7000)
         await page.click("input#nomeEscola")
         await page.type("input#nomeEscola", NOME_ESCOLA_BUSCA, delay=200)
@@ -999,11 +1020,57 @@ async def _ler_cadastro_da_pagina(page, cpf):
     return aluno_dados
 
 
-async def consultar_cpf(page, cpf, etapa="cadastro", analise=False):
+def _normalizar_texto_busca(texto: str) -> str:
+    """minúsculas, sem acento e com espaços colapsados (para achar a mensagem do portal)."""
+    texto = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"\s+", " ", texto).strip().lower()
+
+
+_TRECHO_SEM_CADASTRO_NORM = _normalizar_texto_busca(_TRECHO_SEM_CADASTRO)
+
+
+async def _aguardar_resultado_consulta(page, timeout=7.0):
     """
-    Consulta um CPF na tela de consulta e devolve o dict de cadastro (mesmo
-    formato de pre_matricula.json -> cadastros[cpf]), ou None se não houve
-    resultado. `etapa` só rotula os screenshots.
+    Espera o resultado da consulta por CPF (após o Enter). Devolve:
+      "cadastro"     -> div#divCadastros apareceu
+      "outra_escola" -> o portal mostrou div#naoencontrado ("Nenhum aluno cadastrado
+                        com esse CPF para as escolas que esse usuário tem acesso.")
+      None           -> nada reconhecível apareceu no prazo
+    """
+    loop = asyncio.get_running_loop()
+    limite = loop.time() + timeout
+    while True:
+        try:
+            if await page.locator("div#divCadastros").is_visible():
+                return "cadastro"
+
+            # Mensagem do portal: <div id="naoencontrado"> ... <h4>Nenhum aluno cadastrado ...</h4>
+            if await page.locator("div#naoencontrado").is_visible():
+                return "outra_escola"
+
+            # Reserva: se o id mudar, reconhece pelo texto visível da página
+            # (inner_text ignora elementos escondidos).
+            corpo = await page.locator("body").inner_text(timeout=1500)
+            if _TRECHO_SEM_CADASTRO_NORM in _normalizar_texto_busca(corpo):
+                return "outra_escola"
+        except Exception:
+            # Página navegando (contexto destruído) ou ainda sem body: tenta de novo.
+            pass
+        if loop.time() >= limite:
+            return None
+        await asyncio.sleep(0.25)
+
+
+async def consultar_cpf_com_status(page, cpf, etapa="cadastro", analise=False):
+    """
+    Consulta um CPF na tela de consulta e devolve (cadastro | None, outra_escola: bool).
+
+    cadastro: dict no mesmo formato de pre_matricula.json -> cadastros[cpf], ou None
+    se não houve resultado. `etapa` só rotula os screenshots.
+
+    outra_escola=True: em TODOS os períodos do alvo o portal respondeu que não há
+    aluno com esse CPF para as escolas do usuário, ou seja, o responsável refez o
+    cadastro para outra escola (o aluno deve ser tratado como cancelado).
 
     A tela de consulta também tem o campo "Abertura" (select#anoLetivo), que abre
     no período mais recente do portal. Por isso o período do alvo corrente é
@@ -1020,7 +1087,7 @@ async def consultar_cpf(page, cpf, etapa="cadastro", analise=False):
     while True:
         if not await navegar_com_retry(page, CONSULTA_URL):
             await capturar_tela(page, etapa, f"falha ao abrir consulta cpf {cpf}", erro=True, analise=analise)
-            return None
+            return None, False
 
         try:
             await page.wait_for_selector("select#anoLetivo", timeout=7000)
@@ -1032,7 +1099,7 @@ async def consultar_cpf(page, cpf, etapa="cadastro", analise=False):
                 periodos = sorted(escolher_periodos(opcoes, alvo), key=lambda p: p["inicio"], reverse=True)
                 if not periodos:
                     print(f"⚠️ Sem período de {_ano()} (alvo '{alvo}') na consulta; CPF {cpf} não consultado.")
-                    return None
+                    return None, False
             periodo = periodos[i]
             await page.select_option("select#anoLetivo", periodo["value"])
             if await page.locator("select#anoLetivo").input_value() != periodo["value"]:
@@ -1042,14 +1109,15 @@ async def consultar_cpf(page, cpf, etapa="cadastro", analise=False):
         except Exception as e:
             print(f"Não consegui preparar a consulta do CPF {cpf} (período/campo CPF): {e}")
             await capturar_tela(page, etapa, f"falha ao preparar consulta cpf {cpf}", erro=True, analise=analise)
-            return None
+            return None, False
 
         await capturar_tela(page, etapa, f"tela de consulta cpf {cpf} periodo {periodo['value']}", analise=analise)
         await page.keyboard.press("Enter")
         ultimo = i == len(periodos) - 1
 
-        try:
-            await page.wait_for_selector("div#divCadastros", timeout=7000)
+        resultado = await _aguardar_resultado_consulta(page)
+
+        if resultado == "cadastro":
             await capturar_tela(page, etapa, f"resultado cpf {cpf}", analise=analise)
             aluno_dados = await _ler_cadastro_da_pagina(page, cpf)
             if not aluno_dados.get("nome_aluno") and not ultimo:
@@ -1058,15 +1126,35 @@ async def consultar_cpf(page, cpf, etapa="cadastro", analise=False):
                 continue
             aluno_dados["periodo_abertura"] = periodo["rotulo"]
             print(f"✅ Dados coletados para {cpf} (período {periodo['rotulo']})")
-            return aluno_dados
-        except PWTimeout:
+            return aluno_dados, False
+
+        if resultado == "outra_escola":
             if not ultimo:
-                print(f"   CPF {cpf} não encontrado no período {periodo['rotulo']}; tentando o próximo.")
+                print(f"   CPF {cpf} sem cadastro no período {periodo['rotulo']}; tentando o próximo.")
                 i += 1
                 continue
-            print(f"Nenhum resultado encontrado para {cpf}")
-            await capturar_tela(page, etapa, f"timeout resultado cpf {cpf}", erro=True, analise=analise)
-            return None
+            print(f"↪️ CPF {cpf}: cadastro refeito para OUTRA escola (portal: sem aluno para as escolas deste usuário).")
+            await capturar_tela(page, etapa, f"outra escola cpf {cpf}", analise=analise)
+            return None, True
+
+        # resultado is None: nada reconhecível apareceu no prazo
+        if not ultimo:
+            print(f"   CPF {cpf} não encontrado no período {periodo['rotulo']}; tentando o próximo.")
+            i += 1
+            continue
+        print(f"Nenhum resultado encontrado para {cpf}")
+        await capturar_tela(page, etapa, f"timeout resultado cpf {cpf}", erro=True, analise=analise)
+        return None, False
+
+
+async def consultar_cpf(page, cpf, etapa="cadastro", analise=False):
+    """
+    Consulta um CPF e devolve o dict de cadastro (formato de pre_matricula.json ->
+    cadastros[cpf]), ou None se não houve resultado (inclusive o caso "outra escola").
+    Quem precisa distinguir "outra escola" usa consultar_cpf_com_status().
+    """
+    aluno_dados, _outra_escola = await consultar_cpf_com_status(page, cpf, etapa=etapa, analise=analise)
+    return aluno_dados
 
 
 async def etapa_cadastro(page, dados_prematricula, analise=False):
@@ -1085,7 +1173,12 @@ async def etapa_cadastro(page, dados_prematricula, analise=False):
 
     resultados = {}
     for cpf in cpfs:
-        aluno_dados = await consultar_cpf(page, cpf, etapa="cadastro", analise=analise)
+        aluno_dados, outra_escola = await consultar_cpf_com_status(
+            page, cpf, etapa="cadastro", analise=analise
+        )
+        if outra_escola:
+            print(f"   (CPF {cpf} ignorado: cadastro refeito para outra escola)")
+            continue
         if aluno_dados is not None:
             resultados[cpf] = aluno_dados
 
@@ -1161,13 +1254,29 @@ def _aplicar_opcao_no_aluno(aluno, opcao):
     aluno["observacao"] = opcao.get("observacao") or ""
 
 
+def _marcar_cancelado_outra_escola(aluno):
+    """
+    Responsável refez o cadastro em outra escola: cancelado DE FATO (deixa de ser
+    presunção, então a Etapa 4 não volta a consultar este CPF).
+    """
+    aluno["situacao"] = SITUACAO_CANCELADO
+    aluno["motivo_cancelamento"] = MOTIVO_OUTRA_ESCOLA
+    aluno["observacao"] = MENSAGEM_SEM_CADASTRO
+    aluno["cadastro_refeito_outra_escola"] = True
+
+
 async def etapa_verificar_pendentes(page, dados_pre_matricula=None, analise=False):
     """
     ETAPA 4/4 - Para cada aluno "pendente" (sumiu da lista e com situação
     presumida), re-consulta o CPF e, havendo situação real na opção desta
     escola, substitui a presunção em turmas_intencao e atualiza cadastros.
 
-    Retorna {"total_pendentes", "confirmados", "sem_resposta": [cpfs]}.
+    Se o portal responder "Nenhum aluno cadastrado com esse CPF para as escolas
+    que esse usuário tem acesso.", o responsável refez o cadastro para outra
+    escola: o aluno é gravado como CANCELADO (MOTIVO_OUTRA_ESCOLA).
+
+    Retorna {"total_pendentes", "confirmados", "sem_resposta": [cpfs], "outra_escola": [cpfs]}.
+    ("confirmados" inclui os cancelados por cadastro em outra escola.)
     """
     print("\n" + "=" * 60)
     print("ETAPA 4/4 - VERIFICAÇÃO DE PENDENTES (MATRICULADOS/CANCELADOS)")
@@ -1181,14 +1290,24 @@ async def etapa_verificar_pendentes(page, dados_pre_matricula=None, analise=Fals
 
     if not pendentes:
         print("Nenhum pendente para verificar. Nada a fazer.")
-        return {"total_pendentes": 0, "confirmados": 0, "sem_resposta": []}
+        return {"total_pendentes": 0, "confirmados": 0, "sem_resposta": [], "outra_escola": []}
 
     confirmados = 0
     sem_resposta = []
+    outra_escola_cpfs = []
     cadastros = pre_matricula.setdefault("cadastros", {})
 
     for turma, cpf, aluno in pendentes:
-        aluno_dados = await consultar_cpf(page, cpf, etapa="verificar_pendentes", analise=analise)
+        aluno_dados, outra_escola = await consultar_cpf_com_status(
+            page, cpf, etapa="verificar_pendentes", analise=analise
+        )
+
+        if outra_escola:
+            _marcar_cancelado_outra_escola(aluno)
+            confirmados += 1
+            outra_escola_cpfs.append(cpf)
+            print(f"✅ CPF {cpf} ({turma}): cadastro refeito para outra escola -> {SITUACAO_CANCELADO}")
+            continue
 
         if aluno_dados is None:
             sem_resposta.append(cpf)
@@ -1213,10 +1332,16 @@ async def etapa_verificar_pendentes(page, dados_pre_matricula=None, analise=Fals
     print("\n✅ Etapa 4 concluída.")
     print(f"   Pendentes verificados: {len(pendentes)}")
     print(f"   Confirmados (matriculado/cancelado real): {confirmados}")
+    print(f"   Cancelados por cadastro em outra escola: {len(outra_escola_cpfs)}")
     print(f"   Sem resposta clara (mantidos como presumidos): {len(sem_resposta)}")
     print(f"   Arquivo salvo em: {caminho_pre_matricula()}")
 
-    return {"total_pendentes": len(pendentes), "confirmados": confirmados, "sem_resposta": sem_resposta}
+    return {
+        "total_pendentes": len(pendentes),
+        "confirmados": confirmados,
+        "sem_resposta": sem_resposta,
+        "outra_escola": outra_escola_cpfs,
+    }
 
 
 def reconciliar_situacoes(pre_matricula, aplicar=False):
@@ -1241,6 +1366,8 @@ def reconciliar_situacoes(pre_matricula, aplicar=False):
         for aluno in alunos:
             if tentativa_substituida(aluno):
                 continue          # histórico da tentativa antiga: a situação do cadastro é da nova
+            if aluno.get("cadastro_refeito_outra_escola"):
+                continue          # cancelado por cadastro em outra escola; o cadastro antigo não vale mais
             cpf = (aluno.get("cpf") or "").strip()
             cadastro = cadastros.get(cpf)
             if not cadastro:
@@ -1671,7 +1798,7 @@ class _Sessao:
     async def __aenter__(self):
         self._pw = await async_playwright().start()
         try:
-            self._browser = await getattr(self._pw, self.navegador).launch(headless=self.headless)
+            self._browser = await _navegador.lancar(self._pw, self.navegador, self.headless)
             context = await self._browser.new_context()
             self.page = await context.new_page()
             self.ok = await fazer_login(self.page, self.matricula, self.senha, analise=self.analise)
@@ -1870,7 +1997,7 @@ async def verificar_pendentes_via_login(
             try:
                 if not caminho_pre_matricula().exists():
                     print(f"[{a}] {caminho_pre_matricula().name} não existe ainda; nada a verificar.")
-                    resumos[a] = {"total_pendentes": 0, "confirmados": 0, "sem_resposta": []}
+                    resumos[a] = {"total_pendentes": 0, "confirmados": 0, "sem_resposta": [], "outra_escola": []}
                     continue
                 resumos[a] = await etapa_verificar_pendentes(sessao.page, analise=analise)
             finally:

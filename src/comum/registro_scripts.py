@@ -1222,11 +1222,33 @@ CONFIGS_DOS_SCRIPTS: dict[str, tuple[str, ...]] = {
 }
 
 
+# Scripts que abrem navegador (Playwright): chave → (navegador para o qual o script foi feito, motor travado?).
+# "Travado" = usa algo exclusivo do Chromium e ignora o navegador padrão das Configurações. Esses scripts ganham a
+# configuração "navegador" (navegador padrão + "ver a janela") e TODOS abrem o navegador por comum/navegador.lancar
+# (um teste proíbe `.launch(` direto). Script novo que abre navegador: acrescente-o aqui.
+NAVEGADOR_DOS_SCRIPTS: dict[str, tuple[str, bool]] = {
+    "turmas": ("chromium", False), "alunos": ("chromium", False), "funcionarios": ("chromium", False),
+    "vinculos": ("chromium", False), "sus": ("chromium", False), "gerar_chaves": ("chromium", False),
+    "rematricula": ("chromium", False), "prematricula_completa": ("chromium", False),
+    "transferidos_gerar": ("chromium", False), "transferidos": ("chromium", False),
+    "parecer_rco": ("chromium", True),
+    "pareceres_digitalizados": ("firefox", False), "base_abc": ("firefox", False), "analisa_sere": ("firefox", False),
+    "documentos": ("firefox", False), "limpeza": ("firefox", False), "validar": ("firefox", False),
+    "aluno": ("firefox", False), "espec": ("firefox", False),
+}
+
+
+def navegador_do_script(chave: str) -> Optional[tuple[str, bool]]:
+    """(navegador padrão do script, travado?) ou None se o script não abre navegador."""
+    return NAVEGADOR_DOS_SCRIPTS.get(chave)
+
+
 def _aplicar_mapa_de_configs() -> None:
     for chave, ids in CONFIGS_DOS_SCRIPTS.items():
         script = REGISTRO.get(chave)
         if script is not None and script.configs is None:        # o que o script declarou ele mesmo vale mais
-            REGISTRO[chave] = replace(script, configs=tuple(ids))
+            extra = ("navegador",) if chave in NAVEGADOR_DOS_SCRIPTS else ()
+            REGISTRO[chave] = replace(script, configs=tuple(ids) + extra)
 
 
 _aplicar_mapa_de_configs()

@@ -283,6 +283,7 @@ const TITULOS = {
   alunos: "Alunos",
   documentos: "Análise de documentos",
   prematricula: "Pré matrícula",
+  previsao: "Previsão do próximo ano",
   transferidos: "Transferidos",
   funcionarios: "Funcionários",
   calendario: "Calendário letivo",
@@ -314,6 +315,9 @@ function irPara(view, opts = {}) {
     carregarDocumentos();
   } else if (view === "prematricula") {
     carregarPreMatricula();
+  } else if (view === "previsao") {
+    // previsao.js expõe carregarPrevisao(); sem esta chamada a tela abre sem a lista.
+    if (window.carregarPrevisao) window.carregarPrevisao();
   } else if (view === "funcionarios") {
     carregarFuncionarios();
   } else if (view === "transferidos") {
@@ -2497,10 +2501,41 @@ function _irParaConfiguracao(tela) {
   setTimeout(() => document.querySelector(`.config-row[data-config="${tela}"]`)?.click(), 150);
 }
 
+function _montarBlocoNavegador(chave, nav) {
+  const bloco = document.getElementById("cfg-navegador");
+  if (!bloco) return;
+  if (!nav || !nav.usa) { bloco.hidden = true; bloco.innerHTML = ""; return; }
+  bloco.hidden = false;
+  bloco.innerHTML = `
+    <h3>Navegador</h3>
+    <label class="cfg-toggle">
+      <input type="checkbox" id="cfg-ver-janela"${nav.mostrar_janela ? " checked" : ""}>
+      <span>Ver a janela do navegador durante a execução</span>
+    </label>
+    <div class="campo-ajuda" id="cfg-nav-info">Navegador em uso: <b>${escaparHtml(nav.navegador)}</b> (${escaparHtml(nav.origem)}).
+      ${nav.janela_configurada ? "" : "Sem escolha salva: vale o modo que o próprio script já usava."}</div>
+    <div style="margin-top:8px"><button class="btn-sm" type="button" id="cfg-nav-trocar">Escolher Chrome ou Firefox</button></div>`;
+  document.getElementById("cfg-nav-trocar").addEventListener("click", () => _irParaConfiguracao("navegador"));
+  const caixa = document.getElementById("cfg-ver-janela");
+  caixa.addEventListener("change", async () => {
+    caixa.disabled = true;
+    try {
+      const r = await apiPost(`/automacoes/${chave}/navegador`, { mostrar_janela: caixa.checked });
+      toast(r.mensagem || "Salvo");
+    } catch (e) {
+      caixa.checked = !caixa.checked;
+      toast(e.message);
+    } finally {
+      caixa.disabled = false;
+    }
+  });
+}
+
 async function carregarConfigScript(chave) {
   const exec = document.getElementById("cfg-execucao");
   const sist = document.getElementById("cfg-sistema");
   if (!exec || !sist) return;
+  _montarBlocoNavegador(chave, null);
   exec.innerHTML = '<p class="script-vazio">Carregando…</p>';
   sist.innerHTML = "";
   let c;
@@ -2523,6 +2558,8 @@ async function carregarConfigScript(chave) {
       ? `<div class="cfg-chips">${chips.join("")}</div>
          <div class="campo-ajuda">${c.confirma_antes ? "Pede confirmação antes de executar, porque altera dados no SERE." : "Roda direto ao clicar em Executar tarefa."}</div>`
       : `<p class="script-vazio">Este script não pede nada: é só clicar em Executar tarefa.</p>`}`;
+
+  _montarBlocoNavegador(chave, c.navegador);
 
   const linhas = (c.sistema || []).map((i) => `
     <div class="cfg-linha" data-config-id="${escaparHtml(i.id)}">
@@ -2812,6 +2849,12 @@ const DETALHE_CONFIG = {
       <button class="btn-primary" id="cfg-corte-salvar">Salvar data</button>
       <button class="btn-sm" id="cfg-corte-padrao" style="padding:9px 16px;font-size:.78rem">Usar a data padrão</button>
     </div>`,
+  navegador: `
+    <h4 style="margin-bottom:14px; font-size:.9rem;">Navegador das automações</h4>
+    <p style="color:var(--txt3); font-size:.82rem; margin-bottom:12px;">Vale para todos os scripts que abrem navegador. <b>Automático</b> mantém o navegador para o qual cada script foi feito (nada muda). Escolhendo Chrome ou Firefox, todos passam a usar o escolhido — exceto o script do RCO, que precisa do Chrome. A janela visível ou escondida se escolhe em cada automação, em "Configurações do script".</p>
+    <div id="cfg-nav-opcoes" style="display:flex; flex-direction:column; gap:10px; margin-bottom:14px;">Carregando…</div>
+    <div id="cfg-nav-status" style="font-family:var(--mono); font-size:.72rem; color:var(--txt3); margin-bottom:14px;"></div>
+    <button class="btn-primary" id="cfg-nav-salvar">Salvar navegador</button>`,
   pasta_digitalizacao: `
     <h4 style="margin-bottom:14px; font-size:.9rem;">Pasta de digitalização</h4>
     <p style="color:var(--txt3); font-size:.82rem; margin-bottom:12px;">Pasta raiz onde ficam os documentos digitalizados dos alunos (as pastas das turmas). Por padrão é <code>dados/&lt;ano&gt;/DIGITALIZAÇÃO</code>.</p>
@@ -2916,10 +2959,47 @@ function initConfiguracoes() {
       if (row.dataset.config === "data_corte_transferidos") {
         conectarFormDataCorte();
       }
+      if (row.dataset.config === "navegador") {
+        conectarFormNavegador();
+      }
       if (row.dataset.config === "escola") {
         montarFormEscola(document.getElementById("cfg-escola-form"), {});
       }
     });
+  });
+}
+
+async function conectarFormNavegador() {
+  const caixa = document.getElementById("cfg-nav-opcoes");
+  const status = document.getElementById("cfg-nav-status");
+  const btn = document.getElementById("cfg-nav-salvar");
+  if (!caixa || !status || !btn) return;
+  const desenhar = (d) => {
+    caixa.innerHTML = (d.opcoes || []).map((o) => `
+      <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:.88rem;">
+        <input type="radio" name="cfg-nav" value="${escaparHtml(o.id)}"${o.id === d.navegador ? " checked" : ""}> ${escaparHtml(o.rotulo)}
+      </label>`).join("");
+  };
+  try {
+    desenhar(await apiGet("/configuracoes/navegador"));
+  } catch (e) {
+    caixa.textContent = "Não foi possível ler a configuração atual.";
+    return;
+  }
+  btn.addEventListener("click", async () => {
+    const marcado = caixa.querySelector('input[name="cfg-nav"]:checked');
+    if (!marcado) { toast("Escolha uma opção"); return; }
+    btn.disabled = true;
+    try {
+      const r = await apiPost("/configuracoes/navegador", { navegador: marcado.value });
+      desenhar(r);
+      status.innerHTML = '<span style="color:var(--lime)">✓ ' + escaparHtml(r.mensagem || "Salvo") + "</span>";
+      toast(r.mensagem || "Navegador salvo");
+    } catch (e) {
+      toast(e.message);
+    } finally {
+      btn.disabled = false;
+    }
   });
 }
 

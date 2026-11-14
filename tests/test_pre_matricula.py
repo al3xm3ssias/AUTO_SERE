@@ -404,7 +404,7 @@ def test_etapa4_sem_resposta_mantem_presuncao(dados_tmp):
 def test_etapa4_sem_pendentes_nao_abre_o_site():
     page = FakePage()
     assert rodar(pm.etapa_verificar_pendentes(page)) == {
-        "total_pendentes": 0, "confirmados": 0, "sem_resposta": []
+        "total_pendentes": 0, "confirmados": 0, "sem_resposta": [], "outra_escola": []
     }
     assert page.consultas == []
 

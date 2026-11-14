@@ -85,6 +85,7 @@ from src.comum.logger import get_logger
 from src.comum import paths as _paths
 from src.comum.registros_aluno import consolidar_registros
 from src.comum.sere_api import URL, navegar_por_turma
+from src.comum import navegador as _navegador
 
 log = get_logger(__file__)
 
@@ -327,7 +328,7 @@ async def coletar_turmas_e_alunos_via_login(output_file: Path = TURMAS_JSON) -> 
     log.info("Iniciando Playwright...")
     async with async_playwright() as p:
         log.info("Playwright iniciado. Abrindo browser Chromium (headless)...")
-        browser = await p.chromium.launch(headless=True)
+        browser = await _navegador.lancar(p, "chromium", True)
         log.info("Browser aberto. Criando nova página...")
         page = await browser.new_page()
         log.info(f"Acessando URL: {URL}")

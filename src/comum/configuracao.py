@@ -62,6 +62,8 @@ _PADRAO: dict[str, Any] = {
     "flags_automacoes": {},
     "data_corte_transferidos": None,      # "dd/mm/aaaa"; None = 22/06 do ano letivo (ver data_corte_transferidos)
     "observacao_historico": None,         # último texto usado na etapa "Alterar" do histórico de transferidos
+    "navegador_padrao": None,             # None = automático (cada script usa o seu); "chromium" (Chrome) ou "firefox" — ver comum/navegador.py
+    "navegador_scripts": {},              # {chave_do_script: {"mostrar_janela": True/False}}; sem a chave = o padrão do script
     "google_sheets": None,                # {"mapa_abas"} (ver google_sheets_config); as planilhas ficam em planilhas_gerenciador
 }
 
@@ -474,4 +476,53 @@ def definir_unidade_escolar_completa(dados: dict) -> None:
     """
     configuracao = carregar_configuracao()
     configuracao["unidade_escolar"] = dict(dados)
+    _salvar_configuracao(configuracao)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Navegador das automações (pedido do usuário, 13/11/2026)
+# ─────────────────────────────────────────────────────────────────────────
+
+NAVEGADORES_ACEITOS = ("chromium", "firefox")      # "Chrome" na tela = o Chromium do Playwright
+
+
+def navegador_padrao() -> str:
+    """'chromium', 'firefox' ou '' (= automático: cada script abre o navegador para o qual foi feito)."""
+    valor = str(carregar_configuracao().get("navegador_padrao") or "").strip().lower()
+    return valor if valor in NAVEGADORES_ACEITOS else ""
+
+
+def definir_navegador_padrao(valor) -> str:
+    """Grava o navegador global. Vazio/'automatico' volta ao automático. ValueError se não for um aceito."""
+    texto = str(valor or "").strip().lower()
+    if texto in ("", "automatico", "automático", "auto"):
+        novo = None
+    elif texto in ("chrome", "chromium"):
+        novo = "chromium"
+    elif texto == "firefox":
+        novo = "firefox"
+    else:
+        raise ValueError("Navegador inválido: escolha Automático, Chrome ou Firefox.")
+    configuracao = carregar_configuracao()
+    configuracao["navegador_padrao"] = novo
+    _salvar_configuracao(configuracao)
+    return novo or ""
+
+
+def mostrar_janela_script(chave: str) -> bool | None:
+    """True = abrir a janela do navegador neste script; False = escondida; None = não configurado (vale o padrão do script)."""
+    dados = (carregar_configuracao().get("navegador_scripts") or {}).get(chave) or {}
+    valor = dados.get("mostrar_janela")
+    return valor if isinstance(valor, bool) else None
+
+
+def definir_mostrar_janela_script(chave: str, mostrar: bool | None) -> None:
+    """Grava a escolha do script. None apaga a escolha (volta ao padrão do script)."""
+    configuracao = carregar_configuracao()
+    todos = dict(configuracao.get("navegador_scripts") or {})
+    if mostrar is None:
+        todos.pop(chave, None)
+    else:
+        todos[chave] = {"mostrar_janela": bool(mostrar)}
+    configuracao["navegador_scripts"] = todos
     _salvar_configuracao(configuracao)

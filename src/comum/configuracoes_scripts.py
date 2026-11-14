@@ -108,6 +108,14 @@ def _ler_email() -> tuple[bool, str]:
     return ok, "configurado" if ok else "não configurado"
 
 
+def _ler_navegador() -> tuple[bool, str]:
+    from src.comum import configuracao as c
+    from src.comum.navegador import ROTULOS
+    escolhido = c.navegador_padrao()
+    return True, (f"{ROTULOS[escolhido]} (para todos os scripts)" if escolhido
+                  else "Automático (cada script abre o navegador para o qual foi feito)")
+
+
 def _ler_raio() -> tuple[bool, str]:
     from src.comum.cep_api import RAIO_KM_PADRAO
     return True, f"{RAIO_KM_PADRAO:g} km (padrão do sistema; pode ser trocado no campo da execução)"
@@ -133,6 +141,8 @@ CATALOGO: dict[str, ConfigSistema] = {c.id: c for c in (
     ConfigSistema("cgm_upload", "CGMs salvos para envio", "Lista de CGMs guardada para os modos por aluno.", _ler_cgm_upload),
     ConfigSistema("planilhas_drive", "Planilhas do Drive", "Planilhas cadastradas em Planilhas do Drive.", _ler_planilhas, "planilhas_google"),
     ConfigSistema("google_credenciais", "Acesso ao Google", "Arquivo de credenciais da API do Google (Sheets).", _ler_google),
+    ConfigSistema("navegador", "Navegador das automações", "Chrome, Firefox ou automático (cada script usa o seu).",
+                  _ler_navegador, "navegador"),
     ConfigSistema("raio_cep", "Raio de atendimento", "Distância máxima aluno–escola usada pelo script de CEP.", _ler_raio),
 )}
 

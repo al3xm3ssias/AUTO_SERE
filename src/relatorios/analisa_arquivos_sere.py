@@ -49,6 +49,7 @@ import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment, PatternFill, Font
 from openpyxl.utils import get_column_letter
+from src.comum import navegador as _navegador
 
 # ============================================================
 #  CONFIGURAÇÕES
@@ -1044,7 +1045,7 @@ async def _fazer_login(page) -> None:
 
 async def executar(alunos: list[dict], gerenciador_erros: GerenciadorErros):
     async with async_playwright() as p:
-        browser = await p.firefox.launch(headless=_headless())
+        browser = await _navegador.lancar(p, "firefox", _headless())
         try:
             page = await browser.new_page()
 

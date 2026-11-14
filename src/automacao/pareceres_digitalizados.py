@@ -43,6 +43,7 @@ from typing import Callable, Iterable, Optional
 
 from src.comum import compressao, paths as _paths
 from src.comum.arquivos_json import carregar_json, salvar_json_atomico
+from src.comum import navegador as _navegador
 
 PASTA_ENTRADA = "_PROCESSAR"
 NOME_CONTROLE = "pareceres_digitalizados.json"
@@ -353,7 +354,7 @@ async def _sessao_sere():
     """Navegador logado no SERE (a mesma abertura de sessão de sere_2026.modo_transferidos)."""
     from src.automacao import sere_2026 as s
     async with s.async_playwright() as p:
-        browser = await p.firefox.launch(headless=True)
+        browser = await _navegador.lancar(p, "firefox", True)
         page = await browser.new_page()
         await page.goto(s.URL)
         await page.fill("#CHAVE", s.LOGIN)

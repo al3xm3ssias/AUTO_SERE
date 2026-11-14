@@ -14,7 +14,11 @@ playwright_sync = pytest.importorskip("playwright.sync_api")
 
 @pytest.fixture()
 def pagina(tmp_path, monkeypatch):
+    from src.comum import configuracao
     monkeypatch.setattr(rotas, "_dados_dir", lambda: tmp_path)
+    # a tela grava configurações (navegador, flags...): nunca no config/config_usuario.json de verdade
+    monkeypatch.setattr(configuracao, "CONFIG_DIR", tmp_path / "config")
+    monkeypatch.setattr(configuracao, "ARQUIVO_CONFIG", tmp_path / "config" / "config_usuario.json")
     (tmp_path / "turmas.json").write_text('{"5A": []}', encoding="utf-8")
     with rotas._EXECUCOES_LOCK:
         rotas._EXECUCOES.clear()
@@ -246,3 +250,38 @@ def test_historico_mostra_o_que_deu_certo_e_o_que_deu_errado(pagina, monkeypatch
     pagina.click("#btn-historico-limpar")
     pagina.wait_for_selector("#historico-script-corpo .script-vazio")
     assert pagina.locator("#historico-script-corpo .hist-item").count() == 0
+
+
+# ───────────────── navegador: padrão global (Configurações) e "ver a janela" por script ─────────────────
+
+def test_ver_janela_do_script_e_salvo_e_volta_marcado(pagina):
+    from src.comum import configuracao
+    _abrir(pagina, "turmas")
+    pagina.wait_for_selector("#cfg-navegador:not([hidden]) #cfg-ver-janela")
+    assert "Chrome" in pagina.inner_text("#cfg-navegador") and not pagina.is_checked("#cfg-ver-janela")
+    pagina.check("#cfg-ver-janela")
+    pagina.wait_for_function("() => !document.getElementById('cfg-ver-janela').disabled")
+    assert configuracao.mostrar_janela_script("turmas") is True
+    pagina.click("#btn-voltar-automacoes")
+    pagina.locator('#sub-automacoes .nav-subitem[data-auto="turmas"]').dispatch_event("click")
+    pagina.wait_for_selector("#cfg-ver-janela")
+    assert pagina.is_checked("#cfg-ver-janela")                      # a escolha ficou salva
+
+
+def test_script_que_nao_abre_navegador_nao_mostra_o_bloco(pagina):
+    _abrir(pagina, "backup")
+    pagina.wait_for_selector("#cfg-sistema .cfg-linha")
+    assert pagina.locator("#cfg-navegador").is_hidden()
+
+
+def test_navegador_padrao_se_escolhe_em_configuracoes(pagina):
+    from src.comum import configuracao
+    pagina.locator('.nav-item[data-view="configuracoes"]').dispatch_event("click")
+    pagina.locator('.config-row[data-config="navegador"]').click()
+    pagina.wait_for_selector('input[name="cfg-nav"]')
+    assert pagina.locator('input[name="cfg-nav"]').count() == 3
+    assert pagina.locator('input[name="cfg-nav"][value="automatico"]').is_checked()
+    pagina.check('input[name="cfg-nav"][value="firefox"]')
+    pagina.click("#cfg-nav-salvar")
+    pagina.wait_for_selector("#cfg-nav-status:has-text('Salvo'), #cfg-nav-status:has-text('salvo')")
+    assert configuracao.navegador_padrao() == "firefox"

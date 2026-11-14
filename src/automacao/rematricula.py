@@ -59,6 +59,7 @@ from src.comum.arquivos_json import (
     carregar_json,
     salvar_json_atomico,
 )
+from src.comum import navegador as _navegador
 
 
 # ==========================================================
@@ -1099,7 +1100,7 @@ async def rematricular_via_login(
     historico = list(historico_anterior)    # carregado: o histórico não é sobrescrito
 
     async with async_playwright() as p:
-        browser = await getattr(p, navegador).launch(headless=headless)
+        browser = await _navegador.lancar(p, navegador, headless)
         sessao = SessaoSere(browser, login, senha)  # UMA página logada no SERE para a execução inteira
 
         try:

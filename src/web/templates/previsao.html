@@ -1,0 +1,51 @@
+{# Módulo "Previsão <ano letivo + 1>": rematriculados + alunos novos da pré-matrícula do próximo ano.
+   Dados: GET /web/api/previsao (regra em src/comum/previsao.py). JS: static/js/previsao.js (carregarPrevisao). #}
+<section class="section" id="sec-previsao" data-title="Previsão {{ (ano_letivo | int) + 1 }}">
+
+  <div class="page-header">
+    <div class="page-header-icon cyan"><span data-icon="users"></span></div>
+    <div class="page-header-text">
+      <h1>Previsão <span id="pv-ano">{{ (ano_letivo | int) + 1 }}</span></h1>
+      <p>Alunos rematriculados para o próximo ano letivo + alunos novos da pré-matrícula</p>
+    </div>
+    <div class="page-header-actions">
+      <button class="btn-sm" id="pv-exportar" type="button" title="Baixa a lista exibida em CSV (abre no Excel)"><span data-icon="download"></span> Exportar</button>
+    </div>
+  </div>
+
+  <div class="stat-grid" id="pv-cartoes"></div>
+  <div class="pv-avisos" id="pv-avisos"></div>
+
+  <div class="card">
+    <div class="card-header">
+      <span data-icon="users" style="color:var(--txt3)"></span>
+      <span class="card-title">Alunos da previsão</span>
+      <span class="card-header-badge" id="pv-cnt">0</span>
+    </div>
+    <div class="card-body">
+      <div class="fbar">
+        <button class="pill active" data-pvtab="todos">Todos</button>
+        <button class="pill" data-pvtab="rematriculado">Rematriculados</button>
+        <button class="pill" data-pvtab="novo">Novos</button>
+        <div class="sbox-wrap" style="margin-left:auto">
+          <span data-icon="search"></span>
+          <input type="text" class="sbox" id="pv-busca" placeholder="Buscar nome, CGM, CPF, turma…">
+        </div>
+      </div>
+    </div>
+    <div class="card-body no-pad">
+      <div class="tbl-wrap" style="border:none; border-radius:0">
+        <table>
+          <thead>
+            <tr><th>Aluno</th><th>Tipo</th><th>Turma</th><th>CGM / CPF</th><th>Nascimento</th><th>Situação</th><th>Responsável</th></tr>
+          </thead>
+          <tbody id="pv-tbody"></tbody>
+        </table>
+        <div class="empty" id="pv-vazio" style="display:none">
+          <span data-icon="search"></span><span id="pv-vazio-msg">Nenhum resultado.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</section>

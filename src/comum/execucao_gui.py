@@ -68,6 +68,7 @@ Uso (dentro de um dos arquivos executar_*.py — ver exemplos lá):
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import ctypes
 import logging
 import sys
@@ -252,9 +253,11 @@ class ExecucaoEmBackground:
         ex. `modo_limpeza(...)`) ou uma chamada zero-argumentos síncrona
         (ex. `lambda: modo_analisa(argv)` ou `functools.partial(modo_analisa, argv)`).
         """
+        # A thread roda dentro de uma CÓPIA do contexto de quem iniciou: é assim que comum/navegador.py sabe de qual
+        # script veio a chamada (só leitura de variável de contexto; o resto da execução não muda).
         self._thread = threading.Thread(
-            target=self._executar_na_thread,
-            args=(alvo,),
+            target=contextvars.copy_context().run,
+            args=(self._executar_na_thread, alvo),
             daemon=True,
         )
         self._thread.start()

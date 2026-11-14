@@ -14,6 +14,14 @@ com o mesmo login:
 Pontos de entrada: `processo_completo_via_login` (1→2→4→3), `completar_json_via_login` (lê as planilhas `.xlsx` do SERE em
 vez da etapa 1) e `verificar_pendentes_via_login` (só a 4).
 
+### Ano seguinte e "Previsão <ano+1>"
+O processo roda para dois alvos: `atual` (grava `pre_matricula.json`) e `proximo` (grava **`previsao_alunos_<ano+1>.json`**, ex.:
+`previsao_alunos_2027.json`; antes `pre_matricula_<ano+1>.json`, renomeado sozinho na primeira leitura). Com esse arquivo e o
+`rematriculas_sucesso.json`, o módulo **Previsão <ano+1>** (menu lateral) mostra todos os **rematriculados** + os **alunos novos** da
+pré-matrícula do próximo ano. Regras (`src/comum/previsao.py`): novo = matriculado ou pendente; cancelado, cadastro refeito em outra
+escola e tentativa substituída não contam; quem está nas duas fontes conta uma vez (CGM ou nome + nascimento); novo que já é aluno da
+escola neste ano recebe o selo "já é aluno" para conferência. A tela só lê; exporta CSV.
+
 ### Regra de negócio (decidida pelo usuário)
 - Aluno cancelado que volta com **nova tentativa de vaga**: vale a **última** tentativa.
 - Pendente na fila que foi cancelado no passado: também vale a nova.

@@ -92,6 +92,7 @@ from src.comum.credenciais import LOGIN, SENHA
 from src.comum.logger import get_logger
 from src.comum import paths as _paths
 from src.comum.sere_api import URL, navegar_por_turma
+from src.comum import navegador as _navegador
 
 log = get_logger(__file__)
 
@@ -828,7 +829,7 @@ async def coletar_cadastro_completo_via_login(modo_rapido: bool = False) -> dict
     log.info(f"Alunos na fila:    {len(fila)}")
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await _navegador.lancar(p, "chromium", True)
         page    = await browser.new_page()
 
         await login(page)

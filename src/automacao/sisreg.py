@@ -56,6 +56,7 @@ from typing import Optional
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 
 from src.comum import paths as _paths
+from src.comum import navegador as _navegador
 
 URL = "https://fms.pontagrossa.pr.gov.br/lista-espera-sisreg-cpf"
 
@@ -140,7 +141,7 @@ async def consultar_encaminhamentos_sisreg(
     resultados: list[dict] = []
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await _navegador.lancar(p, "chromium", True)
         page = await browser.new_page()
 
         for aluno in alunos:

@@ -155,6 +155,7 @@ from src.comum.sere_upload import (
     excluir_slot_e_obter_hash,
     injetar_e_enviar,
 )
+from src.comum import navegador as _navegador
 
 log = get_logger(__file__)
 
@@ -615,7 +616,7 @@ async def modo_limpeza(
         # original usava Chrome aqui e Firefox em modo_documento, uma
         # inconsistência aparentemente acidental entre os dois modos).
         print("Vai abrir o Firefox")
-        browser = await p.firefox.launch(headless=True)
+        browser = await _navegador.lancar(p, "firefox", True)
         print("Firefox aberto")
         page    = await browser.new_page()
         await page.goto(URL)
@@ -755,7 +756,7 @@ async def modo_documento(
     docs_restantes_por_cgm: dict[str, list[dict]] = {}
 
     async with async_playwright() as p:
-        browser = await p.firefox.launch(headless=True)
+        browser = await _navegador.lancar(p, "firefox", True)
         page    = await browser.new_page()
         await page.goto(URL)
 
@@ -967,7 +968,7 @@ async def modo_espec(
     resultados: list[dict] = []
 
     async with async_playwright() as p:
-        browser = await p.firefox.launch(headless=True)
+        browser = await _navegador.lancar(p, "firefox", True)
         page    = await browser.new_page()
         await page.goto(URL)
 
@@ -1366,7 +1367,7 @@ async def modo_aluno(modo_teste: bool, modo_erros: bool, modo_faltando: bool, cg
     com_erro:   list[dict] = []
 
     async with async_playwright() as p:
-        browser = await p.firefox.launch(headless=True)
+        browser = await _navegador.lancar(p, "firefox", True)
         page    = await browser.new_page()
         await page.goto(URL)
 
@@ -1683,7 +1684,7 @@ async def modo_transferidos(modo_teste: bool = False, tipos: tuple[str, ...] | N
     resultados: list[dict] = []
 
     async with async_playwright() as p:
-        browser = await p.firefox.launch(headless=True)
+        browser = await _navegador.lancar(p, "firefox", True)
         page    = await browser.new_page()
         await page.goto(URL)
 
@@ -2200,7 +2201,7 @@ async def modo_validar(
     estado_falhas = {"consecutivas": 0}
 
     async with async_playwright() as p:
-        browser = await p.firefox.launch(headless=True)
+        browser = await _navegador.lancar(p, "firefox", True)
         page    = await browser.new_page()
 
         # Proteção extra: aceita automaticamente qualquer diálogo nativo do

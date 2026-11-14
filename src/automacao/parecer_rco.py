@@ -53,6 +53,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeout
 from src.comum import entrada_usuario, paths
 from src.comum.execucao_gui import verificar_cancelamento
 from src.comum.logger import get_logger
+from src.comum import navegador as _navegador
 
 log = get_logger(__file__)
 
@@ -463,8 +464,9 @@ async def gerar_pareceres_infantil_via_login(
     falhas: list[dict] = []
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=not mostrar_navegador,
+        browser = await _navegador.lancar(
+            p, "chromium", True, forcar_mostrar=mostrar_navegador,
+            travar_motor=True,                      # usa um argumento exclusivo do Chromium: ignora o navegador padrão global
             args=["--disable-blink-features=AutomationControlled"],
         )
         try:

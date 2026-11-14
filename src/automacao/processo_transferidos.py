@@ -106,6 +106,7 @@ from src.comum import paths as _paths
 from src.comum import configuracao as _config
 from src.comum import pastas_transferencias as _pastas
 from src.comum.sere_api import URL, navegar_relatorios
+from src.comum import navegador as _navegador
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1528,7 +1529,7 @@ async def processar_transferencias(
     inicializar_alunos(alunos)
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, slow_mo=200)
+        browser = await _navegador.lancar(p, "chromium", True, slow_mo=200)
         context = await browser.new_context()
         page    = await context.new_page()
 

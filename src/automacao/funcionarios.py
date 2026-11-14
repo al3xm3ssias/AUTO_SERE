@@ -59,6 +59,7 @@ from src.comum.credenciais import LOGIN, SENHA
 from src.comum.logger import get_logger
 from src.comum import paths as _paths
 from src.comum.sere_api import URL, navegar_censo_escolar
+from src.comum import navegador as _navegador
 
 log = get_logger(__file__)
 
@@ -199,7 +200,7 @@ async def coletar_funcionarios_via_login(output_file: Path = FUNCIONARIOS_JSON) 
     """
     log.info("Iniciando Playwright...")
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await _navegador.lancar(p, "chromium", True)
         page = await browser.new_page()
         await page.goto(URL)
         await page.fill("#CHAVE", LOGIN)

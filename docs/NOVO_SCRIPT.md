@@ -121,3 +121,16 @@ A tela de cada automação não tem abas: abaixo de **Executar** aparecem **Conf
 - **Histórico:** é gravado automaticamente ao fim de cada execução em `dados/<ano>/historico_automacoes/<chave>.jsonl`
   (últimas 100). "Deu certo" = linhas do log com ✅ ✔ [OK]; "deu errado" = ❌ [ERRO] (e a exceção, se o script caiu);
   avisos = ⚠. Para o histórico ficar útil, o script deve marcar o resultado de cada item com esses símbolos.
+
+## Navegador (Chrome/Firefox) e "ver a janela"
+
+Todo script que abre navegador usa `await navegador.lancar(p, "<motor do script>", <headless do script>)`
+(`src/comum/navegador.py`) — **nunca** `p.chromium.launch(...)` direto (um teste reprova). Assim valem para todos:
+
+- **Navegador padrão** (Configurações → *Navegador das automações*): Automático (cada script usa o seu, como sempre),
+  Chrome ou Firefox. Script que usa algo exclusivo do Chromium passa `travar_motor=True` (hoje: `parecer_rco`).
+- **Ver a janela** (tela da automação → *Configurações do script* → *Navegador*): liga/desliga o headless só naquele
+  script. Sem escolha salva, vale o headless que o script já usava. Script que já tem opção própria de mostrar a janela
+  passa `forcar_mostrar=<a opção>`.
+- Script novo que abre navegador: acrescente-o em `NAVEGADOR_DOS_SCRIPTS` (`src/comum/registro_scripts.py`) com o motor
+  para o qual foi feito; ele ganha o bloco "Navegador" na tela sozinho.

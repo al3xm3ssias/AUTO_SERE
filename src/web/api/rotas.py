@@ -52,6 +52,7 @@ from src.comum import entrada_usuario as _entrada
 from src.comum import opcoes_execucao as _opcoes
 from src.comum import registro_scripts as _registro
 from src.comum import historico_execucoes as _historico
+from src.comum import navegador as _navegador
 from src.comum import configuracoes_scripts as _cfgs
 from src.comum.registros_aluno import casar_com_turmas, registro_principal
 
@@ -768,6 +769,29 @@ def prematricula_fila():
     return jsonify({"itens": itens[:limit]})
 
 
+@api_bp.route("/previsao")
+def previsao_alunos_rota():
+    """
+    Módulo "Previsão <ano letivo + 1>": rematriculados (rematriculas_sucesso.json) + alunos novos da pré-matrícula do próximo
+    ano (previsao_alunos_<ano+1>.json), sem repetir quem está nos dois. Só lê; regra em src.comum.previsao.
+    """
+    from src.comum import previsao as _previsao
+    from src.comum.arquivos_json import ArquivoJsonCorrompidoError
+
+    ano = int(_paths.ano_atual()) + 1
+    try:
+        dados = _previsao.montar_previsao(_dados_dir(), ano)
+    except ArquivoJsonCorrompidoError as exc:
+        return jsonify({"erro": str(exc), "mensagem": str(exc), "ano": ano}), 500
+    c = dados["contagem"]
+    dados["cartoes"] = [
+        _cartao(f"Previsão {ano}", c["total"], "rematriculados + novos", "cyan", "users"),
+        _cartao("Rematriculados", c["rematriculados"], "rematrícula confirmada", "lime", "student"),
+        _cartao("Novos (pré-matrícula)", c["novos"], f"{c['novos_matriculados']} com vaga · {c['novos_pendentes']} aguardando", "amber", "clipboard"),
+    ]
+    return jsonify(dados)
+
+
 def _grupo_funcao(funcao: str) -> str:
     """Agrupa a função do SERE nas categorias dos filtros/cards da tela (mesma ideia do index.html)."""
     f = _sem_acento(funcao)
@@ -1379,6 +1403,14 @@ def _nomes_de_turma(script, turmas_json: dict) -> list[str]:
 
 def _executar_plano(chave: str, plano) -> None:
     """Dispara o plano de um script registrado, no formato de execução que ele pediu."""
+    token = _navegador.definir_script(chave)      # a thread da execução herda: comum/navegador.py sabe qual script abre o navegador
+    try:
+        _disparar_plano(chave, plano)
+    finally:
+        _navegador.restaurar(token)
+
+
+def _disparar_plano(chave: str, plano) -> None:
     if plano.tipo == "gui":
         _iniciar_via_execucao_gui(chave, plano.funcao, log_inicial=plano.log_inicial or None, **plano.kwargs)
     elif plano.tipo == "coroutine":
@@ -1613,6 +1645,67 @@ _NOMES_RECURSOS = {
 }
 
 
+def _estado_navegador_script(chave: str) -> dict:
+    """O que a tela mostra no bloco "Navegador" do script: se ele abre navegador, a janela e o navegador em vigor."""
+    info = _registro.navegador_do_script(chave)
+    if info is None:
+        return {"usa": False}
+    motor_script, travado = info
+    mostrar = _config.mostrar_janela_script(chave)
+    global_ = "" if travado else _config.navegador_padrao()
+    motor = global_ or motor_script
+    return {
+        "usa": True,
+        "mostrar_janela": bool(mostrar),
+        "janela_configurada": mostrar is not None,
+        "navegador": _navegador.ROTULOS[motor],
+        "origem": ("fixo neste script (usa recursos exclusivos do Chrome)" if travado
+                   else "definido em Configurações" if global_ else "padrão deste script"),
+    }
+
+
+@api_bp.route("/automacoes/<string:chave>/navegador", methods=["POST"])
+def automacoes_navegador_salvar(chave):
+    """payload: {"mostrar_janela": true|false} grava; {"mostrar_janela": null} volta ao padrão do script."""
+    if _registro.obter(chave) is None:
+        return jsonify({"erro": f"Automação '{chave}' não encontrada"}), 404
+    if _registro.navegador_do_script(chave) is None:
+        return jsonify({"erro": "Esta automação não abre navegador."}), 400
+    payload = request.get_json(silent=True) or {}
+    if "mostrar_janela" not in payload or not (payload["mostrar_janela"] is None or isinstance(payload["mostrar_janela"], bool)):
+        return jsonify({"erro": "Informe mostrar_janela como verdadeiro, falso ou nulo."}), 400
+    _config.definir_mostrar_janela_script(chave, payload["mostrar_janela"])
+    estado = _estado_navegador_script(chave)
+    estado.update({"status": "ok", "mensagem": "A janela do navegador ficará visível nas próximas execuções."
+                   if estado["mostrar_janela"] else "O navegador voltará a rodar escondido."})
+    return jsonify(estado)
+
+
+def _estado_navegador_global() -> dict:
+    escolhido = _config.navegador_padrao()
+    return {"navegador": escolhido or "automatico",
+            "opcoes": [{"id": "automatico", "rotulo": "Automático — cada script usa o seu"},
+                       {"id": "chromium", "rotulo": "Chrome"}, {"id": "firefox", "rotulo": "Firefox"}]}
+
+
+@api_bp.route("/configuracoes/navegador", methods=["GET"])
+def configuracao_navegador_obter():
+    return jsonify(_estado_navegador_global())
+
+
+@api_bp.route("/configuracoes/navegador", methods=["POST"])
+def configuracao_navegador_salvar():
+    """payload: {"navegador": "automatico" | "chromium" | "firefox"}."""
+    payload = request.get_json(silent=True) or {}
+    try:
+        _config.definir_navegador_padrao(payload.get("navegador"))
+    except ValueError as exc:
+        return jsonify({"erro": str(exc)}), 400
+    resposta = _estado_navegador_global()
+    resposta.update({"status": "ok", "mensagem": "Navegador padrão salvo — vale a partir da próxima execução."})
+    return jsonify(resposta)
+
+
 @api_bp.route("/automacoes/<string:chave>/configuracao")
 def automacoes_configuracao(chave):
     """
@@ -1630,6 +1723,7 @@ def automacoes_configuracao(chave):
                             for c in script.extras()],
         "confirma_antes": script.confirmar,
         "flags": _estado_flags(chave)["flags"],
+        "navegador": _estado_navegador_script(chave),
         "sistema": _cfgs.descrever(script.configs or ()),
     })
 

@@ -40,6 +40,7 @@ from src.comum.arquivos_json import (
     carregar_json,
     salvar_json_atomico,
 )
+from src.comum import navegador as _navegador
 
 ARQUIVO_CHAVES = "chave_responsavel.json"
 
@@ -212,7 +213,7 @@ async def gerar_chaves_via_login(
     resumo = {"geradas": 0, "falhas": []}
 
     async with async_playwright() as p:
-        browser = await getattr(p, navegador).launch(headless=headless)
+        browser = await _navegador.lancar(p, navegador, headless)
         sessao = rem.SessaoSere(browser, login, senha)  # UMA página logada no SERE para a execução inteira
 
         try:
