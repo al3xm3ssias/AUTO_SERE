@@ -436,7 +436,7 @@ def test_sem_alunos_e_erro():
 def test_registrada_com_o_campo_de_alunos(amb):
     s = reg.obter("base_abc")
     assert s is not None and set(s.recursos) == {"teste"}
-    assert [e["nome"] for e in s.extras()] == ["alunos_texto", "pre_matricula", "mostrar_navegador"]
+    assert [e["nome"] for e in s.extras()] == ["alunos_texto", "pre_matricula", "transferidos", "limpar_vinculados", "mostrar_navegador"]
     assert [o["valor"] for o in s.extras()[1]["opcoes"]] == ["nao", "matriculados", "pendentes", "matriculados_e_pendentes", "todos"]
     assert "mãe" in s.extras()[0]["descricao"]
 
@@ -818,3 +818,82 @@ def test_recoletar_o_aluno_na_pre_matricula_nao_apaga_o_vinculo():
     turmas = pm.mesclar_turmas_intencao({"T": [{"cpf": "1", "nome": "A B", "vinculo_base_abc": {"status": "ok"}}]},
                                         {"T": [{"cpf": "1", "nome": "A B"}]})
     assert turmas["T"][0]["vinculo_base_abc"] == {"status": "ok"}
+
+
+# ───────────── mãe da pré-matrícula, vínculo com transferidos e poda do buscas_base.json ─────────────
+
+def test_mae_e_nascimento_da_pre_matricula_entram_na_consulta(amb):
+    cad = {**_cad_pre("CLAUDIO ALEX MENDES DE SOUZA", "111"), "data_nascimento": "12/03/2015", "nome_mae": "MARIA APARECIDA DE SOUZA"}
+    _escrever(amb, "pre_matricula.json", {"cadastros": {"111": cad}})
+    [c] = cb.consultas_da_pre_matricula_arquivo("matriculados")
+    assert (c.nascimento, c.mae, c.responsavel) == (D(2015, 3, 12), "MARIA APARECIDA DE SOUZA", "RITA LIMA")
+    assert "111" not in repr(c)
+
+
+def test_cadastro_antigo_sem_mae_continua_funcionando(amb):
+    _escrever(amb, "pre_matricula.json", {"cadastros": {"111": _cad_pre("ANA CLARA LIMA", "111")}})
+    [c] = cb.consultas_da_pre_matricula_arquivo("matriculados")
+    assert c.mae == "" and c.nascimento is None
+
+
+def _transferidos(amb, **extra):
+    dados = {"1025059227": {"nome": "CLAUDIO ALEX MENDES DE SOUZA", "turma": "Infantil IV", "data_nascimento": "12/03/2015", "retorno": None},
+             "1025059300": {"nome": "MARIA SILVA LIMA", "turma": "1º ano", "data_nascimento": "03/11/2014",
+                            "retorno": {"turma": "1º ano", "data": "01/08/2026"}},        # voltou: fica de fora
+             "sem-cgm": {"nome": "FULANO DE TAL", "turma": "2º ano", "data_nascimento": "01/01/2014", "retorno": None}}
+    dados.update(extra)
+    _escrever(amb, "transferidos.json", dados)
+
+
+def test_consultas_dos_transferidos_so_quem_saiu_e_tem_cgm(amb):
+    _transferidos(amb)
+    [c] = cb.consultas_dos_transferidos_arquivo()
+    assert (c.cgm, c.nome, c.nascimento, c.origem) == ("1025059227", "CLAUDIO ALEX MENDES DE SOUZA", D(2015, 3, 12), "transferidos")
+    assert c.destinos == (("transferidos.json", "transferidos", "1025059227", "", "ano_vigente"),)
+
+
+def test_transferidos_sem_arquivo_ou_sem_ninguem_da_mensagem_pronta(amb):
+    with pytest.raises(ValueError, match="coleta de turmas"):
+        cb.consultas_dos_transferidos_arquivo()
+    _escrever(amb, "transferidos.json", {})
+    with pytest.raises(ValueError, match="nenhum transferido"):
+        cb.consultas_dos_transferidos_arquivo()
+
+
+def _consultar(consultas, **kw):
+    return asyncio.run(cb.consultar(NavFalso(BASE), consultas, log=lambda *_: None, **kw))
+
+
+def test_vinculo_do_transferido_e_gravado_no_proprio_registro(amb):
+    _transferidos(amb)
+    r = _consultar(cb.consultas_dos_transferidos_arquivo())
+    assert r.vinculos_gravados == 1
+    reg_t = _ler(amb, "transferidos.json")["1025059227"]
+    assert reg_t["vinculo_base_abc"]["cgm"] == "1025059227" and reg_t["vinculo_base_abc"]["consultado_em"]
+    assert reg_t["turma"] == "Infantil IV" and reg_t["nome"] == "CLAUDIO ALEX MENDES DE SOUZA"   # o resto não é tocado
+    assert "vinculo_base_abc" not in _ler(amb, "transferidos.json")["1025059300"]   # quem voltou não foi consultado
+    assert len(_lido()) == 1                                                        # sem poda, o consolidado continua com ele
+
+
+def test_poda_tira_do_consolidado_so_quem_ja_esta_vinculado(amb):
+    _transferidos(amb)
+    digitado, _ = cb.interpretar_texto("Maria Silva Lima 03/11/2014 mãe: Ana Paula Lima")
+    r = _consultar(cb.consultas_dos_transferidos_arquivo() + digitado, limpar_vinculados=True)
+    assert r.vinculos_gravados == 1 and r.podados == 1
+    assert [x["nome"] for x in _lido()] == ["MARIA SILVA LIMA"]                     # o digitado (sem destino) fica
+    assert "vinculo_base_abc" in _ler(amb, "transferidos.json")["1025059227"]
+
+
+def test_poda_nao_tira_nada_se_o_vinculo_nao_pode_ser_gravado(amb):
+    _transferidos(amb)
+    consultas = cb.consultas_dos_transferidos_arquivo()
+    (amb / "dados" / "2026" / "transferidos.json").write_text("{ ilegível", encoding="utf-8")   # estragou depois de ler
+    r = _consultar(consultas, limpar_vinculados=True)
+    assert r.vinculos_gravados == 0 and r.podados == 0
+    assert len(_lido()) == 1
+
+
+def test_tela_tem_as_caixas_novas_com_a_limpeza_ligada_por_padrao(amb):
+    extras = {e["nome"]: e for e in reg.obter("base_abc").extras()}
+    assert extras["limpar_vinculados"]["padrao"] is True
+    assert not extras["transferidos"].get("padrao")

@@ -2,6 +2,7 @@
 import email
 import json
 import time
+from datetime import datetime, timedelta
 from email.header import decode_header, make_header
 from pathlib import Path
 
@@ -204,7 +205,7 @@ def test_pais_sem_arquivo_ou_ilegivel(amb):
 # ───────────── marcadores ─────────────
 
 def test_marcadores_por_publico():
-    assert av.marcadores_validos("escolas") == ("ESCOLA", "ANO", "DATA", "ESCOLA_DESTINO")
+    assert av.marcadores_validos("escolas") == ("ESCOLA", "ANO", "DATA", "ESCOLA_DESTINO", "ALUNO", "CGM", "SERIE", "TURMA")
     assert av.marcadores_validos("pais") == ("ESCOLA", "ANO", "DATA", "RESPONSAVEL", "ALUNO", "TURMA")
 
 
@@ -239,8 +240,13 @@ def test_validar_ok_e_normaliza(amb):
     (dict(publico=""), "para quem"),
     (dict(publico="todos"), "para quem"),
     (dict(canal="whatsapp"), "ainda não existe"),
-    (dict(modo="enviar"), "ainda não foi liberado"),
-    (dict(modo="real"), "ainda não foi liberado"),
+    (dict(modo="real"), "Modo inválido"),
+    (dict(fonte="outra"), "Fonte dos alunos"),
+    (dict(unidades=["@todos-os-cmeis"]), "Grupo de unidades desconhecido"),
+    (dict(intervalo_s=1), "Intervalo entre e-mails"),
+    (dict(intervalo_s="abc"), "número inteiro"),
+    (dict(limite_lote=0), "Máximo de e-mails por execução"),
+    (dict(limite_lote=501), "Máximo de e-mails por execução"),
     (dict(assunto="  "), "assunto"),
     (dict(assunto="Oi\nBcc: x@y.com"), "uma linha só"),
     (dict(assunto="x" * 201), "passa de 200"),
@@ -351,8 +357,8 @@ def test_falha_no_smtp_vira_erro_e_nao_grava_registro(amb, monkeypatch):
     assert not (paths.dados_ano_atual() / "AVISOS").exists()
 
 
-def test_modo_real_nao_existe(amb, smtp):
-    with pytest.raises(ValueError, match="ainda não foi liberado"):
+def test_envio_real_sem_simulacao_antes_e_recusado(amb, smtp):
+    with pytest.raises(ValueError, match="rode o modo .Simular."):
         av.executar_avisos(**_args(modo="enviar"))
     assert smtp == [] and not (paths.dados_ano_atual() / "AVISOS").exists()
 
@@ -401,11 +407,13 @@ def test_registrada(amb):
     s = reg.obter("avisos")
     assert s is not None and "avisos" not in rotas.AUTOMACOES_NAO_IMPLEMENTADAS and s.confirmar is False
     nomes = [e["nome"] for e in s.extras()]
-    assert nomes == ["publico", "canal", "modo", "tipo_escola", "filtro_nome", "situacao_pais", "assunto", "mensagem", "email_teste"]
+    assert nomes == ["publico", "canal", "modo", "unidades", "situacao_pais", "fonte", "tipo_mensagem", "modelo_acoes",
+                     "assunto", "mensagem", "intervalo_s", "limite_lote"]
+    assert "filtro_nome" not in nomes and "email_teste" not in nomes                  # saíram da tela a pedido
     mensagem = next(e for e in s.extras() if e["nome"] == "mensagem")
     assert mensagem["multilinha"] is True
     modos = next(e for e in s.extras() if e["nome"] == "modo")
-    assert [o["valor"] for o in modos["opcoes"]] == ["simular", "teste"] and modos["padrao"] == "simular"
+    assert [o["valor"] for o in modos["opcoes"]] == ["simular", "teste", "enviar"] and modos["padrao"] == "simular"
     publico = next(e for e in s.extras() if e["nome"] == "publico")
     assert "$RESPONSAVEL" in next(o for o in publico["opcoes"] if o["valor"] == "pais")["ajuda"]
 
@@ -486,10 +494,12 @@ def test_previa_conta_destinatarios_sem_exigir_o_texto(web):
     r = previa({})                                                      # ainda sem escolher o público: sem aviso nenhum
     assert r.status_code == 200 and r.get_json()["texto"] is None
     d = previa({"publico": "escolas"}).get_json()["texto"]
-    assert d.startswith("4 e-mail(s) de escolas e CMEIs; 2 sem e-mail válido ficariam de fora") and "Simular ou Teste" in d
+    assert d.startswith("4 e-mail(s) de escolas e CMEIs; sem e-mail ficariam de fora 2: Escola Municipal Sem Email; Escola Municipal Lixo")
     assert previa({"publico": "escolas", "tipo_escola": "cmeis"}).get_json()["texto"].startswith("1 e-mail(s)")
+    assert previa({"publico": "escolas", "unidades": ["@cmeis"]}).get_json()["texto"].startswith("1 e-mail(s)")
+    assert previa({"publico": "escolas", "unidades": '["Escola Municipal Ana Néri"]'}).get_json()["texto"].startswith("2 e-mail(s)")
     d = previa({"publico": "pais"}).get_json()["texto"]
-    assert d.startswith("3 responsável(is) por e-mail, de 6 aluno(s) novo(s); 2 sem e-mail válido")
+    assert d.startswith("3 responsável(is) por e-mail, de 6 aluno(s) novo(s); sem e-mail ficariam de fora 2:")
     assert previa({"publico": "pais", "situacao_pais": "aguardando"}).get_json()["texto"].startswith("1 responsável(is)")
 
 
@@ -611,3 +621,425 @@ def test_web_teste_das_escolas_pelo_botao(web, smtp):
 def test_ajuda_do_modo_teste_cita_a_escola_ficticia(amb):
     modo = next(e for e in reg.obter("avisos").extras() if e["nome"] == "modo")
     assert NOME_FICTICIA in next(o for o in modo["opcoes"] if o["valor"] == "teste")["ajuda"]
+
+
+# ═════════════ só quem chega: unidades, escola de origem, fonte, envio real ═════════════
+
+def _vinc(escola, cgm="1025059227", turma="5º ano", status="ok", **extra):
+    return {"vinculo_base_abc": {"periodo": "ano_vigente", "nome": "X", "cgm": cgm, "turma": turma, "escola": escola,
+                                 "situacao": "Matriculado", "status": status, **extra}}
+
+
+@pytest.fixture()
+def chegando(amb):
+    """Alunos novos com o vínculo da Base ABC (escola de origem) gravado, como a 'Consulta na Base ABC' deixa."""
+    pre = json.loads(json.dumps(PRE))
+    cad = pre["cadastros"]
+    cad["111"].update(_vinc("ESCOLA MUNICIPAL ANA NERI", cgm="1000000001", turma="5º ano"))               # → ana@
+    cad["112"].update(_vinc("Escola Municipal Rural São José", cgm="1000000002", turma="3º ano"))          # → sj@
+    cad["115"].update(_vinc("ESCOLA MUNICIPAL SEM EMAIL", cgm="1000000005"))                              # escola sem e-mail
+    cad["117"].update(_vinc("COLEGIO PARTICULAR XYZ", cgm="1000000007"))                                  # fora da lista
+    cad["118"].update(_vinc("ESCOLA MUNICIPAL ANA NERI", cgm="1000000008", status="verificar", motivo="sem linha de 2026"))
+    pre["turmas_intencao"]["1º Ano do Ensino Fundamental"][4]["vinculo_base_abc"] = _vinc(      # IVO: só no item da turma
+        "Escola Municipal Profª Judith Macedo Silveira", cgm="1000000009")["vinculo_base_abc"]
+    (paths.dados_ano_atual() / "pre_matricula.json").write_text(json.dumps(pre), encoding="utf-8")
+    return pre
+
+
+TRANSF = dict(publico="escolas", assunto="Transferência de $ALUNO",
+              mensagem="Aluno $ALUNO, CGM $CGM, série $SERIE, vai para a turma $TURMA de $ESCOLA para $ESCOLA_DESTINO.")
+
+
+def test_normalizar_unidades():
+    assert av.normalizar_unidades(None) is None and av.normalizar_unidades([]) is None and av.normalizar_unidades("") is None
+    assert av.normalizar_unidades(["@todas", "Escola X"]) is None
+    assert av.normalizar_unidades(["@cmeis", "  Escola  Municipal Ana Néri "]) == (frozenset({"@cmeis"}), frozenset({"escola municipal ana neri"}))
+    assert av.normalizar_unidades('["Escola A", "@escolas"]') == (frozenset({"@escolas"}), frozenset({"escola a"}))
+    assert av.normalizar_unidades("Escola Única") == (frozenset(), frozenset({"escola unica"}))
+    with pytest.raises(ValueError, match="Grupo de unidades desconhecido: @outras"):
+        av.normalizar_unidades(["@outras"])
+
+
+def test_listar_unidades_sem_a_propria_escola_em_ordem(amb):
+    u = av.listar_unidades()
+    assert PROPRIA not in [x["nome"] for x in u]
+    assert [x["nome"] for x in u] == sorted([x["nome"] for x in u], key=lambda n: av._sem_acento(n))
+    por_nome = {x["nome"]: x for x in u}
+    assert por_nome["CMEI Pequeno Príncipe"]["tipo"] == "cmei" and por_nome["Escola Municipal Ana Néri"]["tipo"] == "escola"
+    assert por_nome["Escola Municipal Sem Email"]["tem_email"] is False and por_nome["Escola Municipal Ana Néri"]["tem_email"] is True
+
+
+def test_quais_unidades_filtra_por_nome_e_por_grupo(amb):
+    nomes = lambda **kw: sorted({d["nome"] for d in av.destinatarios_escolas(**kw)["destinatarios"]})
+    assert nomes(unidades=["Escola Municipal Ana Néri"]) == ["Escola Municipal Ana Néri"]
+    assert [d["email"] for d in av.destinatarios_escolas(unidades=["escola municipal ana neri"])["destinatarios"]] == ["ana@pg.gov.br", "ana.secretaria@pg.gov.br"]
+    assert nomes(unidades=["@cmeis"]) == ["CMEI Pequeno Príncipe"]
+    assert nomes(unidades=["@cmeis", "Escola Municipal Rural São José"]) == ["CMEI Pequeno Príncipe", "Escola Municipal Rural São José"]
+    assert "CMEI Pequeno Príncipe" not in nomes(unidades=["@escolas"])
+    assert len(nomes(unidades=["@todas"])) == len(nomes())                         # @todas = sem filtro
+
+
+def test_alunos_que_chegam_vao_para_a_escola_de_origem_um_email_por_aluno(chegando):
+    r = av.destinatarios_alunos_origem()
+    por_aluno = {d["contexto"]["ALUNO"]: d for d in r["destinatarios"]}
+    assert set(por_aluno) == {"ANA LIMA", "BETO LIMA"}
+    ana = por_aluno["ANA LIMA"]
+    assert ana["email"] == "ana@pg.gov.br"                                          # a escola tem 2 e-mails: vai o primeiro
+    assert ana["contexto"] == {"ESCOLA_DESTINO": "Escola Municipal Ana Néri", "ALUNO": "ANA LIMA", "CGM": "1000000001",
+                               "SERIE": "5º ano", "TURMA": "Infantil IV"}
+    assert por_aluno["BETO LIMA"]["email"] == "sj@pg.gov.br" and por_aluno["BETO LIMA"]["contexto"]["SERIE"] == "3º ano"
+    assert r["alunos"] == 6 and r["sem_vinculo"] == []                                # CAIO (aguardando) não entra em "matriculados"
+    assert r["origem_desconhecida"] == ["GIGI NUNES (1º Ano) — COLEGIO PARTICULAR XYZ"]
+    assert len(r["a_verificar"]) == 1 and r["a_verificar"][0].startswith("HUGO MELO (1º Ano) — sem linha de 2026")
+    assert r["da_propria_escola"] == ["IVO SEM CAD (1º Ano)"]                         # o vínculo veio do item da turma, sem cadastro
+    assert r["sem_email"] == ["Escola Municipal Sem Email (aluno EDU DIAS)"]
+
+
+def test_aluno_sem_vinculo_da_base_abc_nao_recebe_e_e_listado(chegando):
+    r = av.destinatarios_alunos_origem("ambos")
+    assert r["sem_vinculo"] == ["CAIO PAIVA (Infantil IV)"] and r["alunos"] == 7
+
+
+def test_unidades_escolhidas_tambem_filtram_os_alunos(chegando):
+    r = av.destinatarios_alunos_origem(unidades=["Escola Municipal Ana Néri"])
+    assert [d["contexto"]["ALUNO"] for d in r["destinatarios"]] == ["ANA LIMA"] and r["fora_da_selecao"] == 2       # BETO e EDU: outras escolas de origem
+    assert av.destinatarios_alunos_origem(unidades=["@cmeis"])["destinatarios"] == []
+
+
+def test_origem_so_vale_se_for_a_unica_parecida(chegando):
+    unidades = [{"nome": "Escola Municipal Ana Néri Norte", "eh_cmei": False, "emails": ["n@x.com"]},
+                {"nome": "Escola Municipal Ana Néri Sul", "eh_cmei": False, "emails": ["s@x.com"]}]
+    assert av._achar_unidade("Escola Municipal Ana Néri", unidades) is None          # duas parecidas: não adivinha
+    assert av._achar_unidade("Escola Municipal Ana Néri Sul", unidades)["emails"] == ["s@x.com"]
+    assert av._achar_unidade("Ana Néri Norte", unidades)["emails"] == ["n@x.com"]    # sem 'Escola Municipal': ainda é igual
+
+
+def test_nenhum_aluno_com_escola_de_origem_explica_o_motivo(amb):
+    with pytest.raises(ValueError, match=r"Nenhum aluno novo com escola de origem e e-mail.*6 aluno\(s\) novo\(s\) lido\(s\).*6 sem o vínculo da Base ABC"):
+        av.reunir_destinatarios("escolas", por_aluno=True)
+
+
+def test_texto_com_marcador_de_aluno_vira_um_email_por_aluno(chegando, smtp, capsys):
+    r = av.executar_avisos(**_args(**TRANSF))
+    assert smtp == [] and r["total"] == 2
+    saida = capsys.readouterr().out
+    assert "um e-mail por aluno que chega, para a escola de origem" in saida
+    assert "Escola Municipal Ana Néri <ana@pg.gov.br> — aluno ANA LIMA" in saida
+    assert "Sem e-mail válido (1)" in saida and "Escola de origem fora da lista de escolas (não recebem) (1)" in saida
+    assert "Vínculo da Base ABC a verificar (não recebem) (1)" in saida and "Já estão na nossa escola (não recebem) (1)" in saida
+    registro = json.loads(Path(r["registro"]).read_text(encoding="utf-8"))
+    assert registro["filtros"]["por_aluno"] is True and registro["mensagens"][0]["aluno"] == "ANA LIMA"
+    assert "chave" not in registro["mensagens"][0]
+    corpo = registro["mensagens"][0]["corpo"]
+    assert corpo == f"Aluno ANA LIMA, CGM 1000000001, série 5º ano, vai para a turma Infantil IV de {PROPRIA} para Escola Municipal Ana Néri."
+
+
+def test_texto_sem_marcador_de_aluno_segue_um_email_por_escola(chegando):
+    r = av.executar_avisos(**_args(publico="escolas", assunto="Aviso", mensagem="Para $ESCOLA_DESTINO"))
+    assert r["total"] == 4                                                        # 4 e-mails: Ana (2), São José e o CMEI
+
+
+def test_teste_por_aluno_monta_o_texto_com_o_primeiro_aluno_real(chegando, smtp):
+    r = av.executar_avisos(**_args(**TRANSF, modo="teste"))
+    assert r["enviados_teste"] == 1 and smtp[0]["para"] == EMAIL_FICTICIA
+    assert smtp[0]["assunto"] == "[TESTE] Transferência de ANA LIMA"
+    assert f"para {NOME_FICTICIA}." in smtp[0]["corpo"] and "CGM 1000000001" in smtp[0]["corpo"]
+
+
+def test_teste_por_aluno_sem_nenhum_aluno_ainda_envia_com_a_escola_ficticia(amb, smtp):
+    r = av.executar_avisos(**_args(**TRANSF, modo="teste"))
+    assert r["enviados_teste"] == 1 and "$ALUNO" in smtp[0]["assunto"]             # sem aluno real, o marcador fica à vista
+
+
+def _previsao(amb, cadastros, turmas):
+    (paths.dados_ano_atual() / "previsao_alunos_2027.json").write_text(
+        json.dumps({"cadastros": cadastros, "turmas_intencao": turmas}), encoding="utf-8")
+
+
+def test_pais_podem_vir_da_previsao_do_proximo_ano(amb):
+    _previsao(amb, {"211": {"nome_responsavel": "PAULA NOVA", "email": "paula@x.com"},
+                    "111": {"nome_responsavel": "MARIA LIMA", "email": "mae@x.com"}},
+              {"Infantil V": [{"cpf": "211", "nome": "NINA NOVA", "situacao": "Matriculado"},
+                              {"cpf": "111", "nome": "ANA LIMA", "situacao": "Matriculado"}]})   # ANA já está na pré-matrícula
+    ano = av.destinatarios_pais("matriculados", "ano")
+    proximo = av.destinatarios_pais("matriculados", "proximo")
+    ambas = av.destinatarios_pais("matriculados", "ambas")
+    assert sorted(d["email"] for d in proximo["destinatarios"]) == ["mae@x.com", "paula@x.com"]
+    assert len(ano["destinatarios"]) == 3 and proximo["alunos"] == 2
+    emails = {d["email"]: d["contexto"] for d in ambas["destinatarios"]}
+    assert set(emails) == {"mae@x.com", "edu@x.com", "gigi@x.com", "paula@x.com"}
+    assert emails["mae@x.com"]["ALUNO"] == "ANA LIMA e BETO LIMA"                   # ANA não repete: mesmo CPF nos dois arquivos
+    assert ambas["alunos"] == 7                                                      # 6 da pré-matrícula + NINA (ANA não conta 2 vezes)
+
+
+def test_fonte_sem_o_arquivo_pede_a_automacao(amb):
+    with pytest.raises(ValueError, match="previsao_alunos_2027.json"):
+        av.destinatarios_pais("matriculados", "proximo")
+    assert len(av.destinatarios_pais("matriculados", "ambas")["destinatarios"]) == 3   # com "ambas", basta um existir
+    (paths.dados_ano_atual() / "pre_matricula.json").unlink()
+    with pytest.raises(ValueError, match="pre_matricula.json"):
+        av.destinatarios_pais("matriculados", "ano")
+
+
+def test_arquivo_ilegivel_nunca_e_ignorado_com_ambas(amb):
+    (paths.dados_ano_atual() / "pre_matricula.json").write_text("{ quebrado", encoding="utf-8")
+    _previsao(amb, {}, {})
+    with pytest.raises(ValueError):
+        av.destinatarios_pais("matriculados", "ambas")
+
+
+# ───────────── envio real ─────────────
+
+@pytest.fixture()
+def sem_espera(monkeypatch):
+    """Troca a pausa entre e-mails (senão cada teste esperaria segundos) e anota quantas pausas houve."""
+    pausas = []
+    monkeypatch.setattr(av, "_esperar", lambda s: pausas.append(s))
+    return pausas
+
+
+def _simular_e_enviar(**kw):
+    av.executar_avisos(**_args(**TRANSF, **{k: v for k, v in kw.items() if k in ("unidades",)}))
+    return av.executar_avisos(**_args(**TRANSF, modo="enviar", **kw))
+
+
+def test_envio_real_depois_da_simulacao_envia_com_pausa_e_registra(chegando, smtp, sem_espera):
+    r = _simular_e_enviar(intervalo_s=7)
+    assert r["enviados"] == 2 and r["falhas"] == 0 and r["ja_enviados"] == 0 and r["restantes"] == 0 and r["modo"] == "enviar"
+    assert [e["para"] for e in smtp] == ["ana@pg.gov.br", "sj@pg.gov.br"]
+    assert not any(e["assunto"].startswith("[TESTE]") for e in smtp) and "TESTE" not in smtp[0]["corpo"]
+    assert smtp[0]["assunto"] == "Transferência de ANA LIMA"
+    assert sem_espera == [7]                                                       # uma pausa entre os 2 (não depois do último)
+    registro = json.loads(Path(r["registro"]).read_text(encoding="utf-8"))
+    assert r["registro"].endswith("_escolas_enviar.json") and registro["estado"] == "concluído"
+    assert [e["aluno"] for e in registro["enviados"]] == ["ANA LIMA", "BETO LIMA"] and registro["falhas"] == []
+    enviados = json.loads((paths.dados_ano_atual() / "AVISOS" / "enviados.json").read_text(encoding="utf-8"))["envios"]
+    assert len(enviados) == 2 and {v["para"] for v in enviados.values()} == {"ana@pg.gov.br", "sj@pg.gov.br"}
+
+
+def test_envio_real_exige_simulacao_do_mesmo_comunicado(chegando, smtp, sem_espera):
+    av.executar_avisos(**_args(**TRANSF))                                          # simulou
+    with pytest.raises(ValueError, match="simule de novo"):
+        av.executar_avisos(**_args(**{**TRANSF, "mensagem": TRANSF["mensagem"] + " Obrigado."}, modo="enviar"))
+    with pytest.raises(ValueError, match="rode o modo .Simular."):
+        av.executar_avisos(**_args(**TRANSF, modo="enviar", unidades=["Escola Municipal Ana Néri"]))   # outra lista de destinatários
+    assert smtp == []
+
+
+def test_simulacao_velha_demais_nao_vale(chegando, smtp, sem_espera):
+    av.executar_avisos(**_args(**TRANSF))
+    arq = paths.dados_ano_atual() / "AVISOS" / "previas.json"
+    dados = json.loads(arq.read_text(encoding="utf-8"))
+    dados["previas"] = {h: (datetime.now() - timedelta(hours=25)).isoformat() for h in dados["previas"]}
+    arq.write_text(json.dumps(dados), encoding="utf-8")
+    with pytest.raises(ValueError, match="rode o modo .Simular."):
+        av.executar_avisos(**_args(**TRANSF, modo="enviar"))
+    assert smtp == []
+
+
+def test_rodar_de_novo_nao_manda_outra_vez_para_quem_ja_recebeu(chegando, smtp, sem_espera):
+    _simular_e_enviar()
+    smtp.clear()
+    r = av.executar_avisos(**_args(**TRANSF, modo="enviar"))                       # a prévia de 24 h ainda vale
+    assert smtp == [] and r["enviados"] == 0 and r["ja_enviados"] == 2
+
+
+def test_limite_por_execucao_e_continua_na_proxima(chegando, smtp, sem_espera):
+    av.executar_avisos(**_args(**TRANSF))
+    r1 = av.executar_avisos(**_args(**TRANSF, modo="enviar", limite_lote=1))
+    assert r1["enviados"] == 1 and r1["restantes"] == 1 and [e["para"] for e in smtp] == ["ana@pg.gov.br"]
+    r2 = av.executar_avisos(**_args(**TRANSF, modo="enviar", limite_lote=1))
+    assert r2["enviados"] == 1 and r2["ja_enviados"] == 1 and r2["restantes"] == 0
+    assert [e["para"] for e in smtp] == ["ana@pg.gov.br", "sj@pg.gov.br"]          # ninguém recebeu 2 vezes
+
+
+def test_tres_falhas_seguidas_param_o_envio_sem_marcar_como_enviado(chegando, monkeypatch, sem_espera):
+    av.executar_avisos(**_args(publico="escolas", assunto="Aviso", mensagem="Para $ESCOLA_DESTINO"))
+    tentativas = []
+    monkeypatch.setattr("src.automacao.envia_email.enviar_email",
+                        lambda *a, **k: (tentativas.append(a[0]) or (False, "autenticação recusada")))
+    with pytest.raises(RuntimeError, match="3 falhas seguidas.*autenticação recusada"):
+        av.executar_avisos(**_args(publico="escolas", assunto="Aviso", mensagem="Para $ESCOLA_DESTINO", modo="enviar"))
+    assert len(tentativas) == 3                                                     # parou, não insistiu nos 4 destinos
+    pasta = paths.dados_ano_atual() / "AVISOS"
+    assert not (pasta / "enviados.json").exists()
+    registro = json.loads(next(pasta.glob("*_escolas_enviar.json")).read_text(encoding="utf-8"))
+    assert registro["estado"] == "interrompido por falhas" and len(registro["falhas"]) == 3 and registro["enviados"] == []
+
+
+def test_uma_falha_isolada_nao_derruba_os_outros(chegando, monkeypatch, sem_espera):
+    av.executar_avisos(**_args(**TRANSF))
+    enviados = []
+
+    def envio(destino, assunto, corpo, **kw):
+        if destino == "ana@pg.gov.br":
+            return False, "caixa cheia"
+        enviados.append(destino)
+        return True, None
+    monkeypatch.setattr("src.automacao.envia_email.enviar_email", envio)
+    r = av.executar_avisos(**_args(**TRANSF, modo="enviar"))
+    assert r["enviados"] == 1 and r["falhas"] == 1 and enviados == ["sj@pg.gov.br"]
+    registro = json.loads(Path(r["registro"]).read_text(encoding="utf-8"))
+    assert registro["falhas"][0]["erro"] == "caixa cheia" and registro["estado"] == "concluído"
+    # a falha NÃO entra no registro de enviados: na próxima execução ela é tentada de novo
+    enviados.clear()
+    monkeypatch.setattr("src.automacao.envia_email.enviar_email", lambda d, a, c, **k: (enviados.append(d) or (True, None)))
+    r2 = av.executar_avisos(**_args(**TRANSF, modo="enviar"))
+    assert enviados == ["ana@pg.gov.br"] and r2["ja_enviados"] == 1
+
+
+def test_cancelar_no_meio_guarda_o_que_ja_saiu(chegando, smtp, monkeypatch):
+    av.executar_avisos(**_args(**TRANSF))
+    chamadas = {"n": 0}
+
+    class Cancelado(Exception):
+        pass
+
+    def verificar():
+        chamadas["n"] += 1
+        if len(smtp) >= 1:                                   # cancelou logo depois do 1º e-mail
+            raise Cancelado()
+    monkeypatch.setattr(av, "verificar_cancelamento", verificar)
+    monkeypatch.setattr(av, "_esperar", lambda s: verificar())
+    with pytest.raises(Cancelado):
+        av.executar_avisos(**_args(**TRANSF, modo="enviar"))
+    assert [e["para"] for e in smtp] == ["ana@pg.gov.br"]
+    pasta = paths.dados_ano_atual() / "AVISOS"
+    assert len(json.loads((pasta / "enviados.json").read_text(encoding="utf-8"))["envios"]) == 1
+    registro = json.loads(next(pasta.glob("*_escolas_enviar.json")).read_text(encoding="utf-8"))
+    assert registro["estado"] == "interrompido" and len(registro["enviados"]) == 1 and len(registro["restantes"]) == 1
+    monkeypatch.undo()                                       # voltar a rodar continua só com quem faltou
+
+
+# ───────────── tela: prévia com a lista de quem fica de fora, confirmação, rotas e modelos ─────────────
+
+def test_previa_do_texto_de_transferencia_mostra_escolas_de_origem_e_quem_fica_de_fora(web, chegando):
+    d = web.post("/web/api/automacoes/avisos/previa", json={"publico": "escolas", **{k: TRANSF[k] for k in ("assunto", "mensagem")}}).get_json()["texto"]
+    assert d.startswith("2 e-mail(s) para escolas de origem, um por aluno que chega (de 6 aluno(s) novo(s))")
+    assert "sem e-mail ficariam de fora 1: Escola Municipal Sem Email (aluno EDU DIAS)" in d
+    assert "1 aluno(s) com vínculo a verificar" in d and "1 aluno(s) com escola de origem fora da lista: GIGI NUNES" in d
+
+
+def test_previa_avisa_aluno_sem_vinculo_da_base_abc(web, amb):
+    r = web.post("/web/api/automacoes/avisos/previa", json={"publico": "escolas", "assunto": "A", "mensagem": "$ALUNO"})
+    assert r.status_code == 400 and "6 sem o vínculo da Base ABC" in r.get_json()["erro"]
+
+
+def test_previa_do_envio_real_bloqueia_sem_simulacao_e_libera_depois(web, chegando, smtp, sem_espera):
+    pedido = {"publico": "escolas", "modo": "enviar", **{k: TRANSF[k] for k in ("assunto", "mensagem")}, "limite_lote": "1"}
+    r = web.post("/web/api/automacoes/avisos/previa", json=pedido)
+    assert r.status_code == 400 and "rode o modo" in r.get_json()["erro"]
+    av.executar_avisos(**_args(**TRANSF))                                              # simula
+    d = web.post("/web/api/automacoes/avisos/previa", json=pedido).get_json()["texto"]
+    assert "ENVIO REAL: 1 e-mail(s) nesta execução" in d
+    av.executar_avisos(**_args(**TRANSF, modo="enviar", limite_lote=1))                 # manda 1
+    d = web.post("/web/api/automacoes/avisos/previa", json=pedido).get_json()["texto"]
+    assert "(1 já enviado(s) antes não repetem)" in d
+
+
+def test_validar_extras_do_envio_real_exige_a_simulacao(chegando):
+    s = reg.obter("avisos")
+    p = {"publico": "escolas", "modo": "enviar", **{k: TRANSF[k] for k in ("assunto", "mensagem")}}
+    with pytest.raises(ValueError, match="rode o modo"):
+        s.validar_extras(p)
+    av.executar_avisos(**_args(**TRANSF))
+    s.validar_extras(p)                                                                 # agora passa
+
+
+def test_envio_real_pede_confirmacao_so_no_modo_enviar(web):
+    info = web.get("/web/api/automacoes/avisos/componentes").get_json()
+    assert info["confirmar"] is False and info["confirmar_quando"] == {"campo": "modo", "valor": "enviar"}
+    assert "ENVIA e-mails de verdade" in info["aviso_confirmacao"]
+    outra = web.get("/web/api/automacoes/turmas/componentes").get_json()
+    assert outra.get("confirmar_quando") is None
+
+
+def test_plano_leva_unidades_fonte_pausa_limite_e_tipo_de_mensagem(amb):
+    p = {"publico": "escolas", "assunto": "A", "mensagem": "B", "modo": "enviar", "unidades": '["@cmeis"]', "fonte": "ambas",
+         "intervalo_s": "20", "limite_lote": "25", "tipo_mensagem": "transferencia"}
+    k = reg.obter("avisos").planejar(Opcoes(), p, {}, {}).kwargs
+    assert (k["unidades"], k["fonte"], k["intervalo_s"], k["limite_lote"], k["modelo"]) == ('["@cmeis"]', "ambas", "20", "25", "transferencia")
+    assert av.validar_pedido(**{x: k[x] for x in k if x != "modelo"})["intervalo_s"] == 20
+
+
+def test_tela_tem_o_tipo_de_mensagem_com_os_modelos_e_sem_os_campos_removidos(amb):
+    extras = {e["nome"]: e for e in reg.obter("avisos").extras()}
+    tipo = extras["tipo_mensagem"]
+    assert [o["valor"] for o in tipo["opcoes"]][:2] == ["livre", "transferencia"] and tipo["padrao"] == "livre"
+    transf = next(o for o in tipo["opcoes"] if o["valor"] == "transferencia")
+    assert transf["publico"] == "escolas" and "$ALUNO" in transf["assunto"] and "$CGM" in transf["mensagem"] and "$SERIE" in transf["mensagem"]
+    assert "SME" in transf["mensagem"] and "histórico escolar" in transf["mensagem"] and "SERE" in transf["mensagem"]
+    assert extras["assunto"].get("placeholder") is None                                 # sem o exemplo no campo
+    assert extras["unidades"]["tipo"] == "unidades" and [g["valor"] for g in extras["unidades"]["grupos"]] == ["@todas", "@escolas", "@cmeis"]
+    assert extras["fonte"]["padrao"] == "ambas" and {o["valor"] for o in extras["fonte"]["opcoes"]} == {"ano", "proximo", "ambas"}
+    assert extras["intervalo_s"]["visivelSe"] == {"campo": "campo-modo-aviso", "valor": "enviar"} == extras["limite_lote"]["visivelSe"]
+
+
+def test_rota_de_unidades(web, amb):
+    r = web.get("/web/api/avisos/unidades").get_json()
+    assert PROPRIA not in [u["nome"] for u in r["unidades"]] and r["unidades"][0]["nome"] == "CMEI Pequeno Príncipe"
+    (paths.dados_ano_atual() / "escolas_completas.json").unlink()
+    r = web.get("/web/api/avisos/unidades").get_json()
+    assert r["unidades"] == [] and "Coleta e-mails" in r["aviso"]
+
+
+@pytest.fixture()
+def modelos(monkeypatch, tmp_path):
+    monkeypatch.setattr(paths, "CONFIG_DIR", tmp_path / "config")
+    return tmp_path / "config" / "modelos_avisos.json"
+
+
+def test_rotas_de_modelos_criar_ajustar_restaurar_excluir(web, amb, modelos):
+    ids = lambda r: [m["id"] for m in r["modelos"]]
+    assert ids(web.get("/web/api/avisos/modelos").get_json()) == ["livre", "transferencia"]
+    r = web.post("/web/api/avisos/modelos", json={"nome": "Documentos pendentes", "publico": "pais",
+                                                 "assunto": "Documentos de $ALUNO", "mensagem": "Olá $RESPONSAVEL, faltam documentos de $ALUNO."})
+    assert r.status_code == 200 and r.get_json()["modelo"]["id"] == "documentos-pendentes"
+    assert ids(r.get_json()) == ["livre", "transferencia", "documentos-pendentes"]
+    # ajustar um pronto: a versão ajustada vale no lugar da original
+    r = web.post("/web/api/avisos/modelos", json={"id": "transferencia", "nome": "Transferência de aluno (pedir à escola de origem)",
+                                                 "publico": "escolas", "assunto": "Transferência $ALUNO", "mensagem": "Ajustado: $ALUNO $CGM"})
+    assert r.get_json()["modelo"]["personalizado"] is True and r.get_json()["modelo"]["padrao"] is True
+    assert next(o for o in reg.obter("avisos").extras() if o["nome"] == "tipo_mensagem")["opcoes"][1]["mensagem"] == "Ajustado: $ALUNO $CGM"
+    r = web.delete("/web/api/avisos/modelos/transferencia")
+    assert r.get_json()["acao"] == "restaurado" and "SME" in next(m for m in r.get_json()["modelos"] if m["id"] == "transferencia")["mensagem"]
+    assert web.delete("/web/api/avisos/modelos/transferencia").status_code == 400            # pronto sem ajuste: nada a excluir
+    r = web.delete("/web/api/avisos/modelos/documentos-pendentes")
+    assert r.get_json()["acao"] == "excluido" and ids(r.get_json()) == ["livre", "transferencia"]
+    assert web.delete("/web/api/avisos/modelos/nao-existe").status_code == 400
+
+
+@pytest.mark.parametrize("corpo,trecho", [
+    ({"nome": "", "assunto": "A", "mensagem": "B"}, "Dê um nome"),
+    ({"nome": "X", "assunto": "A", "mensagem": ""}, "Escreva a mensagem"),
+    ({"nome": "X", "assunto": "A\nB", "mensagem": "B"}, "uma linha só"),
+    ({"nome": "X", "assunto": "A", "mensagem": "Olá $NOME"}, "marcador"),
+    ({"nome": "X", "publico": "pais", "assunto": "A", "mensagem": "$CGM"}, "marcador"),       # $CGM só existe para escolas
+    ({"nome": "X", "publico": "todos", "assunto": "A", "mensagem": "B"}, "Público do modelo"),
+    ({"nome": "Mensagem livre (escrever na hora)", "assunto": "A", "mensagem": "B"}, "Já existe um modelo"),
+    ({"id": "nao-existe", "nome": "X", "assunto": "A", "mensagem": "B"}, "não encontrado"),
+])
+def test_modelo_invalido_e_recusado_com_mensagem_pronta(web, amb, modelos, corpo, trecho):
+    r = web.post("/web/api/avisos/modelos", json=corpo)
+    assert r.status_code == 400 and trecho in r.get_json()["erro"]
+    assert not modelos.exists()                                                                # nada foi gravado
+
+
+def test_modelo_sem_publico_aceita_marcadores_dos_dois(web, amb, modelos):
+    r = web.post("/web/api/avisos/modelos", json={"nome": "Geral", "publico": "", "assunto": "$ESCOLA", "mensagem": "$ALUNO $CGM $RESPONSAVEL"})
+    assert r.status_code == 200
+
+
+def test_modelo_com_html_no_nome_nao_vira_html_na_tela(web, amb, modelos):
+    web.post("/web/api/avisos/modelos", json={"nome": "<img src=x onerror=alert(1)>", "assunto": "A", "mensagem": "B"})
+    tipo = next(e for e in reg.obter("avisos").extras() if e["nome"] == "tipo_mensagem")
+    texto = tipo["opcoes"][-1]["texto"]
+    assert "<img" not in texto and "&lt;img" in texto
+
+
+def test_arquivo_de_modelos_quebrado_vira_erro_e_nao_e_apagado(web, amb, modelos):
+    modelos.parent.mkdir(parents=True)
+    modelos.write_text("{ quebrado", encoding="utf-8")
+    assert web.get("/web/api/avisos/modelos").status_code == 400
+    assert web.post("/web/api/avisos/modelos", json={"nome": "X", "assunto": "A", "mensagem": "B"}).status_code == 400
+    assert modelos.read_text(encoding="utf-8") == "{ quebrado"

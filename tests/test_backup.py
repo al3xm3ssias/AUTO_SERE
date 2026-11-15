@@ -42,6 +42,7 @@ def raiz(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "CONFIG_DIR", tmp_path / "config")
     monkeypatch.setattr(paths, "dados_ano_atual", lambda: ano)
     monkeypatch.setattr(paths, "ano_atual", lambda: 2026)
+    monkeypatch.delenv("AUTO_SERE_BACKUP_AUTO", raising=False)      # o conftest desliga o backup automático; aqui ele é testado
     return tmp_path
 
 
@@ -214,3 +215,73 @@ def test_tela_de_automacoes_executa_o_backup(raiz):
     texto = "\n".join(st["logs"])
     assert "Backup criado e conferido" in texto and "dados_ano: 3 arquivo(s)" in texto
     assert len(list((raiz / "dados" / "backup").glob("backup_*.zip"))) == 1
+
+
+# ───────────── backup automático ao fim das coletas (item 3b) ─────────────
+
+def _motivos():
+    return sorted(backup._manifesto_leve(p).get("motivo") for p in paths.DADOS_BACKUP_DIR.glob(backup.PADRAO_NOME))
+
+
+def test_backup_apos_coleta_cria_zip_conferido_com_o_motivo(raiz):
+    msgs = []
+    arquivo = backup.backup_apos_coleta("turmas", msgs.append)
+    assert arquivo is not None and arquivo.exists()
+    assert backup.verificar_backup(arquivo)                                     # integridade conferida
+    assert _motivos() == ["automático (após a coleta de turmas)"]
+    assert any("Backup automático criado" in m for m in msgs)
+
+
+def test_backup_apos_coleta_nunca_derruba_a_coleta(raiz, monkeypatch):
+    def quebra(*a, **k):
+        raise OSError("disco cheio")
+    monkeypatch.setattr(backup, "criar_backup", quebra)
+    msgs = []
+    assert backup.backup_apos_coleta("alunos", msgs.append) is None            # sem exceção
+    assert any("disco cheio" in m for m in msgs)
+
+
+def test_backup_apos_coleta_sem_dados_nao_faz_nada_nem_avisa(raiz, monkeypatch):
+    for f in (paths.dados_ano_atual()).glob("*"):
+        if f.is_file():
+            f.unlink()
+    monkeypatch.setattr(paths, "CONFIG_DIR", raiz / "vazia")
+    monkeypatch.setattr(paths, "DADOS_DIR", raiz / "dados_vazio")
+    monkeypatch.setattr(paths, "DADOS_BACKUP_DIR", raiz / "dados_vazio" / "backup")
+    monkeypatch.setattr(paths, "dados_ano_atual", lambda: raiz / "dados_vazio" / "2026")
+    msgs = []
+    assert backup.backup_apos_coleta("turmas", msgs.append) is None and msgs == []
+
+
+@pytest.mark.parametrize("valor", ["0", "nao", "false", "OFF"])
+def test_backup_automatico_pode_ser_desligado(raiz, monkeypatch, valor):
+    monkeypatch.setenv("AUTO_SERE_BACKUP_AUTO", valor)
+    assert backup.backup_apos_coleta("turmas") is None
+    assert _motivos() == []
+
+
+def test_coletas_seguidas_substituem_o_automatico_anterior_e_nunca_o_manual(raiz):
+    backup.criar_backup(motivo="manual")
+    backup.backup_apos_coleta("turmas", lambda *_: None)
+    backup.backup_apos_coleta("alunos", lambda *_: None)                         # menos de 30 min depois: troca o de turmas
+    assert _motivos() == ["automático (após a coleta de alunos)", "manual"]
+
+
+def test_automatico_antigo_nao_e_trocado(raiz):
+    velho = backup.backup_apos_coleta("turmas", lambda *_: None)
+    velho.rename(velho.with_name("backup_2026-01-01_000000.zip"))                # de meses atrás
+    backup.backup_apos_coleta("alunos", lambda *_: None)
+    assert _motivos() == ["automático (após a coleta de alunos)", "automático (após a coleta de turmas)"]
+
+
+def test_automaticos_tem_retencao_propria_e_nao_empurram_os_manuais(raiz, monkeypatch):
+    monkeypatch.setenv("AUTO_SERE_BACKUP_MANTER_AUTO", "2")
+    monkeypatch.setenv("AUTO_SERE_BACKUP_MANTER", "3")
+    for _ in range(3):
+        backup.criar_backup(motivo="manual")
+    for i in range(5):
+        backup.criar_backup(motivo=f"automático (após a coleta de teste {i})")
+    motivos = _motivos()
+    assert motivos.count("manual") == 3                                          # os manuais ficaram, mesmo com 5 automáticos
+    assert sum(m.startswith("automático") for m in motivos) == 2                 # e só os 2 automáticos mais recentes
+    assert "automático (após a coleta de teste 4)" in motivos and "automático (após a coleta de teste 0)" not in motivos

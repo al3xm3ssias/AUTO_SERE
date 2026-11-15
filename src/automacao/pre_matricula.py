@@ -895,6 +895,9 @@ SUFIXO_CADASTRO = "0"
 CAMPOS_CADASTRO = {
     "data_nascimento": ("dDataNasc{s}",),
     "sexo": ("dSexo{s}",),
+    # Nome da mãe do aluno (filiação). ⚠️ Os ids abaixo são tentativas: NÃO foram vistos no portal real. Se nenhum existir,
+    # o campo fica "" (não custa tempo: _texto_se_existe confere com count()) e a Base ABC busca só por nome + nascimento.
+    "nome_mae": ("dNomeMae{s}", "dMae{s}", "dNomeMaeAluno{s}", "dFiliacao1{s}", "dFiliacao{s}"),
     "nome_responsavel": ("dNomeResponsavel{s}",),
     "cpf_responsavel": ("dCPFResponsavel{s}",),
     "telefone": ("dTelefoneResponsavel{s}",),
@@ -946,7 +949,7 @@ async def extrair_dados_cadastro(page, sufixo=SUFIXO_CADASTRO):
 # Campos gravados em MAIÚSCULA (nome, endereço e demais textos livres). Não entram:
 # e-mail (minúscula), data de nascimento, números, telefones, CPF e CEP (formato do portal).
 _CAMPOS_MAIUSCULA = (
-    "nome_aluno", "nome_responsavel", "endereco",
+    "nome_aluno", "nome_mae", "nome_responsavel", "endereco",
     "sexo", "logradouro", "complemento", "bairro", "municipio", "uf",
 )
 
@@ -986,6 +989,7 @@ async def _ler_cadastro_da_pagina(page, cpf):
         "nome_aluno": nome_aluno,
         "data_nascimento": campos["data_nascimento"],
         "sexo": campos["sexo"],
+        "nome_mae": campos["nome_mae"],
         "nome_responsavel": campos["nome_responsavel"],
         "cpf_responsavel": campos["cpf_responsavel"],
         "telefone": campos["telefone"],

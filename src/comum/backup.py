@@ -30,6 +30,12 @@ USO
   python -m src.comum.backup --restaurar ARQ.zip --aplicar --so-dados
                                                   repõe só os dados do ano, inclusive o calendário dele (não mexe em config)
 
+BACKUP AUTOMÁTICO (item 3b): ao fim de cada coleta (turmas, alunos, funcionários) o sistema cria um backup de motivo
+"automático (após a coleta de ...)". Ele nunca derruba a coleta (erro vira aviso) e tem retenção PRÓPRIA — os 7 mais
+recentes (AUTO_SERE_BACKUP_MANTER_AUTO) —, para as coletas diárias não empurrarem para fora os backups manuais e os de
+"antes de restaurar", que seguem com os 10 do limite normal. Coletas seguidas (menos de 30 min) substituem o backup
+automático anterior, que ficaria incompleto. AUTO_SERE_BACKUP_AUTO=0 desliga.
+
 ANOS (24/10/2026): cada backup é de UM ano (o manifesto guarda `ano`) e a restauração repõe os dados na pasta
 desse ano — nunca por cima do ano em uso, se forem diferentes. Cópia de segurança antes de restaurar também é
 do ano que será sobrescrito. A retenção (10 mais recentes) vale por ano, para um backup de 2025 não ser
@@ -56,6 +62,9 @@ IGNORAR_PASTAS = {"DIGITALIZAÇÃO", "screenshots", "backup", "feriados_cache", 
 MANIFESTO = "MANIFESTO.json"
 PADRAO_NOME = "backup_*.zip"
 MANTER_PADRAO = 10
+MANTER_AUTOMATICOS_PADRAO = 7
+JANELA_SUBSTITUICAO_MIN = 30
+PREFIXO_MOTIVO_AUTOMATICO = "automático"
 
 
 class BackupInvalidoError(Exception):
@@ -208,18 +217,32 @@ def _ano_do_backup(arquivo: Path) -> str | None:
     return str(ano) if ano not in (None, "") else None
 
 
+def _manter_automaticos_configurado() -> int:
+    try:
+        return max(1, int(os.environ.get("AUTO_SERE_BACKUP_MANTER_AUTO", MANTER_AUTOMATICOS_PADRAO)))
+    except ValueError:
+        return MANTER_AUTOMATICOS_PADRAO
+
+
+def _eh_automatico(arquivo: Path) -> bool:
+    """Backup criado sozinho ao fim de uma coleta (motivo do manifesto começa com \"automático\")."""
+    return str(_manifesto_leve(arquivo).get("motivo") or "").startswith(PREFIXO_MOTIVO_AUTOMATICO)
+
+
 def limpar_antigos(manter: int | None = None, preservar: Path | None = None) -> list[Path]:
     """
     Apaga os backup_*.zip mais antigos, mantendo os `manter` mais recentes DE CADA ANO (um backup de 2025 não é
     apagado por backups novos de 2026). Mexe só nesses arquivos. `preservar` (o recém-criado) nunca é apagado.
     """
-    manter = _manter_configurado(manter)
-    grupos: dict[str | None, list[Path]] = {}
+    manter_manuais = _manter_configurado(manter)
+    manter_auto = _manter_automaticos_configurado()
+    grupos: dict[tuple, list[Path]] = {}
     for p in sorted(paths.DADOS_BACKUP_DIR.glob(PADRAO_NOME), key=_ordem):
-        grupos.setdefault(_ano_do_backup(p), []).append(p)
+        grupos.setdefault((_ano_do_backup(p), _eh_automatico(p)), []).append(p)
     removidos = []
-    for lista in grupos.values():
-        excedentes = lista[:-manter] if len(lista) > manter else []
+    for (_, automatico), lista in grupos.items():
+        limite = manter_auto if automatico else manter_manuais
+        excedentes = lista[:-limite] if len(lista) > limite else []
         removidos += [p for p in excedentes if p != preservar]
     for p in removidos:
         p.unlink()
@@ -378,6 +401,37 @@ def restaurar_backup(arquivo, aplicar: bool = False, so_dados: bool = False) -> 
 
 def _tamanho_legivel(n: int) -> str:
     return f"{n / 1024:.0f} KB" if n < 1024 * 1024 else f"{n / 1024 / 1024:.1f} MB"
+
+
+def backup_apos_coleta(coleta: str, log=print) -> Path | None:
+    """
+    Backup automático ao fim de uma coleta bem-sucedida (`coleta`: \"turmas\", \"alunos\", \"funcionários\"...).
+    NUNCA levanta erro: a coleta já terminou e seus dados estão salvos; se o backup falhar vira só um aviso.
+    Devolve o caminho do zip, ou None se desligado (AUTO_SERE_BACKUP_AUTO=0), sem dados ou com falha.
+    Backups automáticos do mesmo ano criados nos últimos JANELA_SUBSTITUICAO_MIN minutos são substituídos pelo novo.
+    """
+    if str(os.environ.get("AUTO_SERE_BACKUP_AUTO", "1")).strip().lower() in {"0", "nao", "não", "false", "off"}:
+        return None
+    try:
+        novo = criar_backup(motivo=f"{PREFIXO_MOTIVO_AUTOMATICO} (após a coleta de {coleta})")
+        ano = _ano_do_backup(novo)
+        limite = datetime.now() - timedelta(minutes=JANELA_SUBSTITUICAO_MIN)
+        for p in paths.DADOS_BACKUP_DIR.glob(PADRAO_NOME):
+            if p == novo or _ano_do_backup(p) != ano or not _eh_automatico(p):
+                continue
+            try:
+                feito_em = datetime.strptime(_ordem(p)[0], "%Y-%m-%d_%H%M%S")
+            except ValueError:
+                continue
+            if feito_em >= limite:
+                p.unlink()                                       # o novo tem tudo o que este tinha, e mais
+        log(f"💾 Backup automático criado: {novo.name} ({_tamanho_legivel(novo.stat().st_size)})")
+        return novo
+    except BackupVazioError:
+        return None
+    except Exception as exc:                                     # noqa: BLE001 — backup nunca derruba a coleta
+        log(f"⚠️  Não foi possível fazer o backup automático: {exc}")
+        return None
 
 
 def executar_backup() -> Path:

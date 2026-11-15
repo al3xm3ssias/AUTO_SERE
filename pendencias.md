@@ -45,14 +45,19 @@ Quase tudo foi testado só com navegador ou dados simulados.
 ## 2. Funcionalidades pendentes
 
 ### `avisos` (e-mail)
-Uso real, definido em 2026-11-02: (1) escrever **para a escola de origem**, na hora da transferência, pedindo a documentação de aluno que está vindo; (2) avisar os **responsáveis de alunos que estão saindo**. Hoje só existem os públicos "todas as escolas/CMEIs" (em massa) e "pais da pré-matrícula", que não cobrem nenhum dos dois.
+Uso real, definido em 2026-11-02 e **revisado em 2026-11-14**: comunicar **só quem está chegando** (pré-matrícula do ano letivo e previsão do próximo). Não se avisa responsável de aluno que está saindo. A tela é "Mandar avisos".
 
-- [ ] Público **escola de origem**: um e-mail por aluno que chega, para uma escola escolhida, com nome, CGM e série do aluno e a lista de documentos pedida
-- [!] Decidir de onde vem a escola de origem: o sistema não tem esse dado (digitar na hora, escolher na lista de `escolas_completas.json` ou campo no cadastro)
-- [ ] Público **responsáveis de quem sai**: destinatários de `transferidos.json` / fila de transferidos, com o e-mail do responsável do cadastro
-- [ ] E-mail de escola escrito de forma disfarçada (ex.: "nome [arroba] dominio") não é reconhecido: reconhecer as variações comuns e mostrar "sem e-mail" na tela, não só no log
-- [ ] Responsável sem e-mail: hoje só vai para o log; para quem sai, mostrar na tela e oferecer outro caminho (WhatsApp ou aviso impresso)
-- [ ] Liberar o **envio real** (hoje recusado de propósito): confirmação com prévia, intervalo entre e-mails, limite por lote, envio em segundo plano com pausa/cancelamento, registro de quem recebeu e de quem falhou
+- [x] Público **escola de origem** (2026-11-14): texto com `$ALUNO`, `$CGM`, `$SERIE` ou `$TURMA` vira **um e-mail por aluno que chega**, para a escola de origem dele. Tipo de mensagem **"Transferência de aluno"** já vem pronto (pede liberação da transferência no SERE, parecer via SME e histórico escolar na pasta do aluno). ⚠️ Rode a "Consulta na Base ABC" antes: sem o vínculo o aluno fica de fora (e aparece na lista "sem vínculo")
+- [x] De onde vem a escola de origem (2026-11-14): do `vinculo_base_abc` gravado na pré-matrícula/previsão pela Consulta na Base ABC; casada com `escolas_completas.json` pelo nome (se houver mais de uma parecida, não adivinha: vai para "origem fora da lista"). ⚠️ Só municipais têm e-mail na lista; escola particular/estadual fica de fora. Se a escola tem mais de um e-mail, vai o primeiro
+- [x] Fonte dos alunos novos (2026-11-14): pré-matrícula do ano, previsão do próximo ano ou as duas
+- [x] **Mostrar "sem e-mail" na tela** (2026-11-14): a prévia da tela nomeia quem ficaria de fora e por quê (sem e-mail, sem vínculo, a verificar, origem fora da lista)
+- [x] **Envio real liberado** (2026-11-14), só depois de **Simular** o mesmo comunicado (vale 24 h); confirmação antes de enviar; pausa configurável entre e-mails; máximo por execução; quem já recebeu não recebe de novo (`AVISOS/enviados.json`), então cancelar e rodar de novo continua de onde parou; registro regravado a cada e-mail (enviados, falhas com o erro, faltantes); 3 falhas seguidas param o envio. ⚠️ **Nunca foi testado com Gmail de verdade nesta mescla**: faça primeiro um envio real para um aluno só (marque só uma unidade e "Máximo: 10")
+- [x] Tela (2026-11-14): "Quais unidades" virou lista pesquisável com marcação; saíram "Só unidades cujo nome contém", o exemplo do Assunto e "E-mail de teste"; "Tipo de mensagem" carrega assunto e mensagem e dá para **salvar, ajustar e excluir modelos** (`config/modelos_avisos.json`)
+- [~] Público **responsáveis de quem sai**: descartado pelo usuário (2026-11-14)
+- [ ] E-mail de escola escrito de forma disfarçada (ex.: "nome [arroba] dominio"): hoje a escola cujo e-mail está assim aparece como "sem e-mail". Baixa prioridade; falta saber se existem casos reais na lista coletada
+- [ ] Responsável sem e-mail (pais que chegam): aparece na prévia; falta oferecer outro caminho (WhatsApp ou aviso impresso)
+- [ ] Mensagem em HTML (hoje só texto puro) e anexos
+- [ ] Botão para ver o registro de quem já recebeu (`AVISOS/enviados.json`) na própria tela
 - [ ] Outros canais: WhatsApp e SERE
 - [ ] Confirmar se o público em massa "todas as escolas/CMEIs" ainda é útil
 
@@ -60,10 +65,10 @@ Uso real, definido em 2026-11-02: (1) escrever **para a escola de origem**, na h
 - [ ] **7b**: fila de envio com intervalo e limite diário, pausa/cancelamento, histórico e modelos de mensagem
 
 ### Backup
-- [ ] **3b**: backup automático ao fim das coletas (turmas, alunos, funcionários)
+- [x] **3b** (2026-11-14): backup automático ao fim das coletas de turmas, alunos (`alunos.py` e `alunos_completo.py`) e funcionários (`servidores.py`, `funcionarios.py`), por `backup.backup_apos_coleta()`. Motivo "automático (após a coleta de …)"; **retenção própria** de 7 (`AUTO_SERE_BACKUP_MANTER_AUTO`), para as coletas diárias não empurrarem os manuais e os de "antes de restaurar" (10 de cada ano); coletas seguidas (< 30 min) trocam o automático anterior; nunca derruba a coleta (erro vira aviso no log); `AUTO_SERE_BACKUP_AUTO=0` desliga. Testes em `tests/test_backup.py`. ⚠️ Falta decidir se vale um botão em Configurações para ligar/desligar (hoje só por variável de ambiente)
 
 ### Funcionários
-- [ ] Modo completo: retomar de onde parou (hoje salva aos poucos e avisa se parar no meio, mas rodar de novo refaz todos)
+- [x] Modo completo: **retoma de onde parou** (2026-11-14). Cada cadastro coletado leva `coletado_em`; se a última coleta completa foi interrompida há menos de 3 dias (`funcionarios_completo_progresso.json` com `completa: false`), a nova rodada só consulta quem faltou e mantém o `iniciado_em` original. Caixa **"Recomeçar do zero"** na tela de Funcionários força todos de novo; interrupção antiga demais ou coleta que terminou não é retomada; quem saiu da lista não fica no arquivo. Testes em `tests/test_funcionarios_completo_parcial.py`
 - [!] Decidir se os termos de ciência pulam quem tem `na_escola = false`
 
 ### Transferidos
@@ -85,10 +90,10 @@ Adaptação do script antigo `consulta_transferidos_ano_anterior.py`: automaçã
 - [!] Rode primeiro com "Mostrar o navegador" e o modo de teste (só o 1º aluno)
 - [ ] **Vínculo CGM + aluno + turma de origem (2026-11-12)**: além de `buscas_base.json`, o vínculo é gravado em `vinculo_base_abc` dentro de `pre_matricula.json` (regra do ano vigente: Matriculado/Transferido) e de `previsao_alunos_<ano+1>.json` (regra da pré-matrícula: + Desistente/Reprovado), em `cadastros[cpf]` ou, para quem só está na fila, no item de `turmas_intencao`. A Base ABC passou a ler os DOIS arquivos. Campos: periodo, ano_referencia, nome, cgm, turma (origem), escola, situacao, status ("ok"|"verificar"), motivo, consultado_em. Fora da regra, sem linha do ano, duas matrículas em curso ou sem CGM: grava e marca "verificar". `pre_matricula.py` preserva `vinculo_base_abc` ao recoletar. Base do módulo "Previsão <ano+1>" (feito em 2026-11-13, ver abaixo). ⚠️ Validar no SERE real os textos de "Resultado" (Desistente/Reprovado/Aprovado) em `SITUACOES_VINCULO`.
 - [x] **Previsão do próximo ano (2026-11-13)**: o arquivo da coleta do alvo "proximo" passou de `pre_matricula_<ano+1>.json` para `previsao_alunos_<ano+1>.json` (o `pre_matricula.json` do ano em uso não muda). Um `pre_matricula_<ano+1>.json` já gravado é **renomeado sozinho** na primeira leitura (`os.replace`, conteúdo intacto; se os dois existirem, vale o novo e o antigo fica para conferência). Novo módulo **Previsão <ano+1>** (menu lateral, `previsao.html` + `previsao.js`, rota `GET /web/api/previsao`, regra em `src/comum/previsao.py`): lista os **rematriculados** (`rematriculas_sucesso.json`) + os **alunos novos da pré-matrícula** (matriculados e pendentes; cancelados, cadastro refeito em outra escola e tentativas substituídas ficam de fora). Quem está nas duas fontes conta uma vez, como rematriculado (CGM ou nome + nascimento). Testes em `tests/test_previsao.py`. ⚠️ Falta validar com dados reais do SERE/pré-matrícula; a turma exibida é a de origem (rematriculado) ou a pretendida (novo): o sistema **não calcula** a turma de destino do rematriculado.
-- [x] **Lista da pré-matrícula** (2026-11-08): campo "Incluir alunos da pré-matrícula" (matriculados, aguardando, os dois ou todos) lê `pre_matricula.json` e soma ao que foi digitado. ⚠️ A pré-matrícula **não tem data de nascimento nem nome da mãe**: a busca é por nome (+ o responsável só desempata homônimos, quando é a mãe no cadastro da Base ABC). `conferido_por` diz o quanto cada aluno foi confirmado; confira à mão os "só o nome"
-- [ ] Decidir se a coleta da pré-matrícula (`pre_matricula.py`, etapa 2) passa a guardar data de nascimento e nome da mãe, quando o portal mostrar: aí a busca por ela fica tão forte quanto a digitada
+- [x] **Lista da pré-matrícula** (2026-11-08): campo "Incluir alunos da pré-matrícula" (matriculados, aguardando, os dois ou todos) lê `pre_matricula.json` e soma ao que foi digitado. ⚠️ Cadastro da pré-matrícula coletado **antes de 2026-11-14** não tem o nome da mãe (e o de antes da Previsão pode não ter a data): a busca é por nome (+ o responsável só desempata homônimos, quando é a mãe no cadastro da Base ABC). Recoletar a etapa 2 traz a data e, se o portal mostrar, a mãe. `conferido_por` diz o quanto cada aluno foi confirmado; confira à mão os "só o nome"
+- [x] **Decidido (2026-11-14): a coleta da pré-matrícula guarda data de nascimento e nome da mãe.** A data já era coletada (`dDataNasc0`); agora também o `nome_mae` (`CAMPOS_CADASTRO`, ids `dNomeMae{s}`, `dMae{s}`, `dNomeMaeAluno{s}`, `dFiliacao1{s}`, `dFiliacao{s}`) e a Base ABC o usa na busca (`Consulta.mae`). ⚠️ **Os ids da mãe são tentativas: não foram vistos no portal real.** Se nenhum existir o campo fica vazio, sem custo de tempo, e a busca segue só por nome + nascimento. Mande o HTML do modal do cadastro para fixar o id certo. Cadastros já coletados não têm a mãe até a próxima coleta da etapa 2
 - [ ] `escolas` traz **todas** as linhas do histórico (a janela de 3 anos do script antigo saiu). Decidir se volta a limitar
-- [ ] Decidir se `buscas_base.json` alimenta algo (escola de origem do `avisos`, ficha do transferido). Hoje só é gravado
+- [x] **`buscas_base.json` agora alimenta os cadastros (2026-11-14)**: (1) novo público **transferidos** (`transferidos.json`, só quem saiu e não voltou, busca pelo CGM): o vínculo (escola/situação do histórico) é gravado no registro dele em `vinculo_base_abc`, como já era feito na pré-matrícula; (2) caixa **"Tirar do buscas_base.json quem já foi vinculado"** (ligada por padrão): depois de gravar o vínculo no cadastro de origem, o registro sai de `buscas_base.json`, que fica só com o que não está em outro lugar (digitados e vínculos que não puderam ser gravados; nada é podado se a gravação falhou). ⚠️ Validar no SERE real o vínculo dos transferidos (a regra é a do ano vigente: Matriculado/Transferido). Falta usar `vinculo_base_abc` do transferido na ficha/tela de Transferidos e como escola de destino no `avisos`
 
 ---
 
@@ -131,6 +136,6 @@ Adaptação do script antigo `consulta_transferidos_ano_anterior.py`: automaçã
 2. Limpar as duplicatas (seção 3), conferindo antes qual cópia é a usada
 3. Execução real com um aluno no SERE (transferidos e coletas); fechar os `[!]`
 4. Confirmar BUG-PRE-001 quando o site da pré-matrícula voltar
-5. Decidir a origem da escola de origem e criar os dois públicos novos do `avisos`
+5. Testar o `avisos` com Gmail de verdade (um aluno só) e conferir o vínculo da Base ABC dos alunos que chegam
 6. Lock de execução (11q)
-7. Só então liberar o envio real do `avisos` e a fila do WhatsApp
+7. Só então a fila do WhatsApp

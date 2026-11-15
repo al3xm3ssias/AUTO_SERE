@@ -151,3 +151,73 @@ def test_a_lista_de_funcionarios_traz_o_aviso_so_quando_a_coleta_ficou_incomplet
 
     sv.gravar_progresso(True, 8, 8, [], "2026-11-02 09:00:00")
     assert c.get("/web/api/funcionarios/lista").get_json()["coleta_completo"] is None          # terminou: some o aviso
+
+
+# ───────────── retomada: continuar de onde a última coleta completa parou ─────────────
+
+def _interromper_na(n, monkeypatch, vistos):
+    async def consultar(page, cpf):
+        if len(vistos) == n:
+            raise RuntimeError("caiu a conexão")
+        vistos.append(cpf)
+        return {"cpf": cpf, "nome_completo": f"Cadastro {cpf}"}
+    monkeypatch.setattr(sv, "consultar_cpf", consultar)
+
+
+def test_retoma_sem_consultar_de_novo_quem_ja_foi_coletado(ctx, monkeypatch):
+    primeira = []
+    _interromper_na(4, monkeypatch, primeira)
+    with pytest.raises(RuntimeError):
+        asyncio.run(sv.coletar_completo(PaginaFalsa(), _lista(7)))
+    assert len(primeira) == 4
+    estado = _ler(ctx / "funcionarios_completo_progresso.json")
+    assert estado["completa"] is False and estado["coletados"] == 4
+
+    segunda = []
+    monkeypatch.setattr(sv, "consultar_cpf", _consulta_ok(segunda))
+    r = asyncio.run(sv.coletar_completo(PaginaFalsa(), _lista(7)))
+    assert segunda == [f"{i:011d}" for i in (5, 6, 7)]                           # só quem faltou
+    assert sorted(x["cpf"] for x in r) == [f"{i:011d}" for i in range(1, 8)]      # e o resultado tem os 7
+    assert _ler(ctx / "funcionarios_completo_progresso.json")["iniciado_em"] == estado["iniciado_em"]
+
+
+def test_recomecar_consulta_todos_de_novo(ctx, monkeypatch):
+    _interromper_na(3, monkeypatch, [])
+    with pytest.raises(RuntimeError):
+        asyncio.run(sv.coletar_completo(PaginaFalsa(), _lista(5)))
+    vistos = []
+    monkeypatch.setattr(sv, "consultar_cpf", _consulta_ok(vistos))
+    asyncio.run(sv.coletar_completo(PaginaFalsa(), _lista(5), recomecar=True))
+    assert len(vistos) == 5
+
+
+def test_coleta_que_terminou_nao_e_retomada(ctx, monkeypatch):
+    monkeypatch.setattr(sv, "consultar_cpf", _consulta_ok())
+    asyncio.run(sv.coletar_completo(PaginaFalsa(), _lista(4)))
+    sv.gravar_progresso(True, 4, 4, [], "2026-11-14 10:00:00")                    # como coletar_servidores faz ao terminar
+    vistos = []
+    monkeypatch.setattr(sv, "consultar_cpf", _consulta_ok(vistos))
+    asyncio.run(sv.coletar_completo(PaginaFalsa(), _lista(4)))
+    assert len(vistos) == 4
+
+
+def test_interrupcao_antiga_demais_nao_e_retomada(ctx, monkeypatch):
+    _interromper_na(2, monkeypatch, [])
+    with pytest.raises(RuntimeError):
+        asyncio.run(sv.coletar_completo(PaginaFalsa(), _lista(4)))
+    estado = _ler(ctx / "funcionarios_completo_progresso.json")
+    estado["iniciado_em"] = "2020-01-01 08:00:00"
+    (ctx / "funcionarios_completo_progresso.json").write_text(json.dumps(estado), encoding="utf-8")
+    vistos = []
+    monkeypatch.setattr(sv, "consultar_cpf", _consulta_ok(vistos))
+    asyncio.run(sv.coletar_completo(PaginaFalsa(), _lista(4)))
+    assert len(vistos) == 4
+
+
+def test_funcionario_que_saiu_da_lista_nao_fica_na_retomada(ctx, monkeypatch):
+    _interromper_na(3, monkeypatch, [])
+    with pytest.raises(RuntimeError):
+        asyncio.run(sv.coletar_completo(PaginaFalsa(), _lista(5)))
+    monkeypatch.setattr(sv, "consultar_cpf", _consulta_ok())
+    r = asyncio.run(sv.coletar_completo(PaginaFalsa(), _lista(5)[1:]))             # o nº 1 saiu da escola
+    assert "00000000001" not in {x["cpf"] for x in r} and len(r) == 4

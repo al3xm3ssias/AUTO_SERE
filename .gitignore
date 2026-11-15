@@ -62,3 +62,7 @@ dados/**/ORIGINAIS_ANTES_DA_COMPRESSAO/
 # Arquivos compactados
 *.zip
 
+
+# teste da tela no jsdom (npm install jsdom em tests/js)
+tests/js/node_modules/
+tests/js/dados.json

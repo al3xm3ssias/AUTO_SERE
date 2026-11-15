@@ -45,6 +45,8 @@ class Script:
     cgm_obrigatorio: bool = False              # com o recurso CGM: True = exige CGMs; False = opcional (em branco vale turma/situação)
     confirmar: bool = False                    # pede confirmação com a prévia antes de executar (altera algo no SERE)
     aviso_confirmacao: str = ""
+    # (campo, valor): pede a confirmação só quando esse campo da tela tem esse valor (ex.: ("modo", "enviar")); None = usa `confirmar`
+    confirmar_quando: Optional[tuple[str, str]] = None
     ajuda_teste: str = AJUDA_TESTE_PADRAO
     ajuda_debug: str = ""
     extras: Callable[[], list[dict]] = lambda: []              # campos próprios do script (já com as opções resolvidas)
@@ -426,6 +428,10 @@ def _extras_funcionarios() -> list[dict]:
          "descricao": "Refaz a lista de funcionários antes do cadastro completo, para pegar quem entrou ou saiu desde a "
                       "última coleta. Sem isso, o modo completo reaproveita a lista já salva.",
          "visivelSe": {"campo": "campo-modo-func", "valor": "completo"}},
+        {"tipo": "caixa", "id": "campo-recomecar-func", "nome": "recomecar", "label": "Recomeçar do zero",
+         "descricao": "Se a última coleta completa foi interrompida há menos de 3 dias, o sistema continua de onde ela parou e só "
+                      "consulta quem faltou. Marque para consultar todos os funcionários de novo.",
+         "visivelSe": {"campo": "campo-modo-func", "valor": "completo"}},
     ]
 
 
@@ -435,7 +441,8 @@ def _plano_funcionarios(o, p, tj, ctx) -> Plano:
         raise ValueError(f"Modo '{modo}' desconhecido: use 'basico' ou 'completo'.")
     from src.automacao.servidores import coletar_funcionarios_automacao
     return Plano("coroutine", coletar_funcionarios_automacao,
-                 {"modo": modo, "atualizar_lista": bool(p.get("atualizar_lista", False))})
+                 {"modo": modo, "atualizar_lista": bool(p.get("atualizar_lista", False)),
+                  "recomecar": bool(p.get("recomecar", False))})
 
 
 _OPCOES_MODO_VINCULOS = [
@@ -874,6 +881,10 @@ def _consultas_base_abc(p: dict) -> list:
             raise ValueError("A pré-matrícula não tem nenhum aluno com essa situação (e nome com sobrenome) para consultar.")
         vistas = {c.chave for c in consultas}
         consultas += [c for c in da_pre if c.chave not in vistas]
+    if p.get("transferidos"):
+        dos_transferidos = cb.consultas_dos_transferidos_arquivo()
+        vistas = {c.chave for c in consultas}
+        consultas += [c for c in dos_transferidos if c.chave not in vistas]
     if consultas:
         return consultas
     arquivo = paths.dados_ano_atual() / f"transferidos-{int(paths.ano_atual()) - 1}.json"
@@ -900,9 +911,17 @@ def _extras_base_abc() -> list[dict]:
                     {"valor": "pendentes", "texto": "Aguardando vaga"},
                     {"valor": "matriculados_e_pendentes", "texto": "Matriculados e aguardando"},
                     {"valor": "todos", "texto": "Todos (inclui cancelados)"}]},
+        {"tipo": "caixa", "id": "campo-transferidos-abc", "nome": "transferidos", "label": "Incluir os transferidos (transferidos.json)",
+         "descricao": "Consulta pelo CGM quem saiu da escola e ainda não voltou, e grava no registro dele para onde foi "
+                      "(\"vinculo_base_abc\" em transferidos.json). Precisa da coleta de turmas feita antes."},
+        {"tipo": "caixa", "id": "campo-limpar-vinculados-abc", "nome": "limpar_vinculados", "padrao": True,
+         "label": "Tirar do buscas_base.json quem já foi vinculado",
+         "descricao": "Depois de gravar o vínculo no cadastro da pré-matrícula ou dos transferidos, o registro sai de "
+                      "buscas_base.json, que fica só com o que não está em outro lugar (digitados e vínculos que não puderam ser gravados)."},
         {"tipo": "caixa", "id": "campo-mostrar-navegador-abc", "nome": "mostrar_navegador", "label": "Mostrar o navegador",
          "descricao": "Abre a janela do SERE enquanto trabalha. Útil na primeira vez, para conferir a busca. A pré-matrícula "
-                      "não tem data de nascimento nem mãe: a busca por ela é mais fraca (veja \"conferido_por\" no resultado)."},
+                      "traz a data de nascimento do aluno (e o nome da mãe, quando o portal mostrar): quanto mais dados, mais forte a busca "
+                      "(veja \"conferido_por\" no resultado)."},
     ]
 
 
@@ -915,7 +934,8 @@ def _plano_base_abc(o, p, tj, ctx) -> Plano:
     consultas = _consultas_base_abc(p)
     return Plano("coroutine", consultar_base_abc_via_login,
                  {"consultas": consultas[:1] if o.modo_teste else consultas, "modo_teste": o.modo_teste,
-                  "mostrar_navegador": bool(p.get("mostrar_navegador", False))},
+                  "mostrar_navegador": bool(p.get("mostrar_navegador", False)),
+                  "limpar_vinculados": bool(p.get("limpar_vinculados", True))},
                  f"[OPÇÕES] {1 if o.modo_teste else len(consultas)} aluno(s) na Base ABC")
 
 
@@ -923,16 +943,26 @@ def _args_avisos(p: dict) -> dict:
     return {"publico": p.get("publico"), "canal": p.get("canal") or "email", "modo": p.get("modo") or "simular",
             "assunto": p.get("assunto"), "mensagem": p.get("mensagem"),
             "tipo_escola": p.get("tipo_escola") or "todas", "filtro_nome": p.get("filtro_nome") or "",
-            "situacao_pais": p.get("situacao_pais") or "matriculados", "email_teste": p.get("email_teste") or ""}
+            "situacao_pais": p.get("situacao_pais") or "matriculados", "email_teste": p.get("email_teste") or "",
+            "unidades": p.get("unidades") or None, "fonte": p.get("fonte") or "ano",
+            "intervalo_s": p.get("intervalo_s") or 10, "limite_lote": p.get("limite_lote") or 50}
 
 
 def _extras_avisos() -> list[dict]:
+    import html
     from src.automacao import avisos as av
+    from src.comum import modelos_avisos as ma
     so = lambda campo, valor: {"campo": campo, "valor": valor}
     marcadores = {
-        "escolas": "Marcadores no assunto e na mensagem: " + ", ".join("$" + m for m in av.marcadores_validos("escolas")),
+        "escolas": "Marcadores no assunto e na mensagem: " + ", ".join("$" + m for m in av.marcadores_validos("escolas"))
+                   + ". Com $ALUNO, $CGM, $SERIE ou $TURMA o e-mail vai para a escola de ORIGEM de cada aluno que chega.",
         "pais": "Marcadores no assunto e na mensagem: " + ", ".join("$" + m for m in av.marcadores_validos("pais")),
     }
+    nomes_publico = {"escolas": "escolas", "pais": "pais", "": "qualquer público"}
+    modelos = [{"valor": m["id"], "texto": html.escape(m["nome"] + (" (ajustado)" if m["padrao"] and m["personalizado"] else "")),
+                "ajuda": f"Para {nomes_publico[m['publico']]}. O assunto e a mensagem abaixo podem ser editados antes de executar.",
+                "assunto": m["assunto"], "mensagem": m["mensagem"], "publico": m["publico"],
+                "nome": m["nome"], "padrao": m["padrao"], "personalizado": m["personalizado"]} for m in ma.listar()]
     return [
         {"tipo": "select", "id": "campo-publico", "nome": "publico", "label": "Para quem",
          "opcoes": [{"valor": k, "texto": v, "ajuda": marcadores[k]} for k, v in av.PUBLICOS.items()]},
@@ -941,52 +971,93 @@ def _extras_avisos() -> list[dict]:
         {"tipo": "select", "id": "campo-modo-aviso", "nome": "modo", "label": "Modo", "semVazio": True, "padrao": "simular",
          "opcoes": [
              {"valor": "simular", "texto": av.MODOS["simular"],
-              "ajuda": "Lista quem receberia e mostra a prévia da mensagem. Não envia nada."},
+              "ajuda": "Lista quem receberia, mostra a prévia da mensagem e libera o envio real deste mesmo comunicado por "
+                       f"{av.VALIDADE_PREVIA_HORAS} horas. Não envia nada."},
              {"valor": "teste", "texto": av.MODOS["teste"],
               "ajuda": "Envia UM e-mail de verdade, só para o e-mail de teste. Para escolas, vai para a escola fictícia "
-                       "ESCOLA MUNICIPAL TESTE DA SILVA. Os destinatários reais não recebem nada."}]},
-        {"tipo": "select", "id": "campo-tipo-escola", "nome": "tipo_escola", "label": "Quais unidades", "semVazio": True,
-         "padrao": "todas", "opcoes": [{"valor": k, "texto": v} for k, v in av.TIPOS_ESCOLA.items()],
+                       "ESCOLA MUNICIPAL TESTE DA SILVA. Os destinatários reais não recebem nada."},
+             {"valor": "enviar", "texto": av.MODOS["enviar"],
+              "ajuda": "ENVIA os e-mails aos destinatários reais, um a um, com pausa entre eles. Só funciona depois de Simular "
+                       "o mesmo texto e os mesmos destinatários. Quem já recebeu não recebe de novo; dá para cancelar e continuar depois."}]},
+        {"tipo": "unidades", "id": "campo-unidades", "nome": "unidades", "label": "Quais unidades",
+         "grupos": [{"valor": k, "texto": v} for k, v in av.GRUPOS_UNIDADES.items()],
+         "ajuda": "Pesquise e marque uma ou mais. Nenhuma marcada = todas. No texto de transferência, só as escolas de origem marcadas recebem.",
          "visivelSe": so("campo-publico", "escolas")},
-        {"tipo": "texto", "id": "campo-filtro-nome", "nome": "filtro_nome", "label": "Só unidades cujo nome contém (opcional)",
-         "placeholder": "ex.: Rural", "visivelSe": so("campo-publico", "escolas")},
         {"tipo": "select", "id": "campo-situacao-pais", "nome": "situacao_pais", "label": "Quais alunos novos",
          "semVazio": True, "padrao": "matriculados", "opcoes": [{"valor": k, "texto": v} for k, v in av.SITUACOES_PAIS.items()],
-         "visivelSe": so("campo-publico", "pais")},
-        {"tipo": "texto", "id": "campo-assunto", "nome": "assunto", "label": "Assunto",
-         "placeholder": "ex.: Comunicado oficial - $ESCOLA"},
+         "visivelSe": so("campo-publico", "pais|escolas")},
+        {"tipo": "select", "id": "campo-fonte-alunos", "nome": "fonte", "label": "De onde vêm os alunos novos",
+         "semVazio": True, "padrao": "ambas", "opcoes": [
+             {"valor": k, "texto": v, "ajuda": ajuda} for (k, v), ajuda in zip(av.FONTES_ALUNOS.items(), (
+                 "Só quem está na pré-matrícula deste ano letivo (pre_matricula.json).",
+                 "Só a previsão do próximo ano letivo (previsao_alunos_<ano+1>.json).",
+                 "Os dois arquivos; o aluno que está nos dois conta uma vez."))],
+         "visivelSe": so("campo-publico", "pais|escolas")},
+        {"tipo": "select", "id": "campo-tipo-mensagem", "nome": "tipo_mensagem", "label": "Tipo de mensagem", "semVazio": True,
+         "padrao": "livre", "opcoes": modelos},
+        {"tipo": "modelo_acoes", "id": "campo-modelo-acoes", "nome": "modelo_acoes"},
+        {"tipo": "texto", "id": "campo-assunto", "nome": "assunto", "label": "Assunto"},
         {"tipo": "texto", "multilinha": True, "id": "campo-mensagem", "nome": "mensagem", "label": "Mensagem",
-         "placeholder": "Escreva o comunicado. Use os marcadores acima para personalizar."},
-        {"tipo": "texto", "id": "campo-email-teste", "nome": "email_teste", "label": "E-mail de teste (opcional)",
-         "placeholder": "em branco: escolas → a escola fictícia; pais → o e-mail do remetente",
-         "visivelSe": so("campo-modo-aviso", "teste")},
+         "placeholder": "Escreva o comunicado ou escolha um tipo de mensagem acima. Use os marcadores para personalizar."},
+        {"tipo": "select", "id": "campo-intervalo", "nome": "intervalo_s", "label": "Pausa entre os e-mails", "semVazio": True,
+         "padrao": "10", "opcoes": [{"valor": str(n), "texto": f"{n} segundos"} for n in (5, 10, 20, 30, 60)],
+         "visivelSe": so("campo-modo-aviso", "enviar")},
+        {"tipo": "select", "id": "campo-limite-lote", "nome": "limite_lote", "label": "Máximo de e-mails por execução",
+         "semVazio": True, "padrao": "50", "opcoes": [{"valor": str(n), "texto": f"{n} e-mails"} for n in (10, 25, 50, 100, 200)],
+         "visivelSe": so("campo-modo-aviso", "enviar")},
     ]
 
 
+def _resumo_lista(nomes: list[str], limite: int = 3) -> str:
+    mostrados = "; ".join(nomes[:limite])
+    return mostrados + (f"; … (+{len(nomes) - limite})" if len(nomes) > limite else "")
+
+
 def _previa_avisos(p: dict) -> str:
-    """Quantos destinatários o comunicado alcançaria com as escolhas atuais (não exige o texto pronto)."""
+    """Quantos destinatários o comunicado alcançaria com as escolhas atuais (não exige o texto pronto) e quem ficaria de fora."""
     from src.automacao import avisos as av
     if p.get("publico") not in av.PUBLICOS:
         return ""
-    if av.teste_com_escola_ficticia(p["publico"], p.get("modo") or "simular"):
+    modo = p.get("modo") or "simular"
+    unidades, fonte = p.get("unidades") or None, p.get("fonte") or "ano"
+    texto_do_pedido = f"{p.get('assunto') or ''} {p.get('mensagem') or ''}"
+    por_aluno = p["publico"] == "escolas" and bool(av._marcadores_de_aluno(texto_do_pedido))
+    filtros = (p.get("tipo_escola") or "todas", p.get("filtro_nome") or "", p.get("situacao_pais") or "matriculados", unidades, fonte, por_aluno)
+    if av.teste_com_escola_ficticia(p["publico"], modo):
         email = (p.get("email_teste") or "").strip() or av.ESCOLA_TESTE["email"]
         texto = f"Teste: 1 e-mail para a escola fictícia {av.ESCOLA_TESTE['nome']} <{email}>"
         try:
-            n = len(av.reunir_destinatarios("escolas", p.get("tipo_escola") or "todas", p.get("filtro_nome") or "")["destinatarios"])
-            texto += f" (o comunicado real iria para {n} e-mail(s) de escolas e CMEIs)"
+            n = len(av.reunir_destinatarios("escolas", *filtros)["destinatarios"])
+            texto += f" (o comunicado real iria para {n} e-mail(s) " + ("de escolas de origem" if por_aluno else "de escolas e CMEIs") + ")"
         except ValueError:
             pass                                # sem a lista real o teste funciona do mesmo jeito
         return texto + "."
-    r = av.reunir_destinatarios(p["publico"], p.get("tipo_escola") or "todas", p.get("filtro_nome") or "",
-                                p.get("situacao_pais") or "matriculados")
+    r = av.reunir_destinatarios(p["publico"], *filtros)
     n = len(r["destinatarios"])
     if p["publico"] == "pais":
         texto = f"{n} responsável(is) por e-mail, de {r['alunos']} aluno(s) novo(s)"
+    elif por_aluno:
+        texto = f"{n} e-mail(s) para escolas de origem, um por aluno que chega (de {r['alunos']} aluno(s) novo(s))"
     else:
         texto = f"{n} e-mail(s) de escolas e CMEIs"
     if r["sem_email"]:
-        texto += f"; {len(r['sem_email'])} sem e-mail válido ficariam de fora"
-    return texto + ". O envio real ainda não está liberado: use Simular ou Teste."
+        texto += f"; sem e-mail ficariam de fora {len(r['sem_email'])}: {_resumo_lista(r['sem_email'])}"
+    for chave, rotulo in (("sem_vinculo", "sem o vínculo da Base ABC (rode a Consulta na Base ABC)"),
+                          ("a_verificar", "com vínculo a verificar"), ("origem_desconhecida", "com escola de origem fora da lista")):
+        if r.get(chave):
+            texto += f"; {len(r[chave])} aluno(s) {rotulo}: {_resumo_lista(r[chave])}"
+    if modo == "enviar":
+        if (p.get("assunto") or "").strip() and (p.get("mensagem") or "").strip():
+            mensagens = av.montar_mensagens(r["destinatarios"], p["assunto"].strip(), p["mensagem"].strip(), por_aluno)
+            av.conferir_previa(mensagens)       # ValueError: sem simulação do mesmo comunicado, a tela nem deixa executar
+            enviados = av.carregar_enviados()
+            ja = sum(1 for m in mensagens if m["chave"] in enviados)
+            lote = int(p.get("limite_lote") or av.LOTE_PADRAO)
+            texto += (f". ENVIO REAL: {min(len(mensagens) - ja, lote)} e-mail(s) nesta execução"
+                      + (f" ({ja} já enviado(s) antes não repetem)" if ja else "") + ".")
+        else:
+            texto += ". Envio real: preencha o assunto e a mensagem (e simule antes)."
+    return texto + ("" if modo == "enviar" else ".")
 
 
 def _validar_avisos(p: dict) -> None:
@@ -994,13 +1065,16 @@ def _validar_avisos(p: dict) -> None:
     a = av.validar_pedido(**_args_avisos(p))
     if av.teste_com_escola_ficticia(a["publico"], a["modo"]):
         return                                  # o teste com a escola fictícia não depende da lista real
-    av.reunir_destinatarios(a["publico"], a["tipo_escola"], a["filtro_nome"], a["situacao_pais"])
+    r = av.reunir_destinatarios(a["publico"], a["tipo_escola"], a["filtro_nome"], a["situacao_pais"], a["unidades"], a["fonte"], a["por_aluno"])
+    if a["modo"] == "enviar":
+        av.conferir_previa(av.montar_mensagens(r["destinatarios"], a["assunto"], a["mensagem"], a["por_aluno"]))
 
 
 def _plano_avisos(o, p, tj, ctx) -> Plano:
     from src.automacao import avisos as av
     a = _args_avisos(p)
-    return Plano("sync", av.executar_avisos, a, f"[AVISOS] público={a['publico']} | canal={a['canal']} | modo={a['modo']}")
+    return Plano("sync", av.executar_avisos, {**a, "modelo": p.get("tipo_mensagem") or ""},
+                 f"[AVISOS] público={a['publico']} | canal={a['canal']} | modo={a['modo']}")
 
 
 _T, _S, _C, _TE, _E, _D = RECURSO_TURMA, RECURSO_SITUACAO, RECURSO_CGM, RECURSO_TESTE, RECURSO_ERROS, RECURSO_DEBUG
@@ -1118,7 +1192,9 @@ registrar(Script("base_abc", (_TE,), _plano_base_abc, validar_extras=_validar_ba
                  ajuda_teste="Consulta só o primeiro aluno da lista, para você conferir a busca antes de consultar todos."))
 
 registrar(Script("avisos", (), _plano_avisos, validar_extras=_validar_avisos, extras=_extras_avisos,
-                 previa=_previa_avisos))
+                 previa=_previa_avisos, confirmar_quando=("modo", "enviar"),
+                 aviso_confirmacao="Isto ENVIA e-mails de verdade aos destinatários. Depois de enviado não dá para desfazer. "
+                                   "Confira a prévia acima: quantos e-mails saem e para quem."))
 
 # ── coletas e relatórios (sem opções compartilhadas, ou só as próprias) ──
 registrar(Script("turmas", (), _plano_turmas))

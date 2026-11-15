@@ -50,17 +50,18 @@ def test_aparece_na_lista_logo_depois_de_turmas_e_alunos(ctx):
 def test_registrada_com_os_campos(ctx):
     s = reg.obter("funcionarios")
     assert s is not None and s.recursos == () and s.confirmar is False
-    modo, atualizar = s.extras()
+    modo, atualizar, recomecar = s.extras()
     assert modo["nome"] == "modo" and modo["padrao"] == "completo" and modo["semVazio"] is True
     assert [o["valor"] for o in modo["opcoes"]] == ["completo", "basico"]
     assert atualizar["nome"] == "atualizar_lista" and atualizar["visivelSe"] == {"campo": "campo-modo-func", "valor": "completo"}
+    assert recomecar["nome"] == "recomecar" and recomecar["visivelSe"] == atualizar["visivelSe"] and not recomecar.get("padrao")
 
 
 def test_plano_padrao_e_modos(ctx):
     s = reg.obter("funcionarios")
     plano = s.planejar(Opcoes(), {}, {}, {})
     assert plano.tipo == "coroutine" and plano.funcao is sv.coletar_funcionarios_automacao
-    assert plano.kwargs == {"modo": "completo", "atualizar_lista": False}
+    assert plano.kwargs == {"modo": "completo", "atualizar_lista": False, "recomecar": False}
     plano = s.planejar(Opcoes(), {"modo": " BASICO "}, {}, {})
     assert plano.kwargs["modo"] == "basico"
     assert s.planejar(Opcoes(), {"modo": "completo", "atualizar_lista": True}, {}, {}).kwargs["atualizar_lista"] is True

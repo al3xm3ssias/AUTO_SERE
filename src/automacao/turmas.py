@@ -349,6 +349,8 @@ async def coletar_turmas_e_alunos_via_login(output_file: Path = TURMAS_JSON) -> 
         await browser.close()
         log.info("Browser fechado. Script encerrado com sucesso.")
 
+    from src.comum import backup as _backup
+    _backup.backup_apos_coleta("turmas", log.info)
     return resultado
 
 

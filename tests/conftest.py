@@ -36,3 +36,10 @@ def _preservar_modulos_que_fixam_o_ano():
             sys.modules[nome] = modulo
             if modulo_pai is not None:
                 setattr(modulo_pai, filho, modulo)
+
+
+# O backup automático ao fim das coletas (backup.backup_apos_coleta) gravaria zips na pasta de dados de verdade se os
+# testes de coleta (com navegador de mentira) o deixassem ligado. Fica desligado em todos os testes; test_backup liga.
+@pytest.fixture(autouse=True)
+def _sem_backup_automatico(monkeypatch):
+    monkeypatch.setenv("AUTO_SERE_BACKUP_AUTO", "0")

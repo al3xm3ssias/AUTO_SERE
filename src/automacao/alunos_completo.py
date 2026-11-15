@@ -840,6 +840,8 @@ async def coletar_cadastro_completo_via_login(modo_rapido: bool = False) -> dict
         await browser.close()
 
     log.info("=== Script encerrado com sucesso ===")
+    from src.comum import backup as _backup
+    _backup.backup_apos_coleta("alunos", log.info)
     return resultado
 
 

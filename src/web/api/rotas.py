@@ -1437,6 +1437,64 @@ def _executar_registrado(script, chave: str, payload: dict, turmas_json: dict) -
     _executar_plano(chave, plano)
 
 
+# ── Mandar avisos: lista de unidades (select pesquisável) e modelos de mensagem ──
+
+@api_bp.route("/avisos/unidades")
+def avisos_unidades():
+    """Escolas e CMEIs da lista coletada, para o campo \"Quais unidades\". Sem a lista, devolve o aviso (a tela mostra)."""
+    from src.automacao import avisos as _avisos
+    try:
+        return jsonify({"unidades": _avisos.listar_unidades()})
+    except ValueError as exc:
+        return jsonify({"unidades": [], "aviso": str(exc)})
+
+
+def _modelos_resposta(**extra):
+    from src.comum import modelos_avisos as _modelos
+    return jsonify({"modelos": _modelos.listar(), **extra})
+
+
+@api_bp.route("/avisos/modelos")
+def avisos_modelos():
+    try:
+        return _modelos_resposta()
+    except ValueError as exc:
+        return jsonify({"erro": str(exc)}), 400
+
+
+@api_bp.route("/avisos/modelos", methods=["POST"])
+def avisos_modelo_salvar():
+    """Cria um modelo de mensagem (sem `id`) ou ajusta um existente (com `id`; um pronto ajustado vale no lugar do original)."""
+    from src.automacao import avisos as _avisos
+    from src.comum import modelos_avisos as _modelos
+    d = request.get_json(silent=True) or {}
+    try:
+        publico = str(d.get("publico") or "")
+        if publico not in _modelos.PUBLICOS_DO_MODELO:       # antes dos marcadores, que dependem do público
+            raise ValueError("Público do modelo inválido: use escolas, pais ou deixe em branco.")
+        _avisos.conferir_marcadores(str(d.get("assunto") or ""), publico, "Assunto")
+        _avisos.conferir_marcadores(str(d.get("mensagem") or ""), publico, "Mensagem")
+        modelo = _modelos.salvar(d.get("nome"), publico, d.get("assunto"), d.get("mensagem"), d.get("id") or None)
+        return _modelos_resposta(modelo=modelo)
+    except ValueError as exc:
+        return jsonify({"erro": str(exc)}), 400
+    except OSError as exc:
+        return jsonify({"erro": f"Não foi possível gravar o modelo: {exc}"}), 500
+
+
+@api_bp.route("/avisos/modelos/<string:id_modelo>", methods=["DELETE"])
+def avisos_modelo_excluir(id_modelo):
+    """Exclui um modelo criado pelo usuário; num pronto ajustado, volta o texto original."""
+    from src.comum import modelos_avisos as _modelos
+    try:
+        acao = _modelos.excluir(id_modelo)
+        return _modelos_resposta(acao=acao)
+    except ValueError as exc:
+        return jsonify({"erro": str(exc)}), 400
+    except OSError as exc:
+        return jsonify({"erro": f"Não foi possível gravar a alteração: {exc}"}), 500
+
+
 @api_bp.route("/automacoes/<string:chave>/componentes")
 def automacoes_componentes(chave):
     """O que a tela precisa para montar os componentes compartilhados deste script."""
@@ -1448,6 +1506,8 @@ def automacoes_componentes(chave):
         "registrado": True,
         "recursos": list(script.recursos),
         "confirmar": script.confirmar,
+        "confirmar_quando": ({"campo": script.confirmar_quando[0], "valor": script.confirmar_quando[1]}
+                             if script.confirmar_quando else None),
         "aviso_confirmacao": script.aviso_confirmacao,
         "ajuda_teste": script.ajuda_teste,
         "ajuda_debug": script.ajuda_debug,

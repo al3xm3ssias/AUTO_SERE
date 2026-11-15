@@ -529,6 +529,8 @@ async def coletar_alunos_via_login(output_file: Path = ALUNOS_JSON) -> list[dict
         log.info("Coleta finalizada!")
         await browser.close()
 
+    from src.comum import backup as _backup
+    _backup.backup_apos_coleta("alunos", log.info)
     return resultado
 
 

@@ -85,6 +85,8 @@ OUTPUT_COMPLETO = _DADOS / "funcionarios_completo.json"
 # Funcionários lê este arquivo para avisar. Não guarda CPF, só nomes.
 OUTPUT_PROGRESSO = _DADOS / "funcionarios_completo_progresso.json"
 SALVAR_A_CADA = 5   # modo completo: grava o arquivo a cada N cadastros coletados (como alunos_completo.py)
+RETOMAR_VALIDADE_DIAS = 3   # coleta interrompida há mais que isso não é retomada: os dados já estariam velhos
+_FORMATO_DATA_HORA = "%Y-%m-%d %H:%M:%S"
 
 _ROTA_CONSULTA = ("Funcionário/ Docente", "Consulta Funcionários/Docentes")
 _ROTA_CADASTRO = ("Funcionário/ Docente", "Cadastro")
@@ -465,7 +467,25 @@ def _motivo_da_parada(erro: BaseException) -> str:
     return f"erro: {str(erro).strip() or type(erro).__name__}"
 
 
-async def coletar_completo(page, lista_basico: list[dict]) -> list[dict]:
+def _retomada_pendente() -> Optional[str]:
+    """
+    `iniciado_em` da última coleta completa se ela foi INTERROMPIDA há pouco (progresso com completa=False e dentro de
+    RETOMAR_VALIDADE_DIAS); None se terminou, nunca rodou, o arquivo está ruim ou a interrupção é antiga demais.
+    """
+    try:
+        with open(OUTPUT_PROGRESSO, encoding="utf-8") as f:
+            estado = json.load(f)
+        if not isinstance(estado, dict) or estado.get("completa") is not False:
+            return None
+        iniciado = str(estado.get("iniciado_em") or "")
+        if (datetime.now() - datetime.strptime(iniciado, _FORMATO_DATA_HORA)).days >= RETOMAR_VALIDADE_DIAS:
+            return None
+        return iniciado
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+
+
+async def coletar_completo(page, lista_basico: list[dict], recomecar: bool = False) -> list[dict]:
     """
     Percorre a lista de funcionários básicos, busca cada um pelo CPF no
     formulário de Cadastro e retorna os dados completos.
@@ -475,16 +495,32 @@ async def coletar_completo(page, lista_basico: list[dict]) -> list[dict]:
     consultado mantém o registro da coleta anterior. Se parar antes do fim, avisa no log e deixa o aviso em
     funcionarios_completo_progresso.json (a tela de Funcionários mostra). Só quando termina o arquivo passa a
     ter exatamente os cadastros coletados agora (como sempre foi).
+
+    RETOMADA: cada cadastro coletado leva `coletado_em`. Se a última coleta completa foi interrompida há pouco
+    (ver _retomada_pendente), quem já foi coletado nela NÃO é consultado de novo: a rodada continua de onde parou e
+    mantém o `iniciado_em` original. `recomecar=True` ignora a interrupção e consulta todos.
     """
     await navegar_censo_escolar(page, _ROTA_CADASTRO)
     print("✅ Navegou até Cadastro de Funcionários")
 
     anteriores = _carregar_completo_anterior()
-    iniciado_em = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    iniciado_em = datetime.now().strftime(_FORMATO_DATA_HORA)
     dados_completos: list[dict] = []
     total = len(lista_basico)
     com_cpf = [f for f in lista_basico if _so_digitos(f.get("cpf"))]
     coletados_cpf: set[str] = set()
+
+    desde = None if recomecar else _retomada_pendente()
+    if desde:
+        na_lista = {_so_digitos(f.get("cpf")) for f in com_cpf}
+        for r in anteriores:                      # coletados na rodada interrompida (e ainda na lista): ficam
+            cpf_r = _so_digitos(r.get("cpf"))
+            if cpf_r in na_lista and cpf_r not in coletados_cpf and str(r.get("coletado_em") or "") >= desde:
+                dados_completos.append(r)
+                coletados_cpf.add(cpf_r)
+        iniciado_em = desde
+        print(f"↩️  Retomando a coleta interrompida (iniciada em {desde}): {len(dados_completos)} de {len(com_cpf)} "
+              f"cadastros já coletados; faltam {len(com_cpf) - len(dados_completos)}. (Para refazer todos, marque \"Recomeçar do zero\".)")
 
     def _pendentes() -> list[str]:
         return [str(f.get("nome") or f.get("cpf") or "").strip() or "(sem nome)"
@@ -502,10 +538,14 @@ async def coletar_completo(page, lista_basico: list[dict]) -> list[dict]:
             if not cpf:
                 print(f"   [{i}/{total}] ⚠️  sem CPF, pulando")
                 continue
+            if _so_digitos(cpf) in coletados_cpf:
+                print(f"[{i}/{total}] já coletado na rodada interrompida, pulando")
+                continue
 
             print(f"[{i}/{total}] CPF {cpf} ...", end="  ")
             dados = await consultar_cpf(page, cpf)
             if dados:
+                dados["coletado_em"] = datetime.now().strftime(_FORMATO_DATA_HORA)
                 dados_completos.append(dados)
                 coletados_cpf.add(_so_digitos(cpf))
                 if len(dados_completos) % SALVAR_A_CADA == 0:
@@ -532,7 +572,7 @@ async def coletar_completo(page, lista_basico: list[dict]) -> list[dict]:
 #  ENTRY POINT (pronto para uma futura GUI)
 # ═════════════════════════════════════════════════════════════════════════════
 
-async def coletar_servidores(page, modo: str) -> list[dict]:
+async def coletar_servidores(page, modo: str, recomecar: bool = False) -> list[dict]:
     """
     Executa o modo de coleta especificado ("basico" ou "completo") numa
     `page` já autenticada no SERE, e salva o resultado no arquivo
@@ -570,7 +610,7 @@ async def coletar_servidores(page, modo: str) -> list[dict]:
 
         print(f"\n📡 Consultando {len(lista_basico)} funcionários no cadastro individual...")
         inicio_coleta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        dados_completos = await coletar_completo(page, lista_basico)
+        dados_completos = await coletar_completo(page, lista_basico, recomecar)
 
         _gravar_json(OUTPUT_COMPLETO, dados_completos)
         com_cpf = [f for f in lista_basico if _so_digitos(f.get("cpf"))]
@@ -588,7 +628,7 @@ async def coletar_servidores(page, modo: str) -> list[dict]:
         raise ValueError(f"modo deve ser 'basico' ou 'completo', recebido: {modo!r}")
 
 
-async def coletar_servidores_via_login(modo: str) -> list[dict]:
+async def coletar_servidores_via_login(modo: str, recomecar: bool = False) -> list[dict]:
     """
     Ponto de entrada completo: abre o navegador, faz login no SERE,
     executa o modo de coleta especificado e fecha o navegador. Renomeada
@@ -612,12 +652,15 @@ async def coletar_servidores_via_login(modo: str) -> list[dict]:
             if not await login_sere(page):
                 raise RuntimeError("Falha no login no SERE: confira o login e a senha em Configurações → Senha do SERE.")
 
-            return await coletar_servidores(page, modo)
+            resultado = await coletar_servidores(page, modo, **({"recomecar": True} if recomecar else {}))
         finally:
             await browser.close()
+    from src.comum import backup as _backup
+    _backup.backup_apos_coleta("funcionários")
+    return resultado
 
 
-async def coletar_funcionarios_automacao(modo: str = "completo", atualizar_lista: bool = False) -> dict:
+async def coletar_funcionarios_automacao(modo: str = "completo", atualizar_lista: bool = False, recomecar: bool = False) -> dict:
     """
     Ponto de entrada da automação "Funcionários / Servidores" (lista de Automações). Devolve só um RESUMO
     ({"modo", "total", "arquivo", "lista_atualizada"}) — os cadastros completos ficam nos arquivos, e não na
@@ -632,7 +675,7 @@ async def coletar_funcionarios_automacao(modo: str = "completo", atualizar_lista
     if atualizar:
         print("Atualizando antes a lista básica de funcionários...")
         await coletar_servidores_via_login("basico")
-    lista = await coletar_servidores_via_login(modo)
+    lista = await coletar_servidores_via_login(modo, **({"recomecar": True} if recomecar else {}))
     arquivo = OUTPUT_BASICO if modo == "basico" else OUTPUT_COMPLETO
     return {"modo": modo, "total": len(lista), "arquivo": str(arquivo), "lista_atualizada": atualizar}
 

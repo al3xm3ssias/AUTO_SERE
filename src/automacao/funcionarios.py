@@ -214,6 +214,8 @@ async def coletar_funcionarios_via_login(output_file: Path = FUNCIONARIOS_JSON) 
         log.info("Coleta finalizada!")
         await browser.close()
 
+    from src.comum import backup as _backup
+    _backup.backup_apos_coleta("funcionários", log.info)
     return resultado
 
 

@@ -317,7 +317,7 @@ def consultas_da_pre_matricula(dados: dict, quais: str = "matriculados", arquivo
     cadastros = dados.get("cadastros") if isinstance(dados.get("cadastros"), dict) else {}
     saida, vistos, com_cadastro = [], {}, set()
 
-    def juntar(nome: str, responsavel: str, nascimento: Any = None, destino: tuple = ()) -> None:
+    def juntar(nome: str, responsavel: str, nascimento: Any = None, destino: tuple = (), mae: Any = "") -> None:
         nome = re.sub(r"\s+", " ", str(nome or "")).strip()
         if len(nome.split()) < 2:
             return                                          # só um nome: homônimos demais para procurar
@@ -325,7 +325,8 @@ def consultas_da_pre_matricula(dados: dict, quais: str = "matriculados", arquivo
             nasc = parse_data(nascimento)                   # cadastro antigo não tem a data: None
         except ValueError:
             nasc = None                                     # data impossível (31/02): busca sem ela
-        c = Consulta(nome=nome, nascimento=nasc, responsavel=re.sub(r"\s+", " ", str(responsavel or "")).strip(),
+        c = Consulta(nome=nome, nascimento=nasc, mae=re.sub(r"\s+", " ", str(mae or "")).strip(),
+                     responsavel=re.sub(r"\s+", " ", str(responsavel or "")).strip(),
                      origem="pre_matricula", destinos=(destino,) if destino else ())
         if c.chave not in vistos:
             vistos[c.chave] = len(saida)
@@ -342,7 +343,7 @@ def consultas_da_pre_matricula(dados: dict, quais: str = "matriculados", arquivo
         opcoes = [o for o in (escolhas.get("opcoes") or []) if isinstance(o, dict)]
         if _situacao_pre_matricula(opcoes) in aceitas:
             juntar(c.get("nome_aluno"), c.get("nome_responsavel"), c.get("data_nascimento"),
-                   (arquivo, "cadastros", str(cid), "", periodo))
+                   (arquivo, "cadastros", str(cid), "", periodo), mae=c.get("nome_mae"))
     if "pendente" in aceitas:                                # quem está na fila e ainda não tem cadastro coletado
         turmas = dados.get("turmas_intencao") if isinstance(dados.get("turmas_intencao"), dict) else {}
         for turma, lista in turmas.items():
@@ -399,8 +400,47 @@ def consultas_da_pre_matricula_arquivo(quais: str = "matriculados", ano: Optiona
     return _mesclar_consultas(listas)
 
 
+ARQUIVO_TRANSFERIDOS = "transferidos.json"
+
+
+def consultas_dos_transferidos(dados: dict, arquivo: str = ARQUIVO_TRANSFERIDOS) -> list[Consulta]:
+    """
+    Alunos de transferidos.json ({CGM: registro}) que ainda estão fora da escola (quem voltou, `retorno` preenchido, fica de
+    fora). Busca pelo CGM, que é a chave do arquivo; nome e data de nascimento só acompanham o rótulo. O vínculo (escola
+    para onde foi, situação) volta gravado no próprio registro, em "vinculo_base_abc". Regra do ano letivo vigente.
+    """
+    saida = []
+    for cgm, reg in (dados if isinstance(dados, dict) else {}).items():
+        if not isinstance(reg, dict) or reg.get("retorno") or not re.fullmatch(r"\d{8,12}", str(cgm).strip()):
+            continue
+        try:
+            nasc = parse_data(reg.get("data_nascimento"))
+        except ValueError:
+            nasc = None
+        saida.append(Consulta(nome=re.sub(r"\s+", " ", str(reg.get("nome") or "")).strip(), nascimento=nasc, cgm=str(cgm).strip(),
+                              origem="transferidos",
+                              destinos=((arquivo, "transferidos", str(cgm).strip(), "", PERIODO_ANO_VIGENTE),)))
+    return saida
+
+
+def consultas_dos_transferidos_arquivo(ano: Optional[str] = None) -> list[Consulta]:
+    """Lê dados/<ano>/transferidos.json. ValueError com a mensagem pronta se não existe, não lê ou ninguém precisa consultar."""
+    pasta, _ = _pasta_e_ano(ano)
+    caminho = pasta / ARQUIVO_TRANSFERIDOS
+    if not caminho.exists():
+        raise ValueError(f"Não há {ARQUIVO_TRANSFERIDOS} em {pasta}. Rode antes a coleta de turmas.")
+    try:
+        dados = carregar_json(caminho, dict, dict)
+    except Exception as exc:                                 # noqa: BLE001
+        raise ValueError(f"Não foi possível ler {caminho.name}: {exc}") from exc
+    consultas = consultas_dos_transferidos(dados)
+    if not consultas:
+        raise ValueError(f"{caminho.name} não tem nenhum transferido com CGM que ainda esteja fora da escola.")
+    return consultas
+
+
 def gravar_vinculos_pre_matricula(vinculos: list, ano: Optional[str] = None,
-                                  log: Callable[[str], None] = print) -> int:
+                                  log: Callable[[str], None] = print, gravados_out: Optional[set] = None) -> int:
     """
     Grava cada vínculo de volta no arquivo da pré-matrícula de onde o aluno veio, na chave "vinculo_base_abc":
     cadastros[cpf] (quem tem cadastro) ou o item da turma em turmas_intencao (quem só está na fila). `vinculos` = lista de
@@ -421,9 +461,12 @@ def gravar_vinculos_pre_matricula(vinculos: list, ano: Optional[str] = None,
             log(f"    ⚠️  Vínculos não gravados em {nome_arq}: {exc}")
             continue
         n = 0
+        candidatos: set = set()
         for (_, secao, chave, turma, _periodo), vinculo in itens:
             alvo = None
-            if secao == "cadastros":
+            if secao == "transferidos":                      # transferidos.json é {CGM: registro}, sem seção
+                alvo = dados.get(chave)
+            elif secao == "cadastros":
                 alvo = (dados.get("cadastros") or {}).get(chave)
             else:
                 lista = (dados.get("turmas_intencao") or {}).get(turma)
@@ -434,9 +477,12 @@ def gravar_vinculos_pre_matricula(vinculos: list, ano: Optional[str] = None,
             if isinstance(alvo, dict):
                 alvo["vinculo_base_abc"] = {**vinculo, "consultado_em": agora}
                 n += 1
+                candidatos.add((nome_arq, secao, chave, turma))
         if n:
             salvar_json_atomico(caminho, dados, indent=2)
             gravados += n
+            if gravados_out is not None:
+                gravados_out |= candidatos
             log(f"    💾 {n} vínculo(s) gravado(s) em {nome_arq}")
     return gravados
 
@@ -779,6 +825,21 @@ def atualizar_consolidado(registro: dict, ano: Optional[str] = None) -> tuple[Pa
     return caminho, True
 
 
+def podar_consolidado(registros: list, ano: Optional[str] = None) -> int:
+    """
+    Tira de buscas_base.json os registros que já foram vinculados (gravados) ao cadastro de origem — pré-matrícula ou
+    transferidos. Quem foi digitado, ou cujo vínculo não pôde ser gravado, continua lá. Devolve quantos saíram.
+    """
+    if not registros:
+        return 0
+    caminho = arquivo_consolidado(ano)
+    atual = carregar_json(caminho, list, list)
+    restantes = [r for r in atual if not any(_mesmo_aluno(r, x) for x in registros)]
+    if len(restantes) != len(atual):
+        salvar_json_atomico(caminho, restantes, indent=4)
+    return len(atual) - len(restantes)
+
+
 @dataclass
 class ResumoBaseAbc:
     total: int = 0
@@ -790,11 +851,13 @@ class ResumoBaseAbc:
     verificar: list = field(default_factory=list)         # (rótulo, motivo): achado, mas o vínculo (turma/escola/situação) pede conferência manual
     vinculos: list = field(default_factory=list)         # (destino, vínculo) a gravar de volta nos arquivos da pré-matrícula
     vinculos_gravados: int = 0
+    com_destino: list = field(default_factory=list)       # (registro, destinos) de quem veio de pré-matrícula/transferidos
+    podados: int = 0                                      # registros tirados de buscas_base.json por já estarem vinculados
     arquivo: str = ""
 
     def como_dict(self) -> dict:
         return {"total": self.total, "encontrados": list(self.encontrados), "nao_encontrados": list(self.nao_encontrados),
-                "ambiguos": list(self.ambiguos), "erros": list(self.erros), "mantidos": list(self.mantidos), "verificar": list(self.verificar), "vinculos_gravados": self.vinculos_gravados, "arquivo": self.arquivo}
+                "ambiguos": list(self.ambiguos), "erros": list(self.erros), "mantidos": list(self.mantidos), "verificar": list(self.verificar), "vinculos_gravados": self.vinculos_gravados, "podados": self.podados, "arquivo": self.arquivo}
 
 
 # ───────────────────────────── orquestração (independe do navegador) ─────────────────────────────
@@ -983,6 +1046,8 @@ async def processar_consulta(nav, consulta: Consulta, resumo: ResumoBaseAbc, ano
         else:
             resumo.verificar.append((rotulo, v["motivo"]))
             log(f"    🔗 vínculo a VERIFICAR: {v['turma'] or '?'} · {v['escola'] or '?'} · {v['situacao'] or '?'} — {v['motivo']}")
+        if consulta.destinos:
+            resumo.com_destino.append((registro, consulta.destinos))
         for destino in consulta.destinos:                        # um vínculo por arquivo: cada um tem a sua regra de período
             resumo.vinculos.append((destino, montar_vinculo(consulta, v["nome"], v["cgm"], historico,
                                                             v["ano_referencia"], periodo=destino[4])))
@@ -998,7 +1063,7 @@ async def processar_consulta(nav, consulta: Consulta, resumo: ResumoBaseAbc, ano
 
 async def consultar(nav, consultas: list[Consulta], ano: Optional[str] = None,
                     sessao_valida: Optional[Callable] = None, refazer_sessao: Optional[Callable] = None,
-                    log: Callable[[str], None] = print) -> ResumoBaseAbc:
+                    log: Callable[[str], None] = print, limpar_vinculados: bool = False) -> ResumoBaseAbc:
     resumo = ResumoBaseAbc(total=len(consultas))
     for i, c in enumerate(consultas, 1):
         log(f"\n  [{i:02d}/{len(consultas)}] {c.rotulo}")
@@ -1008,9 +1073,17 @@ async def consultar(nav, consultas: list[Consulta], ano: Optional[str] = None,
         await processar_consulta(nav, c, resumo, ano, log)
     if resumo.vinculos:
         try:
-            resumo.vinculos_gravados = gravar_vinculos_pre_matricula(resumo.vinculos, ano, log)
+            gravados: set = set()
+            resumo.vinculos_gravados = gravar_vinculos_pre_matricula(resumo.vinculos, ano, log, gravados_out=gravados)
+            if limpar_vinculados and gravados:
+                # só sai de buscas_base.json quem teve TODOS os destinos gravados: o vínculo já está no cadastro de origem
+                saem = [reg for reg, destinos in resumo.com_destino
+                        if all((d[0], d[1], d[2], d[3]) in gravados for d in destinos)]
+                resumo.podados = podar_consolidado(saem, ano)
+                if resumo.podados:
+                    log(f"    🧹 {resumo.podados} registro(s) já vinculado(s) saíram de {NOME_ARQUIVO} (ficaram no cadastro de origem)")
         except Exception as exc:                                 # noqa: BLE001 — a busca já está salva em buscas_base.json
-            log(f"    ⚠️  Não foi possível gravar os vínculos na pré-matrícula: {exc}")
+            log(f"    ⚠️  Não foi possível gravar os vínculos nos cadastros de origem: {exc}")
     return resumo
 
 
@@ -1206,7 +1279,8 @@ async def _sessao_sere(mostrar_navegador: bool = False):
 
 
 async def consultar_base_abc_via_login(consultas: list, modo_teste: bool = False, mostrar_navegador: bool = False,
-                                       sessao=_sessao_sere, log: Callable[[str], None] = print) -> dict:
+                                       sessao=_sessao_sere, log: Callable[[str], None] = print,
+                                       limpar_vinculados: bool = False) -> dict:
     """
     Abre o SERE, vai a "Consulta Aluno na Base ABC" e consulta cada aluno. Devolve o resumo
     {"total","encontrados","nao_encontrados","ambiguos","erros","mantidos","arquivo"}. Aluno que não está na base não é erro.
@@ -1224,7 +1298,8 @@ async def consultar_base_abc_via_login(consultas: list, modo_teste: bool = False
         async def refazer():
             await _entrar_e_ir_para_a_consulta(page)
 
-        resumo = await consultar(nav, consultas, sessao_valida=nav.sessao_valida, refazer_sessao=refazer, log=log)
+        resumo = await consultar(nav, consultas, sessao_valida=nav.sessao_valida, refazer_sessao=refazer, log=log,
+                                 limpar_vinculados=limpar_vinculados)
     log(f"\n{'=' * 60}\n  RESUMO: {len(resumo.encontrados)} encontrado(s), {len(resumo.nao_encontrados)} não encontrado(s) "
         f"(registrados), {len(resumo.ambiguos)} ambíguo(s) (registrados), {len(resumo.erros)} com erro técnico")
     for titulo, lista in (("Vínculo a verificar à mão", resumo.verificar), ("Não encontrados", resumo.nao_encontrados), ("Ambíguos (nada foi escolhido)", resumo.ambiguos), ("Erros", resumo.erros)):

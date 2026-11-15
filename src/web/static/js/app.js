@@ -1881,6 +1881,28 @@ function campoHTML(campo) {
         </div>
       </div>`;
   }
+  if (campo.tipo === "unidades") {
+    // Select pesquisável de várias escolhas: busca + lista com caixas; o valor vai num campo oculto (lista JSON; [] = todas)
+    return `
+      <div class="field"${cond}>
+        <label>${campo.label}</label>
+        <input type="text" class="unidades-busca" id="${campo.id}-busca" placeholder="Pesquisar escola ou CMEI…" autocomplete="off">
+        <div class="checklist unidades-lista" id="${campo.id}-lista" data-campo="${campo.id}" data-grupos="${JSON.stringify(campo.grupos || []).replace(/"/g, "&quot;")}" style="margin-top:8px; max-height:220px; overflow:auto;">Carregando unidades…</div>
+        <input id="${campo.id}" type="text"${nome} value="[]" style="display:none">
+        <div class="campo-ajuda" id="${campo.id}-resumo"></div>
+        ${campo.ajuda ? `<div class="campo-ajuda">${campo.ajuda}</div>` : ""}
+      </div>`;
+  }
+  if (campo.tipo === "modelo_acoes") {
+    return `
+      <div class="field"${cond} id="${campo.id}">
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" class="btn-sm" id="btn-modelo-salvar">Salvar como modelo…</button>
+          <button type="button" class="btn-sm" id="btn-modelo-excluir">Excluir modelo</button>
+        </div>
+        <div class="campo-ajuda" id="modelo-acoes-msg">Escolha um tipo acima para carregar o assunto e a mensagem; edite à vontade e salve como modelo para reaproveitar.</div>
+      </div>`;
+  }
   if (campo.tipo === "pasta") {
     return `
       <div class="field">
@@ -2049,6 +2071,7 @@ function montarComponentesCompartilhados(container, chave, info) {
   container.querySelectorAll("[id^='comp-'], .field select, .field input[type=checkbox]").forEach((el) => {
     el.addEventListener(el.tagName === "TEXTAREA" ? "input" : "change", () => agendarPrevia());
   });
+  inicializarCamposAvisos();
   agendarPrevia(true);
 }
 
@@ -2135,6 +2158,158 @@ function confirmarExecucao(info, previa) {
       corpo.querySelector("#conf-nao").addEventListener("click", fechar);
     }, () => resolve(false));       // Esc/Cancelar; ignorado se já resolveu com true
   });
+}
+
+/* ---------- Mandar avisos: unidades pesquisáveis e modelos de mensagem ---------- */
+
+const _escHtml = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const _semAcentoJS = (t) => String(t ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+/** Preenche a lista de unidades (escolas e CMEIs coletados) e liga a busca e as caixas. Nada marcado = todas. */
+async function inicializarCampoUnidades() {
+  const lista = document.querySelector("#campos-automacao .unidades-lista");
+  if (!lista) return;
+  const id = lista.dataset.campo;
+  const oculto = document.getElementById(id);
+  const busca = document.getElementById(`${id}-busca`);
+  const resumo = document.getElementById(`${id}-resumo`);
+  const grupos = JSON.parse(lista.dataset.grupos || "[]");
+  const marcados = new Set(["@todas"]);
+  let unidades = [];
+  let aviso = "";
+  try {
+    const r = await apiGet("/avisos/unidades");
+    unidades = r.unidades || [];
+    aviso = r.aviso || "";
+  } catch (e) {
+    aviso = "Não foi possível carregar a lista de unidades.";
+  }
+
+  const sincronizar = () => {
+    const itens = [...marcados];
+    oculto.value = JSON.stringify(itens.includes("@todas") ? [] : itens);
+    const n = itens.includes("@todas") ? 0 : itens.length;
+    resumo.textContent = n ? `${n} marcada(s).` : "Nenhuma marcada: vale para todas.";
+    agendarPrevia();
+  };
+  const desenhar = () => {
+    const termo = _semAcentoJS(busca.value).trim();
+    const linhas = [];
+    grupos.forEach((g) => {
+      if (termo && !_semAcentoJS(g.texto).includes(termo)) return;
+      linhas.push({ valor: g.valor, texto: g.texto, nota: "" });
+    });
+    unidades.forEach((u) => {
+      if (termo && !_semAcentoJS(u.nome).includes(termo)) return;
+      linhas.push({ valor: u.nome, texto: u.nome, nota: [u.tipo === "cmei" ? "CMEI" : "", u.tem_email ? "" : "sem e-mail"].filter(Boolean).join(" · ") });
+    });
+    lista.innerHTML = linhas.length
+      ? linhas.map((l) => `
+          <label class="checklist-item">
+            <input type="checkbox" value="${_escHtml(l.valor)}"${marcados.has(l.valor) ? " checked" : ""}>
+            ${_escHtml(l.texto)}${l.nota ? ` <small style="color:var(--txt3)">(${_escHtml(l.nota)})</small>` : ""}
+          </label>`).join("")
+      : `<div class="campo-ajuda">${_escHtml(aviso || "Nenhuma unidade encontrada.")}</div>`;
+  };
+  lista.addEventListener("change", (ev) => {
+    const cx = ev.target;
+    if (!(cx instanceof HTMLInputElement) || cx.type !== "checkbox") return;
+    if (cx.checked) {
+      if (cx.value === "@todas") marcados.clear();
+      else marcados.delete("@todas");
+      marcados.add(cx.value);
+    } else {
+      marcados.delete(cx.value);
+    }
+    if (!marcados.size) marcados.add("@todas");
+    desenhar();
+    sincronizar();
+  });
+  busca.addEventListener("input", desenhar);
+  desenhar();
+  sincronizar();
+}
+
+const _modeloDaTela = () => {
+  const campo = (_infoComponentes?.extras || []).find((c) => c.id === "campo-tipo-mensagem");
+  const valor = document.getElementById("campo-tipo-mensagem")?.value;
+  return (campo?.opcoes || []).find((o) => o.valor === valor) || null;
+};
+
+/** Carrega o assunto e a mensagem do tipo escolhido (e ajusta o "Para quem" do modelo). O modelo "livre" não apaga o que foi digitado. */
+function aplicarModeloEscolhido() {
+  const modelo = _modeloDaTela();
+  if (!modelo) return;
+  const assunto = document.getElementById("campo-assunto");
+  const mensagem = document.getElementById("campo-mensagem");
+  if (modelo.assunto || modelo.mensagem) {
+    if (assunto) assunto.value = modelo.assunto || "";
+    if (mensagem) mensagem.value = modelo.mensagem || "";
+  }
+  const publico = document.getElementById("campo-publico");
+  if (publico && modelo.publico && publico.value !== modelo.publico) publico.value = modelo.publico;
+  atualizarCamposDinamicos();
+  agendarPrevia();
+}
+
+async function _recarregarTelaDeAvisos(idParaSelecionar) {
+  await renderizarCamposAutomacao(automacaoAtual);
+  const sel = document.getElementById("campo-tipo-mensagem");
+  if (sel && idParaSelecionar) {
+    sel.value = idParaSelecionar;
+    aplicarModeloEscolhido();
+  }
+}
+
+async function salvarModeloDeMensagem() {
+  const assunto = document.getElementById("campo-assunto")?.value.trim() || "";
+  const mensagem = document.getElementById("campo-mensagem")?.value.trim() || "";
+  const publico = document.getElementById("campo-publico")?.value || "";
+  if (!assunto || !mensagem) { toast("Escreva o assunto e a mensagem antes de salvar como modelo."); return; }
+  const atual = _modeloDaTela();
+  let corpo = { publico, assunto, mensagem };
+  if (atual && atual.valor !== "livre" && confirm(`Atualizar o modelo "${atual.nome}" com este assunto e esta mensagem?\n\nOK = atualizar este modelo\nCancelar = salvar como um modelo novo`)) {
+    corpo = { ...corpo, id: atual.valor, nome: atual.nome };
+  } else {
+    const nome = prompt("Nome do novo modelo (ex.: Documentos pendentes):", "");
+    if (nome === null) return;
+    corpo = { ...corpo, nome };
+  }
+  try {
+    const r = await apiPost("/avisos/modelos", corpo);
+    if (r.erro) { toast(r.erro); return; }
+    toast(`Modelo "${r.modelo.nome}" salvo`);
+    await _recarregarTelaDeAvisos(r.modelo.id);
+  } catch (e) {
+    toast(e.message || "Não foi possível salvar o modelo.");
+  }
+}
+
+async function excluirModeloDeMensagem() {
+  const atual = _modeloDaTela();
+  if (!atual || !atual.personalizado) { toast("Escolha um modelo criado ou ajustado por você para excluir (os prontos não somem)."); return; }
+  const aviso = atual.padrao
+    ? `Voltar o modelo "${atual.nome}" ao texto original?`
+    : `Excluir o modelo "${atual.nome}"? Isso não afeta e-mails já enviados.`;
+  if (!confirm(aviso)) return;
+  try {
+    const r = await apiDelete(`/avisos/modelos/${encodeURIComponent(atual.valor)}`);
+    if (r.erro) { toast(r.erro); return; }
+    toast(r.acao === "restaurado" ? "Modelo restaurado ao texto original" : "Modelo excluído");
+    await _recarregarTelaDeAvisos(atual.padrao ? atual.valor : "livre");
+  } catch (e) {
+    toast(e.message || "Não foi possível excluir o modelo.");
+  }
+}
+
+/** Liga o que é só da tela "Mandar avisos" (lista de unidades, tipo de mensagem). Sem esses campos, não faz nada. */
+function inicializarCamposAvisos() {
+  inicializarCampoUnidades();
+  document.getElementById("campo-tipo-mensagem")?.addEventListener("change", aplicarModeloEscolhido);
+  document.getElementById("btn-modelo-salvar")?.addEventListener("click", salvarModeloDeMensagem);
+  document.getElementById("btn-modelo-excluir")?.addEventListener("click", excluirModeloDeMensagem);
+  // a prévia (quantos e-mails, quem fica de fora, se pode enviar) depende do texto: marcadores de aluno e envio real
+  ["campo-assunto", "campo-mensagem"].forEach((id) => document.getElementById(id)?.addEventListener("input", () => agendarPrevia()));
 }
 
 /** Texto de ajuda de cada opção escolhida e campos que só aparecem para certo valor de outro campo. */
@@ -2433,7 +2608,9 @@ async function _execAoClicar() {
     if (alvo?.classList.contains("aviso") && alvo.textContent) { toast(alvo.textContent); return; }
   }
   const payload = _execMontarPayload();
-  if (_infoComponentes?.confirmar && !payload.modo_teste) {
+  const cq = _infoComponentes?.confirmar_quando;       // ex.: avisos só confirma no modo "enviar"
+  const pedeConfirmacao = cq ? payload[cq.campo] === cq.valor : (_infoComponentes?.confirmar && !payload.modo_teste);
+  if (pedeConfirmacao) {
     const previa = document.getElementById("comp-previa")?.dataset.texto || "";
     if (!(await confirmarExecucao(_infoComponentes, previa))) return;
   }
