@@ -23,6 +23,7 @@ from flask import Flask, Blueprint, jsonify, render_template, request, send_from
 from src.comum import paths as _paths
 from src.comum import servidor as _servidor
 
+from src.web.api.ajuda import ajuda_bp
 from src.web.api.calendario import calendario_bp
 from src.web.api.planilhas import planilhas_bp
 from src.web.api.rotas import api_bp
@@ -135,6 +136,7 @@ def create_app() -> Flask:
 
     app.register_blueprint(web_bp)
     app.register_blueprint(api_bp, url_prefix="/web/api")
+    app.register_blueprint(ajuda_bp, url_prefix="/web/api/ajuda")
     app.register_blueprint(calendario_bp, url_prefix="/web/api/calendario")
     app.register_blueprint(whatsapp_bp, url_prefix="/web/api/whatsapp")
     app.register_blueprint(planilhas_bp, url_prefix="/web/api/planilhas")

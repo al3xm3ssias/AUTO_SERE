@@ -3,42 +3,40 @@
   <div class="page-header">
     <div class="page-header-icon cyan"><span data-icon="help"></span></div>
     <div class="page-header-text">
-      <h1>Ajuda</h1>
-      <p>Informações, documentação e suporte</p>
+      <h1>Central de ajuda</h1>
+      <p>Aperte <strong>F1</strong> em qualquer tela para ver a ajuda dela. Aqui está o índice de tudo.</p>
     </div>
   </div>
 
-  <div class="config-grid">
-    <div class="config-row">
-      <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="info"></span></div>
-      <div class="txt">
-        <div class="name">Sobre o sistema</div>
-        <div class="desc">Informações sobre o Auto SERE.</div>
+  <div class="aj-central">
+    <div class="aj-central-topo">
+      <div class="search-box">
+        <span data-icon="search"></span>
+        <input type="text" id="aj-busca" placeholder="Buscar na ajuda (ex.: transferidos, senha, CGM)…" autocomplete="off">
       </div>
     </div>
+    <p id="aj-vazio" hidden class="campo-ajuda">Nada encontrado. Tente outra palavra.</p>
 
-    <div class="config-row">
-      <div class="ic" style="background:var(--badge-violet-bg); color:var(--violet);"><span data-icon="book"></span></div>
-      <div class="txt">
-        <div class="name">Documentação</div>
-        <div class="desc">Acesse manuais e guias.</div>
-      </div>
+    <h3 class="aj-tit">Atalhos</h3>
+    <div class="aj-atalhos">
+      <kbd>F1</kbd><span>Abre a ajuda da tela, aba, painel ou janela em que você está. Aperte de novo para fechar.</span>
+      <kbd>Esc</kbd><span>Fecha a ajuda (e, sem ela aberta, as janelas de confirmação).</span>
+      <kbd>?</kbd><span>O botão ? no alto da tela faz o mesmo que o F1 (útil no celular).</span>
     </div>
 
-    <div class="config-row">
-      <div class="ic" style="background:var(--badge-lime-bg); color:var(--lime);"><span data-icon="headset"></span></div>
-      <div class="txt">
-        <div class="name">Suporte</div>
-        <div class="desc">Canais de suporte e contato.</div>
-      </div>
-    </div>
+    <h3 class="aj-tit">Telas</h3>
+    <div class="aj-cards" id="aj-lista-telas"><p class="campo-ajuda">Carregando…</p></div>
 
-    <div class="config-row">
-      <div class="ic" style="background:var(--badge-amber-bg); color:var(--amber);"><span data-icon="versions"></span></div>
-      <div class="txt">
-        <div class="name">Versão</div>
-        <div class="desc">Versão do sistema e atualizações.</div>
-      </div>
+    <h3 class="aj-tit">Automações</h3>
+    <div id="aj-lista-automacoes"></div>
+
+    <h3 class="aj-tit">Painéis das Configurações</h3>
+    <div class="aj-cards" id="aj-lista-config"></div>
+
+    <h3 class="aj-tit">Sobre</h3>
+    <div class="aj-atalhos">
+      <span>Sistema</span><span>Auto SERE — automação escolar, versão V1.0</span>
+      <span>Desenvolvido por</span><span>Claudio Alex</span>
     </div>
   </div>
 

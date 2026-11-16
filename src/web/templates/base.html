@@ -370,6 +370,9 @@
       <span id="ano-badge-texto">Ano letivo {{ ano_letivo }}{{ ' · somente consulta' if somente_consulta else '' }}</span>
     </div>
     <div class="topbar-meta" id="t-meta"></div>
+    <button class="topbar-help" id="btn-ajuda-f1" type="button" title="Ajuda desta tela (F1)" aria-label="Ajuda desta tela">
+      <span data-icon="help"></span><kbd>F1</kbd>
+    </button>
     <div class="topbar-user" title="Perfil (ainda não configurado)" data-goto="configuracoes" id="topbar-user">
       <span data-icon="userPlain"></span>
     </div>
@@ -429,6 +432,7 @@
 <script src="{{ url_for('web.static', filename='js/corte_etario.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/previsao.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/whatsapp.js') }}"></script>
+<script src="{{ url_for('web.static', filename='js/ajuda.js') }}"></script>
 <script>
   // Service worker (necessário para o Chrome oferecer "Instalar"). Falha silenciosa.
   if ('serviceWorker' in navigator) {

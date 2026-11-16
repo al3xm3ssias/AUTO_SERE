@@ -115,7 +115,7 @@ Adaptação do script antigo `consulta_transferidos_ano_anterior.py`: automaçã
 
 ## 4. Ajuda para os usuários
 
-- [ ] Preencher os três `src/web/templates/partials/help/*.html` (hoje vazios): textos de ajuda (planejado)
+- [x] Ajuda (F1) de todas as telas, abas, painéis, janelas e automações: feita em `src/comum/ajuda*.py` + `static/js/ajuda.js` (os três `partials/help/*.html` vazios não são mais necessários e podem ser apagados)
 
 ---
 

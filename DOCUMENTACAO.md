@@ -43,3 +43,23 @@ automações, arquivos lidos e gravados, regras de negócio, particularidades e 
 
 Ao criar uma automação (ver `docs/NOVO_SCRIPT.md`), acrescente-a ao arquivo do módulo correspondente e, se ela gravar
 um arquivo novo, a `Dados_e_Arquivos.md`. Conferir antes de editar: as informações aqui são um retrato de 2026-11-02.
+
+
+## Ajuda (tecla F1)
+
+**F1** (ou o botão **?** no alto da tela) abre um painel com a ajuda do lugar em que o usuário está: a janela aberta por cima
+(se houver), a aba, o painel de Configurações, a automação em execução e, por último, a tela. **Esc** ou **F1** fecham.
+O menu Sistema → Ajuda é a Central de ajuda: índice com busca de tudo.
+
+| Arquivo | Papel |
+|---|---|
+| `src/comum/ajuda_conteudo.py` | textos de telas, abas, painéis de Configurações, janelas e do que existe em todas as telas |
+| `src/comum/ajuda_automacoes.py` | textos de cada automação (o que faz, quando usar, antes, o que grava, cuidados) |
+| `src/comum/ajuda.py` | monta a ajuda; para as automações lê do registro de scripts os campos da tela, o modo de teste, a confirmação e as configurações usadas, então nunca ficam diferentes da tela |
+| `src/web/api/ajuda.py` | `GET /web/api/ajuda/indice`, `/geral` e `/<tipo>/<chave>` (tipo: tela, aba, configuracao, modal, automacao) |
+| `src/web/static/js/ajuda.js` | F1, painel, níveis de contexto, "Mostrar na tela", Central de ajuda |
+| `tests/test_ajuda.py` | impede tela, automação, painel ou janela sem ajuda; confere links e seletores |
+
+**Ao criar uma tela, painel ou automação nova:** acrescente a entrada em `TELAS`, `CONFIGURACOES`, `MODAIS` ou `AUTOMACOES`
+(`pytest tests/test_ajuda.py` diz o que falta). Uma automação nova registrada em `registro_scripts.py` já ganha os campos sozinha.
+O seletor CSS do 3º argumento de `E(...)` é o que o botão "Mostrar na tela" destaca.

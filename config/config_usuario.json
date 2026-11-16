@@ -25,7 +25,7 @@
   },
   "data_corte_transferidos": "18/10/2026",
   "observacao_historico": null,
-  "navegador_padrao": "firefox",
+  "navegador_padrao": null,
   "navegador_scripts": {
     "base_abc": {
       "mostrar_janela": true
