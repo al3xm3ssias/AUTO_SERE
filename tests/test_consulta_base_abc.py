@@ -897,3 +897,42 @@ def test_tela_tem_as_caixas_novas_com_a_limpeza_ligada_por_padrao(amb):
     extras = {e["nome"]: e for e in reg.obter("base_abc").extras()}
     assert extras["limpar_vinculados"]["padrao"] is True
     assert not extras["transferidos"].get("padrao")
+
+
+# ───────────── ponta a ponta: a Base ABC liga o CGM ao aluno da pré-matrícula e o aviso preenche o texto com ele ─────────────
+
+def test_consulta_da_pre_matricula_grava_o_cgm_e_o_aviso_de_transferencia_usa(amb, monkeypatch):
+    from src.automacao import avisos as av
+    from src.comum import escola
+    monkeypatch.setattr(escola, "nome", lambda: "ESCOLA MUNICIPAL DA NOSSA ESCOLA")
+    cad = {**_cad_pre("CLAUDIO ALEX MENDES DE SOUZA", "111"), "data_nascimento": "12/03/2015", "nome_mae": "MARIA APARECIDA DE SOUZA"}
+    _escrever(amb, "pre_matricula.json", {
+        "cadastros": {"111": cad},
+        "turmas_intencao": {"5º Ano do Ensino Fundamental": [{"cpf": "111", "nome": "CLAUDIO ALEX MENDES DE SOUZA", "situacao": "Matriculado"}]}})
+    _escrever(amb, "escolas_completas.json", {"escolas-municipais": {"escolas": [
+        {"nome": "Escola Municipal Ana Néri", "email": "ana@pg.gov.br"}]}})
+    base = [{**BASE[0], "historico": [_h(2025, "ESC A", "EF", "4º ano", "Aprovado"),
+                                      _h(2026, "ESCOLA MUNICIPAL ANA NERI", "EF", "5º ano", "Matriculado")]}]
+
+    # 1) antes da consulta, o aluno aparece na tela como "sem vínculo" e não recebe
+    [antes] = av.listar_alunos_novos("matriculados", "ano")
+    assert antes["estado"] == "sem_vinculo" and antes["cgm"] == ""
+
+    # 2) a Consulta na Base ABC usa data de nascimento + mãe da pré-matrícula, acha o aluno e grava o vínculo no cadastro
+    consultas = cb.consultas_da_pre_matricula_arquivo("matriculados")
+    assert (consultas[0].nascimento, consultas[0].mae) == (D(2015, 3, 12), "MARIA APARECIDA DE SOUZA")
+    resumo = asyncio.run(cb.consultar(NavFalso(base), consultas, log=lambda *_: None, limpar_vinculados=True))
+    assert resumo.vinculos_gravados == 1 and resumo.podados == 1                       # vinculado: saiu do buscas_base.json
+    gravado = _ler(amb, "pre_matricula.json")["cadastros"]["111"]["vinculo_base_abc"]
+    assert (gravado["cgm"], gravado["escola"], gravado["turma"], gravado["status"]) == ("1025059227", "ESCOLA MUNICIPAL ANA NERI", "5º ano", "ok")
+
+    # 3) a tela lista o aluno com o CGM e a escola de origem
+    [depois] = av.listar_alunos_novos("matriculados", "ano")
+    assert (depois["estado"], depois["cgm"], depois["escola_origem"]) == ("ok", "1025059227", "ESCOLA MUNICIPAL ANA NERI")
+
+    # 4) o texto de transferência sai preenchido com o CGM, a série de origem e a escola que recebe
+    r = av.destinatarios_alunos_origem()
+    [m] = av.montar_mensagens(r["destinatarios"], "Transferência de $ALUNO",
+                              "Aluno $ALUNO, CGM $CGM, série $SERIE, para $ESCOLA_DESTINO.", por_aluno=True)
+    assert m["para"] == "ana@pg.gov.br"
+    assert m["corpo"] == "Aluno CLAUDIO ALEX MENDES DE SOUZA, CGM 1025059227, série 5º ano, para Escola Municipal Ana Néri."

@@ -945,7 +945,8 @@ def _args_avisos(p: dict) -> dict:
             "tipo_escola": p.get("tipo_escola") or "todas", "filtro_nome": p.get("filtro_nome") or "",
             "situacao_pais": p.get("situacao_pais") or "matriculados", "email_teste": p.get("email_teste") or "",
             "unidades": p.get("unidades") or None, "fonte": p.get("fonte") or "ano",
-            "intervalo_s": p.get("intervalo_s") or 10, "limite_lote": p.get("limite_lote") or 50}
+            "intervalo_s": p.get("intervalo_s") or 10, "limite_lote": p.get("limite_lote") or 50,
+            "alunos": p.get("alunos") or None}
 
 
 def _extras_avisos() -> list[dict]:
@@ -993,6 +994,10 @@ def _extras_avisos() -> list[dict]:
                  "Só a previsão do próximo ano letivo (previsao_alunos_<ano+1>.json).",
                  "Os dois arquivos; o aluno que está nos dois conta uma vez."))],
          "visivelSe": so("campo-publico", "pais|escolas")},
+        {"tipo": "alunos", "id": "campo-alunos", "nome": "alunos", "label": "Quais alunos",
+         "ajuda": "Pesquise e marque os alunos. Nenhum marcado = todos os da lista acima. \"CGM ok\" quer dizer que a Consulta na Base ABC "
+                  "já ligou o CGM e a escola de origem ao aluno (é isso que preenche $CGM, $SERIE e a escola que recebe).",
+         "visivelSe": so("campo-publico", "pais|escolas")},
         {"tipo": "select", "id": "campo-tipo-mensagem", "nome": "tipo_mensagem", "label": "Tipo de mensagem", "semVazio": True,
          "padrao": "livre", "opcoes": modelos},
         {"tipo": "modelo_acoes", "id": "campo-modelo-acoes", "nome": "modelo_acoes"},
@@ -1022,7 +1027,8 @@ def _previa_avisos(p: dict) -> str:
     unidades, fonte = p.get("unidades") or None, p.get("fonte") or "ano"
     texto_do_pedido = f"{p.get('assunto') or ''} {p.get('mensagem') or ''}"
     por_aluno = p["publico"] == "escolas" and bool(av._marcadores_de_aluno(texto_do_pedido))
-    filtros = (p.get("tipo_escola") or "todas", p.get("filtro_nome") or "", p.get("situacao_pais") or "matriculados", unidades, fonte, por_aluno)
+    filtros = (p.get("tipo_escola") or "todas", p.get("filtro_nome") or "", p.get("situacao_pais") or "matriculados", unidades, fonte, por_aluno,
+               p.get("alunos") or None)
     if av.teste_com_escola_ficticia(p["publico"], modo):
         email = (p.get("email_teste") or "").strip() or av.ESCOLA_TESTE["email"]
         texto = f"Teste: 1 e-mail para a escola fictícia {av.ESCOLA_TESTE['nome']} <{email}>"
@@ -1065,7 +1071,8 @@ def _validar_avisos(p: dict) -> None:
     a = av.validar_pedido(**_args_avisos(p))
     if av.teste_com_escola_ficticia(a["publico"], a["modo"]):
         return                                  # o teste com a escola fictícia não depende da lista real
-    r = av.reunir_destinatarios(a["publico"], a["tipo_escola"], a["filtro_nome"], a["situacao_pais"], a["unidades"], a["fonte"], a["por_aluno"])
+    r = av.reunir_destinatarios(a["publico"], a["tipo_escola"], a["filtro_nome"], a["situacao_pais"], a["unidades"], a["fonte"], a["por_aluno"],
+                                a["alunos"])
     if a["modo"] == "enviar":
         av.conferir_previa(av.montar_mensagens(r["destinatarios"], a["assunto"], a["mensagem"], a["por_aluno"]))
 

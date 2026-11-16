@@ -1449,6 +1449,22 @@ def avisos_unidades():
         return jsonify({"unidades": [], "aviso": str(exc)})
 
 
+@api_bp.route("/avisos/alunos")
+def avisos_alunos():
+    """
+    Alunos novos (pré-matrícula do ano e/ou previsão do próximo) para o campo \"Quais alunos\", cada um com o estado do vínculo
+    da Base ABC (ok / verificar / sem_vinculo). Parâmetros: situacao (matriculados|aguardando|ambos) e fonte (ano|proximo|ambas).
+    """
+    from src.automacao import avisos as _avisos
+    situacao, fonte = request.args.get("situacao") or "matriculados", request.args.get("fonte") or "ano"
+    if situacao not in _avisos.SITUACOES_PAIS or fonte not in _avisos.FONTES_ALUNOS:
+        return jsonify({"erro": "Situação ou fonte inválida."}), 400
+    try:
+        return jsonify({"alunos": _avisos.listar_alunos_novos(situacao, fonte)})
+    except ValueError as exc:
+        return jsonify({"alunos": [], "aviso": str(exc)})
+
+
 def _modelos_resposta(**extra):
     from src.comum import modelos_avisos as _modelos
     return jsonify({"modelos": _modelos.listar(), **extra})

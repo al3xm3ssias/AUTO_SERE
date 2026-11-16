@@ -311,12 +311,22 @@ def _bases_de_alunos(fonte: str) -> list[tuple[str, dict]]:
     return achadas
 
 
-def _alunos_da_base(base: dict, aceitas: set, vistos: set):
-    """(turma, aluno, cadastro) dos alunos novos que valem: situação aceita, sem tentativa substituída, sem repetir o CPF."""
+def id_do_aluno(a: dict) -> str:
+    """Identifica o aluno novo na tela e no pedido: o CPF; sem ele, o tr_id; sem os dois, o nome."""
+    return str(a.get("cpf") or a.get("tr_id") or "") or "nome:" + _sem_acento(a.get("nome"))
+
+
+def _alunos_da_base(base: dict, aceitas: set, vistos: set, escolhidos: Optional[set] = None):
+    """
+    (turma, aluno, cadastro) dos alunos novos que valem: situação aceita, sem tentativa substituída, sem repetir o CPF e,
+    se `escolhidos` (ids marcados na tela) não for vazio, só esses.
+    """
     cadastros = base.get("cadastros") or {}
     for turma, lista in (base.get("turmas_intencao") or {}).items():
         for a in lista or []:
             if a.get("substituido_por_nova_tentativa") or situacao_do_aluno(a) not in aceitas:
+                continue
+            if escolhidos and id_do_aluno(a) not in escolhidos:
                 continue
             cpf = str(a.get("cpf") or "")
             if cpf and cpf in vistos:                           # o mesmo aluno nos dois arquivos
@@ -330,18 +340,40 @@ def _alunos_da_base(base: dict, aceitas: set, vistos: set):
 _SITUACOES_ACEITAS = {"matriculados": {"matriculado"}, "aguardando": {"aguardando"}, "ambos": {"matriculado", "aguardando"}}
 
 
-def destinatarios_pais(situacao: str = "matriculados", fonte: str = "ano") -> dict:
+def listar_alunos_novos(situacao: str = "matriculados", fonte: str = "ano") -> list[dict]:
+    """
+    Os alunos novos para a tela escolher: [{id, nome, turma, fonte, estado, cgm, escola_origem, motivo}], por nome.
+    `estado`: "ok" (vínculo da Base ABC com CGM e escola), "verificar" (vínculo incompleto) ou "sem_vinculo" (a Consulta na
+    Base ABC ainda não achou/gravou o aluno). Mostra quem já está pronto para um texto com $CGM e $SERIE.
+    """
+    if situacao not in _SITUACOES_ACEITAS:
+        raise ValueError("Situação inválida: use matriculados, aguardando ou ambos.")
+    saida, vistos = [], set()
+    for rotulo, base in _bases_de_alunos(fonte):
+        for turma, a, cad in _alunos_da_base(base, _SITUACOES_ACEITAS[situacao], vistos):
+            v = a.get("vinculo_base_abc") or cad.get("vinculo_base_abc") or {}
+            cgm = re.sub(r"\D", "", str(v.get("cgm") or ""))
+            estado = "sem_vinculo" if not v else ("ok" if v.get("status") == "ok" and cgm and v.get("escola") else "verificar")
+            saida.append({"id": id_do_aluno(a), "nome": _uma_linha(a.get("nome") or cad.get("nome_aluno")),
+                          "turma": _uma_linha(str(turma).replace(" do Ensino Fundamental", "")), "fonte": rotulo,
+                          "estado": estado, "cgm": cgm, "escola_origem": _uma_linha(v.get("escola")),
+                          "motivo": _uma_linha(v.get("motivo"))})
+    return sorted(saida, key=lambda x: _sem_acento(x["nome"]))
+
+
+def destinatarios_pais(situacao: str = "matriculados", fonte: str = "ano", alunos=None) -> dict:
     """
     {"destinatarios": [{nome, email, contexto}], "sem_email": [descrições], "alunos": n}.
     Um destinatário por e-mail: responsável com vários filhos recebe uma mensagem só (também entre a pré-matrícula do
     ano e a previsão do próximo, se `fonte` for "ambas").
     """
     aceitas = _SITUACOES_ACEITAS[situacao]
+    escolhidos = set(_itens_unidades(alunos)) or None
     por_email: dict[str, dict] = {}
-    sem_email, alunos, vistos = [], 0, set()
+    sem_email, total_alunos, vistos = [], 0, set()
     for _rotulo, base in _bases_de_alunos(fonte):
-        for turma, a, cad in _alunos_da_base(base, aceitas, vistos):
-            alunos += 1
+        for turma, a, cad in _alunos_da_base(base, aceitas, vistos, escolhidos):
+            total_alunos += 1
             nome_aluno = _uma_linha(a.get("nome") or cad.get("nome_aluno"))
             emails = extrair_emails(cad.get("email"))
             if not emails:
@@ -360,7 +392,7 @@ def destinatarios_pais(situacao: str = "matriculados", fonte: str = "ano") -> di
         destinatarios.append({"nome": reg["nome"] or reg["email"], "email": reg["email"], "contexto": {
             "RESPONSAVEL": reg["nome"] or "Responsável", "ALUNO": _lista_com_e(reg["alunos"]),
             "TURMA": _lista_com_e(reg["turmas"])}})
-    return {"destinatarios": destinatarios, "sem_email": sem_email, "alunos": alunos}
+    return {"destinatarios": destinatarios, "sem_email": sem_email, "alunos": total_alunos}
 
 
 # ───────────── público: escolas, um e-mail por ALUNO que chega (pedido à escola de origem) ─────────────
@@ -378,7 +410,7 @@ def _achar_unidade(origem: str, unidades: list[dict]) -> Optional[dict]:
 
 
 def destinatarios_alunos_origem(situacao: str = "matriculados", fonte: str = "ano", tipo: str = "todas",
-                                filtro_nome: str = "", unidades=None) -> dict:
+                                filtro_nome: str = "", unidades=None, alunos=None) -> dict:
     """
     Um destinatário POR ALUNO novo: a escola de origem dele (do vínculo da Base ABC gravado na pré-matrícula/previsão),
     com o e-mail da lista coletada (o primeiro, se a escola tem mais de um).
@@ -389,6 +421,7 @@ def destinatarios_alunos_origem(situacao: str = "matriculados", fonte: str = "an
     """
     aceitas = _SITUACOES_ACEITAS[situacao]
     escolhidas = normalizar_unidades(unidades)
+    alunos_marcados = set(_itens_unidades(alunos)) or None
     filtro = _sem_acento(filtro_nome).strip()
     propria = escola.nome()
     lista = [{"nome": _uma_linha(e.get("nome")), "eh_cmei": _eh_cmei(e), "emails": extrair_emails(e.get("email"))}
@@ -397,7 +430,7 @@ def destinatarios_alunos_origem(situacao: str = "matriculados", fonte: str = "an
          "origem_desconhecida": [], "da_propria_escola": [], "fora_da_selecao": 0}
     vistos = set()
     for _rotulo, base in _bases_de_alunos(fonte):
-        for turma, a, cad in _alunos_da_base(base, aceitas, vistos):
+        for turma, a, cad in _alunos_da_base(base, aceitas, vistos, alunos_marcados):
             r["alunos"] += 1
             nome_aluno = _uma_linha(a.get("nome") or cad.get("nome_aluno"))
             turma_limpa = _uma_linha(str(turma).replace(" do Ensino Fundamental", ""))
@@ -480,7 +513,7 @@ def _inteiro_entre(valor, minimo: int, maximo: int, padrao: int, nome: str) -> i
 
 def validar_pedido(publico, canal, modo, assunto, mensagem, tipo_escola="todas", filtro_nome="",
                    situacao_pais="matriculados", email_teste="", unidades=None, fonte="ano",
-                   intervalo_s=INTERVALO_PADRAO_S, limite_lote=LOTE_PADRAO) -> dict:
+                   intervalo_s=INTERVALO_PADRAO_S, limite_lote=LOTE_PADRAO, alunos=None) -> dict:
     """Confere TUDO antes de qualquer envio. ValueError com mensagem pronta; devolve os parâmetros já normalizados."""
     publico, canal, modo = str(publico or ""), str(canal or "email"), str(modo or "simular")
     if publico not in PUBLICOS:
@@ -527,6 +560,7 @@ def validar_pedido(publico, canal, modo, assunto, mensagem, tipo_escola="todas",
             "tipo_escola": str(tipo_escola or "todas"), "filtro_nome": str(filtro_nome or "").strip(),
             "situacao_pais": str(situacao_pais or "matriculados"), "email_teste": email_teste,
             "unidades": _itens_unidades(unidades), "fonte": str(fonte or "ano"), "por_aluno": por_aluno,
+            "alunos": _itens_unidades(alunos),
             "intervalo_s": intervalo, "limite_lote": lote}
 
 
@@ -553,16 +587,16 @@ def _por_que_nao_ha_alunos(r: dict) -> str:
 
 
 def reunir_destinatarios(publico: str, tipo_escola="todas", filtro_nome="", situacao_pais="matriculados",
-                         unidades=None, fonte="ano", por_aluno=False) -> dict:
+                         unidades=None, fonte="ano", por_aluno=False, alunos=None) -> dict:
     if publico == "escolas" and por_aluno:
-        r = destinatarios_alunos_origem(situacao_pais, fonte, tipo_escola, filtro_nome, unidades)
+        r = destinatarios_alunos_origem(situacao_pais, fonte, tipo_escola, filtro_nome, unidades, alunos)
         if not r["destinatarios"]:
             raise ValueError(_por_que_nao_ha_alunos(r))
         return r
     if publico == "escolas":
         r = destinatarios_escolas(tipo_escola, filtro_nome, unidades)
     else:
-        r = destinatarios_pais(situacao_pais, fonte)
+        r = destinatarios_pais(situacao_pais, fonte, alunos)
     if not r["destinatarios"]:
         raise ValueError("Nenhum destinatário com e-mail válido para este público e estes filtros.")
     return r
@@ -740,19 +774,19 @@ def _rotulo_destinatario(m: dict) -> str:
 
 def executar_avisos(publico, canal, modo, assunto, mensagem, tipo_escola="todas", filtro_nome="",
                     situacao_pais="matriculados", email_teste="", unidades=None, fonte="ano",
-                    intervalo_s=INTERVALO_PADRAO_S, limite_lote=LOTE_PADRAO, modelo="") -> dict:
+                    intervalo_s=INTERVALO_PADRAO_S, limite_lote=LOTE_PADRAO, modelo="", alunos=None) -> dict:
     """
     Monta o comunicado e, conforme o modo: só simula; envia UM e-mail de teste; ou envia de verdade (só depois de uma
     simulação do mesmo comunicado). Devolve {"modo","publico","canal","total","simulados","enviados_teste","enviados","falhas",
     "ja_enviados","restantes","sem_email","registro"}.
     """
     p = validar_pedido(publico, canal, modo, assunto, mensagem, tipo_escola, filtro_nome, situacao_pais, email_teste,
-                       unidades, fonte, intervalo_s, limite_lote)
+                       unidades, fonte, intervalo_s, limite_lote, alunos)
     ficticia = teste_com_escola_ficticia(p["publico"], p["modo"])
     aviso_lista = ""
     try:
         r = reunir_destinatarios(p["publico"], p["tipo_escola"], p["filtro_nome"], p["situacao_pais"],
-                                 p["unidades"], p["fonte"], p["por_aluno"])
+                                 p["unidades"], p["fonte"], p["por_aluno"], p["alunos"])
     except ValueError as exc:
         if not ficticia:
             raise
@@ -797,7 +831,7 @@ def executar_avisos(publico, canal, modo, assunto, mensagem, tipo_escola="todas"
         "gerado_em": datetime.now().isoformat(timespec="seconds"), "publico": p["publico"], "canal": p["canal"],
         "modo": p["modo"], "modelo": str(modelo or ""), "assunto": p["assunto"], "mensagem": p["mensagem"], "filtros": {
             "tipo_escola": p["tipo_escola"], "filtro_nome": p["filtro_nome"], "situacao_pais": p["situacao_pais"],
-            "unidades": p["unidades"], "fonte": p["fonte"], "por_aluno": p["por_aluno"]},
+            "unidades": p["unidades"], "fonte": p["fonte"], "por_aluno": p["por_aluno"], "alunos": p["alunos"]},
         "total": total, "sem_email": r["sem_email"], "excluidas": r.get("excluidas", []),
         "mensagens": [{k: v for k, v in m.items() if k != "chave"} for m in mensagens]}
 

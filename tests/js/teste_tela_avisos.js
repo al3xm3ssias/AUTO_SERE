@@ -15,6 +15,14 @@ w.fetch = async (url, op = {}) => {
   const ok = (j, status = 200) => ({ ok: status < 400, status, json: async () => j });
   if (url.endsWith("/componentes")) return ok(salvou ? D.info2 : D.info);
   if (url.endsWith("/avisos/unidades")) return ok({ unidades: D.unidades });
+  if (url.includes("/avisos/alunos")) {
+    const f = new URL("http://x" + url).searchParams.get("fonte");
+    if (f === "proximo") return ok({ alunos: [], aviso: "Ainda não existe previsao_alunos_2027.json" });
+    return ok({ alunos: [
+      { id: "111", nome: "ANA LIMA", turma: "Infantil IV", fonte: "ano", estado: "ok", cgm: "1000000001", escola_origem: "ESCOLA MUNICIPAL ANA NERI", motivo: "" },
+      { id: "112", nome: "BETO <i>LIMA</i>", turma: "1º Ano", fonte: "ano", estado: "sem_vinculo", cgm: "", escola_origem: "", motivo: "" },
+      { id: "118", nome: "HUGO MELO", turma: "1º Ano", fonte: "ano", estado: "verificar", cgm: "", escola_origem: "X", motivo: "sem linha de 2026" }] });
+  }
   if (url.endsWith("/previa")) return ok({ texto: "prévia", aviso: false });
   if (url.endsWith("/avisos/modelos") && metodo === "POST") { salvou = true; return ok({ modelo: { id: "meu-modelo", nome: "Meu modelo" }, modelos: [] }); }
   if (url.includes("/avisos/modelos/") && metodo === "DELETE") { return ok({ acao: "excluido", modelos: [] }); }
@@ -82,6 +90,29 @@ const marcar = (cx, v) => { cx.checked = v; cx.dispatchEvent(new w.Event("change
   ok($("campo-unidades").value === "[]" && cx("Todas as escolas e CMEIs").checked, "desmarcar tudo volta para 'Todas'");
   marcar(cx("Ana Néri"), true);
 
+  console.log("# quais alunos (lista com estado do vínculo)");
+  const alunosLinhas = () => [...$("campo-alunos-lista").querySelectorAll("label")].map((l) => l.textContent.replace(/\s+/g, " ").trim());
+  ok(alunosLinhas().length === 3, "3 alunos listados: " + JSON.stringify(alunosLinhas()));
+  ok(alunosLinhas()[0].includes("CGM 1000000001") && alunosLinhas()[0].includes("ANA NERI"), "aluno com vínculo ok mostra o CGM e a escola de origem");
+  ok(alunosLinhas()[1].includes("sem vínculo da Base ABC"), "aluno sem vínculo é sinalizado");
+  ok(alunosLinhas()[2].includes("vínculo a verificar: sem linha de 2026"), "vínculo a verificar mostra o motivo");
+  ok(!$("campo-alunos-lista").innerHTML.includes("<i>LIMA"), "nome com HTML é escapado");
+  ok($("campo-alunos").value === "[]" && $("campo-alunos-resumo").textContent.includes("todos (3)"), "nada marcado = todos");
+  $("campo-alunos-marcar-ok").click(); await esperar();
+  ok($("campo-alunos").value === '["111"]', "'Marcar quem tem CGM ok' marca só o aluno ok: " + $("campo-alunos").value);
+  marcar($("campo-alunos-lista").querySelectorAll("input")[1], true);
+  ok($("campo-alunos").value === '["111","112"]', "marcar mais um aluno: " + $("campo-alunos").value);
+  $("campo-alunos-busca").value = "hugo"; $("campo-alunos-busca").dispatchEvent(new w.Event("input"));
+  ok(alunosLinhas().length === 1 && alunosLinhas()[0].includes("HUGO"), "busca de aluno");
+  $("campo-alunos-busca").value = ""; $("campo-alunos-busca").dispatchEvent(new w.Event("input"));
+  chamadas.length = 0; mudar($("campo-fonte-alunos"), "proximo"); await esperar(60);
+  ok(chamadas.some((c) => c[1].includes("/avisos/alunos") && c[1].includes("fonte=proximo") && c[1].includes("situacao=matriculados")), "trocar a fonte recarrega a lista");
+  ok($("campo-alunos-lista").textContent.includes("previsao_alunos_2027.json") && $("campo-alunos").value === "[]", "fonte sem arquivo: mostra o aviso e descarta as marcações que sumiram");
+  mudar($("campo-fonte-alunos"), "ambas"); await esperar(60);
+  $("campo-alunos-limpar").click();
+  ok($("campo-alunos").value === "[]", "Limpar desmarca tudo");
+  marcar($("campo-alunos-lista").querySelectorAll("input")[0], true);
+
   console.log("# tipo de mensagem carrega o texto");
   const tipo = $("campo-tipo-mensagem");
   ok([...tipo.options].map((o) => o.value).join() === "livre,transferencia", "opções: " + [...tipo.options].map((o) => o.value));
@@ -97,6 +128,7 @@ const marcar = (cx, v) => { cx.checked = v; cx.dispatchEvent(new w.Event("change
   const p = w.eval("_execMontarPayload()");
   ok(p.unidades === '["Escola Municipal Ana Néri"]' && p.publico === "escolas" && p.modo === "simular" && p.tipo_mensagem === "livre", "payload: " + JSON.stringify({u: p.unidades, p: p.publico, m: p.modo, t: p.tipo_mensagem}));
   ok(p.fonte === "ambas" && p.intervalo_s === "10" && p.limite_lote === "50", "fonte/pausa/limite no payload");
+  ok(p.alunos === '["111"]', "alunos marcados no payload: " + p.alunos);
   ok(!("email_teste" in p) && !("filtro_nome" in p), "sem e-mail de teste nem filtro no payload");
 
   console.log("# confirmação só no modo enviar");

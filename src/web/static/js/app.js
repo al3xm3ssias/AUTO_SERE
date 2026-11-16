@@ -1893,6 +1893,22 @@ function campoHTML(campo) {
         ${campo.ajuda ? `<div class="campo-ajuda">${campo.ajuda}</div>` : ""}
       </div>`;
   }
+  if (campo.tipo === "alunos") {
+    // Alunos novos para marcar (pré-matrícula/previsão), cada um com o estado do vínculo da Base ABC; [] = todos
+    return `
+      <div class="field"${cond}>
+        <label>${campo.label}</label>
+        <input type="text" class="unidades-busca" id="${campo.id}-busca" placeholder="Pesquisar aluno…" autocomplete="off">
+        <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+          <button type="button" class="btn-sm" id="${campo.id}-marcar-ok">Marcar quem tem CGM ok</button>
+          <button type="button" class="btn-sm" id="${campo.id}-limpar">Limpar</button>
+        </div>
+        <div class="checklist alunos-lista" id="${campo.id}-lista" data-campo="${campo.id}" style="margin-top:8px; max-height:240px; overflow:auto;">Carregando alunos…</div>
+        <input id="${campo.id}" type="text"${nome} value="[]" style="display:none">
+        <div class="campo-ajuda" id="${campo.id}-resumo"></div>
+        ${campo.ajuda ? `<div class="campo-ajuda">${campo.ajuda}</div>` : ""}
+      </div>`;
+  }
   if (campo.tipo === "modelo_acoes") {
     return `
       <div class="field"${cond} id="${campo.id}">
@@ -2230,6 +2246,75 @@ async function inicializarCampoUnidades() {
   sincronizar();
 }
 
+/** Lista os alunos novos (conforme "Quais alunos novos" e "De onde vêm") com o estado do vínculo da Base ABC. Nada marcado = todos. */
+async function inicializarCampoAlunos() {
+  const lista = document.querySelector("#campos-automacao .alunos-lista");
+  if (!lista) return;
+  const id = lista.dataset.campo;
+  const oculto = document.getElementById(id);
+  const busca = document.getElementById(`${id}-busca`);
+  const resumo = document.getElementById(`${id}-resumo`);
+  const marcados = new Set();
+  let alunos = [];
+  let aviso = "";
+
+  const selo = (a) => {
+    if (a.estado === "ok") return { texto: `CGM ${a.cgm} · ${a.escola_origem}`, cor: "var(--cyan)" };
+    if (a.estado === "verificar") return { texto: `vínculo a verificar${a.motivo ? ": " + a.motivo : ""}`, cor: "var(--amber)" };
+    return { texto: "sem vínculo da Base ABC (rode a consulta)", cor: "var(--amber)" };
+  };
+  const sincronizar = () => {
+    oculto.value = JSON.stringify([...marcados]);
+    resumo.textContent = marcados.size ? `${marcados.size} aluno(s) marcado(s).` : `Nenhum marcado: vale para todos (${alunos.length}).`;
+    agendarPrevia();
+  };
+  const desenhar = () => {
+    const termo = _semAcentoJS(busca.value).trim();
+    const visiveis = alunos.filter((a) => !termo || _semAcentoJS(`${a.nome} ${a.turma}`).includes(termo));
+    lista.innerHTML = visiveis.length
+      ? visiveis.map((a) => {
+          const s = selo(a);
+          return `
+          <label class="checklist-item" style="align-items:flex-start;">
+            <input type="checkbox" value="${_escHtml(a.id)}"${marcados.has(a.id) ? " checked" : ""}>
+            <span>${_escHtml(a.nome)} <small style="color:var(--txt3)">(${_escHtml(a.turma)})</small><br><small style="color:${s.cor}">${_escHtml(s.texto)}</small></span>
+          </label>`;
+        }).join("")
+      : `<div class="campo-ajuda">${_escHtml(aviso || "Nenhum aluno encontrado.")}</div>`;
+  };
+  const carregar = async () => {
+    const situacao = document.getElementById("campo-situacao-pais")?.value || "matriculados";
+    const fonte = document.getElementById("campo-fonte-alunos")?.value || "ano";
+    try {
+      const r = await apiGet(`/avisos/alunos?situacao=${encodeURIComponent(situacao)}&fonte=${encodeURIComponent(fonte)}`);
+      alunos = r.alunos || [];
+      aviso = r.aviso || "";
+    } catch (e) {
+      alunos = [];
+      aviso = "Não foi possível carregar os alunos.";
+    }
+    const existentes = new Set(alunos.map((a) => a.id));
+    [...marcados].forEach((i) => { if (!existentes.has(i)) marcados.delete(i); });     // trocou a fonte: some quem não está mais
+    desenhar();
+    sincronizar();
+  };
+  lista.addEventListener("change", (ev) => {
+    const cx = ev.target;
+    if (!(cx instanceof HTMLInputElement) || cx.type !== "checkbox") return;
+    if (cx.checked) marcados.add(cx.value); else marcados.delete(cx.value);
+    sincronizar();
+  });
+  busca.addEventListener("input", desenhar);
+  document.getElementById(`${id}-marcar-ok`)?.addEventListener("click", () => {
+    alunos.filter((a) => a.estado === "ok").forEach((a) => marcados.add(a.id));
+    desenhar();
+    sincronizar();
+  });
+  document.getElementById(`${id}-limpar`)?.addEventListener("click", () => { marcados.clear(); desenhar(); sincronizar(); });
+  ["campo-situacao-pais", "campo-fonte-alunos"].forEach((c) => document.getElementById(c)?.addEventListener("change", carregar));
+  await carregar();
+}
+
 const _modeloDaTela = () => {
   const campo = (_infoComponentes?.extras || []).find((c) => c.id === "campo-tipo-mensagem");
   const valor = document.getElementById("campo-tipo-mensagem")?.value;
@@ -2305,6 +2390,7 @@ async function excluirModeloDeMensagem() {
 /** Liga o que é só da tela "Mandar avisos" (lista de unidades, tipo de mensagem). Sem esses campos, não faz nada. */
 function inicializarCamposAvisos() {
   inicializarCampoUnidades();
+  inicializarCampoAlunos();
   document.getElementById("campo-tipo-mensagem")?.addEventListener("change", aplicarModeloEscolhido);
   document.getElementById("btn-modelo-salvar")?.addEventListener("click", salvarModeloDeMensagem);
   document.getElementById("btn-modelo-excluir")?.addEventListener("click", excluirModeloDeMensagem);

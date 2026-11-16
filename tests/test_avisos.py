@@ -407,7 +407,7 @@ def test_registrada(amb):
     s = reg.obter("avisos")
     assert s is not None and "avisos" not in rotas.AUTOMACOES_NAO_IMPLEMENTADAS and s.confirmar is False
     nomes = [e["nome"] for e in s.extras()]
-    assert nomes == ["publico", "canal", "modo", "unidades", "situacao_pais", "fonte", "tipo_mensagem", "modelo_acoes",
+    assert nomes == ["publico", "canal", "modo", "unidades", "situacao_pais", "fonte", "alunos", "tipo_mensagem", "modelo_acoes",
                      "assunto", "mensagem", "intervalo_s", "limite_lote"]
     assert "filtro_nome" not in nomes and "email_teste" not in nomes                  # saíram da tela a pedido
     mensagem = next(e for e in s.extras() if e["nome"] == "mensagem")
@@ -1043,3 +1043,68 @@ def test_arquivo_de_modelos_quebrado_vira_erro_e_nao_e_apagado(web, amb, modelos
     assert web.get("/web/api/avisos/modelos").status_code == 400
     assert web.post("/web/api/avisos/modelos", json={"nome": "X", "assunto": "A", "mensagem": "B"}).status_code == 400
     assert modelos.read_text(encoding="utf-8") == "{ quebrado"
+
+
+# ───────────── escolher os alunos na tela ─────────────
+
+def test_listar_alunos_novos_mostra_o_estado_do_vinculo_de_cada_um(chegando):
+    por_nome = {a["nome"]: a for a in av.listar_alunos_novos()}
+    assert list(por_nome) == sorted(por_nome, key=av._sem_acento) and len(por_nome) == 6          # só os matriculados, por nome
+    ana = por_nome["ANA LIMA"]
+    assert (ana["estado"], ana["cgm"], ana["escola_origem"], ana["turma"], ana["id"]) == ("ok", "1000000001", "ESCOLA MUNICIPAL ANA NERI", "Infantil IV", "111")
+    assert por_nome["HUGO MELO"]["estado"] == "verificar" and por_nome["HUGO MELO"]["motivo"] == "sem linha de 2026"
+    assert av.listar_alunos_novos("ambos")[0]["nome"] == "ANA LIMA" and len(av.listar_alunos_novos("ambos")) == 7
+    assert [a["nome"] for a in av.listar_alunos_novos("aguardando")] == ["CAIO PAIVA"]
+    assert [a for a in av.listar_alunos_novos("ambos") if a["nome"] == "CAIO PAIVA"][0]["estado"] == "sem_vinculo"
+
+
+def test_listar_alunos_novos_valida_e_explica(amb):
+    with pytest.raises(ValueError, match="Situação inválida"):
+        av.listar_alunos_novos("todos")
+    with pytest.raises(ValueError, match="previsao_alunos_2027.json"):
+        av.listar_alunos_novos("matriculados", "proximo")
+
+
+def test_aluno_sem_cpf_tem_id_pelo_tr_id_ou_pelo_nome():
+    assert av.id_do_aluno({"cpf": "111", "tr_id": "T1", "nome": "A"}) == "111"
+    assert av.id_do_aluno({"tr_id": "T1", "nome": "A"}) == "T1"
+    assert av.id_do_aluno({"nome": "Áurea Dias"}) == "nome:aurea dias"
+
+
+def test_so_os_alunos_marcados_recebem_o_comunicado(chegando, smtp, sem_espera):
+    r = av.destinatarios_alunos_origem(alunos=["112"])
+    assert [d["contexto"]["ALUNO"] for d in r["destinatarios"]] == ["BETO LIMA"] and r["alunos"] == 1
+    assert [d["contexto"]["ALUNO"] for d in av.destinatarios_alunos_origem(alunos='["111", "112"]')["destinatarios"]] == ["ANA LIMA", "BETO LIMA"]
+    av.executar_avisos(**_args(**TRANSF, alunos=["112"]))
+    with pytest.raises(ValueError, match="rode o modo .Simular."):                      # outra seleção = outro comunicado
+        av.executar_avisos(**_args(**TRANSF, modo="enviar"))
+    r = av.executar_avisos(**_args(**TRANSF, modo="enviar", alunos=["112"]))
+    assert r["enviados"] == 1 and [e["para"] for e in smtp] == ["sj@pg.gov.br"] and "BETO LIMA" in smtp[0]["assunto"]
+    registro = json.loads(Path(r["registro"]).read_text(encoding="utf-8"))
+    assert registro["filtros"]["alunos"] == ["112"]
+
+
+def test_marcar_so_quem_nao_tem_vinculo_explica_o_motivo(chegando):
+    with pytest.raises(ValueError, match=r"Nenhum aluno novo com escola de origem e e-mail.*1 aluno\(s\) novo\(s\) lido\(s\).*1 sem o vínculo"):
+        av.reunir_destinatarios("escolas", situacao_pais="ambos", por_aluno=True, alunos=["113"])      # CAIO: nunca consultado
+
+
+def test_pais_tambem_filtram_pelos_alunos_marcados(amb):
+    r = av.destinatarios_pais("matriculados", "ano", alunos=["111"])
+    assert [d["email"] for d in r["destinatarios"]] == ["mae@x.com"] and r["alunos"] == 1
+    assert [d["contexto"]["ALUNO"] for d in r["destinatarios"]] == ["ANA LIMA"]                         # BETO (mesma mãe) fica de fora
+
+
+def test_rota_de_alunos_novos(web, chegando):
+    r = web.get("/web/api/avisos/alunos?situacao=matriculados&fonte=ano").get_json()
+    assert [a["nome"] for a in r["alunos"]][:2] == ["ANA LIMA", "BETO LIMA"] and r["alunos"][0]["estado"] == "ok"
+    r = web.get("/web/api/avisos/alunos?fonte=proximo").get_json()
+    assert r["alunos"] == [] and "previsao_alunos_2027.json" in r["aviso"]                              # a tela mostra o aviso
+    assert web.get("/web/api/avisos/alunos?situacao=x").status_code == 400
+    assert web.get("/web/api/avisos/alunos?fonte=x").status_code == 400
+
+
+def test_previa_respeita_os_alunos_marcados(web, chegando):
+    d = web.post("/web/api/automacoes/avisos/previa", json={"publico": "escolas", "alunos": '["111"]',
+                                                           **{k: TRANSF[k] for k in ("assunto", "mensagem")}}).get_json()["texto"]
+    assert d.startswith("1 e-mail(s) para escolas de origem, um por aluno que chega (de 1 aluno(s) novo(s))")
