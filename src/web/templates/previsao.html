@@ -1,5 +1,6 @@
 {# Módulo "Previsão <ano letivo + 1>": rematriculados + alunos novos da pré-matrícula do próximo ano.
-   Dados: GET /web/api/previsao (regra em src/comum/previsao.py). JS: static/js/previsao.js (carregarPrevisao). #}
+   Dados: GET /web/api/previsao (regra em src/comum/previsao.py). JS: static/js/previsao.js (carregarPrevisao).
+   Três visões: Lista geral · Por turma (uma turma de cada vez) · Ficaram de fora (matriculados hoje sem rematrícula). #}
 <section class="section" id="sec-previsao" data-title="Previsão {{ (ano_letivo | int) + 1 }}">
 
   <div class="page-header">
@@ -9,40 +10,108 @@
       <p>Alunos rematriculados para o próximo ano letivo + alunos novos da pré-matrícula</p>
     </div>
     <div class="page-header-actions">
-      <button class="btn-sm" id="pv-exportar" type="button" title="Baixa a lista exibida em CSV (abre no Excel)"><span data-icon="download"></span> Exportar</button>
+      <button class="btn-sm" id="pv-exportar" type="button" title="Baixa em CSV (abre no Excel) a lista da visão que está aberta"><span data-icon="download"></span> Exportar</button>
     </div>
   </div>
 
   <div class="stat-grid" id="pv-cartoes"></div>
   <div class="pv-avisos" id="pv-avisos"></div>
 
-  <div class="card">
-    <div class="card-header">
-      <span data-icon="users" style="color:var(--txt3)"></span>
-      <span class="card-title">Alunos da previsão</span>
-      <span class="card-header-badge" id="pv-cnt">0</span>
-    </div>
-    <div class="card-body">
-      <div class="fbar">
-        <button class="pill active" data-pvtab="todos">Todos</button>
-        <button class="pill" data-pvtab="rematriculado">Rematriculados</button>
-        <button class="pill" data-pvtab="novo">Novos</button>
-        <div class="sbox-wrap" style="margin-left:auto">
-          <span data-icon="search"></span>
-          <input type="text" class="sbox" id="pv-busca" placeholder="Buscar nome, CGM, CPF, turma…">
+  <div class="fbar pv-views">
+    <button class="pill active" type="button" data-pvview="lista">Lista geral</button>
+    <button class="pill" type="button" data-pvview="turmas">Por turma</button>
+    <button class="pill" type="button" data-pvview="fora">Ficaram de fora <span id="pv-fora-n"></span></button>
+  </div>
+
+  {# ───────── visão 1: lista geral ───────── #}
+  <div id="pv-view-lista">
+    <div class="card">
+      <div class="card-header">
+        <span data-icon="users" style="color:var(--txt3)"></span>
+        <span class="card-title">Alunos da previsão</span>
+        <span class="card-header-badge" id="pv-cnt">0</span>
+      </div>
+      <div class="card-body">
+        <div class="fbar">
+          <button class="pill active" data-pvtab="todos">Todos</button>
+          <button class="pill" data-pvtab="rematriculado">Rematriculados</button>
+          <button class="pill" data-pvtab="novo">Novos</button>
+          <select class="pv-select" id="pv-turma" title="Mostra só uma turma"></select>
+          <label class="pv-check"><input type="checkbox" id="pv-agrupar" checked> separar por turma</label>
+          <div class="sbox-wrap" style="margin-left:auto">
+            <span data-icon="search"></span>
+            <input type="text" class="sbox" id="pv-busca" placeholder="Buscar nome, CGM, CPF, turma…">
+          </div>
+        </div>
+      </div>
+      <div class="card-body no-pad">
+        <div class="tbl-wrap" style="border:none; border-radius:0">
+          <table>
+            <thead>
+              <tr><th>Aluno</th><th>Tipo</th><th>Turma {{ (ano_letivo | int) + 1 }}</th><th>CGM / CPF</th><th>Nascimento</th><th>Situação</th><th>Responsável</th></tr>
+            </thead>
+            <tbody id="pv-tbody"></tbody>
+          </table>
+          <div class="empty" id="pv-vazio" style="display:none">
+            <span data-icon="search"></span><span id="pv-vazio-msg">Nenhum resultado.</span>
+          </div>
         </div>
       </div>
     </div>
-    <div class="card-body no-pad">
-      <div class="tbl-wrap" style="border:none; border-radius:0">
-        <table>
-          <thead>
-            <tr><th>Aluno</th><th>Tipo</th><th>Turma</th><th>CGM / CPF</th><th>Nascimento</th><th>Situação</th><th>Responsável</th></tr>
-          </thead>
-          <tbody id="pv-tbody"></tbody>
-        </table>
-        <div class="empty" id="pv-vazio" style="display:none">
-          <span data-icon="search"></span><span id="pv-vazio-msg">Nenhum resultado.</span>
+  </div>
+
+  {# ───────── visão 2: por turma ───────── #}
+  <div id="pv-view-turmas" style="display:none">
+    <div class="pv-tiles" id="pv-tiles"></div>
+    <div class="card" id="pv-turma-detalhe"></div>
+  </div>
+
+  {# ───────── visão 3: ficaram de fora ───────── #}
+  <div id="pv-view-fora" style="display:none">
+    <div class="card">
+      <div class="card-header">
+        <span data-icon="transfer" style="color:var(--txt3)"></span>
+        <span class="card-title">Rematrícula por série</span>
+        <span class="card-header-badge" id="pv-fora-base"></span>
+      </div>
+      <div class="card-body">
+        <p class="campo-ajuda" style="margin:0">Compara quem está matriculado hoje (turmas.json) com quem entrou na previsão. Transferidos durante o ano ficam de fora da conta. A última série da escola é de concluintes: não se espera rematrícula deles.</p>
+      </div>
+      <div class="card-body no-pad">
+        <div class="tbl-wrap" style="border:none; border-radius:0">
+          <table>
+            <thead><tr><th>Série hoje</th><th>Matriculados</th><th>Na previsão</th><th>Ficaram de fora</th><th>Rematricularam</th></tr></thead>
+            <tbody id="pv-fora-series"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span data-icon="search" style="color:var(--txt3)"></span>
+        <span class="card-title">Alunos que não rematricularam</span>
+        <span class="card-header-badge" id="pv-fora-cnt">0</span>
+      </div>
+      <div class="card-body">
+        <div class="fbar" id="pv-fora-pills"></div>
+        <div class="fbar">
+          <select class="pv-select" id="pv-fora-turma" title="Mostra só uma turma de hoje"></select>
+          <div class="sbox-wrap" style="margin-left:auto">
+            <span data-icon="search"></span>
+            <input type="text" class="sbox" id="pv-fora-busca" placeholder="Buscar nome, CGM, turma, responsável…">
+          </div>
+        </div>
+      </div>
+      <div class="card-body no-pad">
+        <div class="tbl-wrap" style="border:none; border-radius:0">
+          <table>
+            <thead><tr><th>Aluno</th><th>Turma hoje</th><th>Iria para</th><th>CGM</th><th>Nascimento</th><th>Motivo provável</th><th>Responsável</th></tr></thead>
+            <tbody id="pv-fora-tbody"></tbody>
+          </table>
+          <div class="empty" id="pv-fora-vazio" style="display:none">
+            <span data-icon="search"></span><span id="pv-fora-vazio-msg">Nenhum resultado.</span>
+          </div>
         </div>
       </div>
     </div>

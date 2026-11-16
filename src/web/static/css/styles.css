@@ -1954,3 +1954,36 @@ tbody td{padding:11px 14px;vertical-align:middle}
 .hist-log{margin-top:12px}
 .hist-log>summary{cursor:pointer;font-size:.74rem;color:var(--txt3)}
 .hist-log pre{margin:8px 0 0;max-height:240px;overflow:auto;padding:10px 12px;background:var(--surface2,#0d1117);border:1px solid var(--border);border-radius:8px;font-family:var(--mono);font-size:.66rem;line-height:1.5;color:var(--txt2);white-space:pre-wrap;word-break:break-word}
+
+/* ══════════════════════════════════════════════════════════════════════
+   PREVISÃO — visões (lista / por turma / ficaram de fora)
+══════════════════════════════════════════════════════════════════════ */
+.pv-views{margin-bottom:18px}
+.pv-select{
+  background:var(--surface2);border:1px solid var(--border);color:var(--txt2);
+  font-family:var(--mono);font-size:.7rem;padding:5px 10px;border-radius:20px;cursor:pointer;max-width:230px;
+}
+.pv-select:hover,.pv-select:focus{border-color:var(--cyan);color:var(--txt);outline:none}
+.pv-check{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:.7rem;color:var(--txt2);cursor:pointer;padding:0 6px}
+.pv-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-bottom:18px}
+.pv-tile{
+  text-align:left;background:var(--card-bg);border:1px solid var(--card-brd);border-radius:var(--radius-lg);
+  padding:14px 16px;cursor:pointer;color:var(--txt);display:flex;flex-direction:column;gap:3px;
+  transition:border-color var(--transition),box-shadow var(--transition);font:inherit;
+}
+.pv-tile:hover{border-color:var(--border2);box-shadow:var(--shadow)}
+.pv-tile.active{border-color:var(--cyan);box-shadow:0 0 0 1px var(--cyan) inset}
+.pv-tile-nome{font-weight:600;font-size:.9rem}
+.pv-tile-total{font-size:1.7rem;font-weight:700;line-height:1.1;letter-spacing:-1px;color:var(--cyan)}
+.pv-tile-sub{font-family:var(--mono);font-size:.68rem;color:var(--txt3)}
+.pv-tile-fora{font-family:var(--mono);font-size:.68rem;color:var(--rose)}
+.pv-grupo td{
+  background:var(--surface2);font-family:var(--mono);font-size:.7rem;font-weight:600;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--txt2);padding:8px 14px;border-top:1px solid var(--border);
+}
+.pv-grupo td span{color:var(--txt3);font-weight:500;text-transform:none;letter-spacing:0;margin-left:8px}
+.pv-origens{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.pv-detalhe-sep{font-family:var(--mono);font-size:.7rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--rose);padding:10px 14px;border-top:1px solid var(--border);background:var(--surface2)}
+.pv-barra{display:inline-block;width:70px;height:6px;border-radius:3px;background:var(--surface2);border:1px solid var(--border);vertical-align:middle;margin-right:8px;overflow:hidden}
+.pv-barra>i{display:block;height:100%;background:var(--lime)}
+#sec-previsao td small{display:block;font-family:var(--mono);font-size:.68rem;color:var(--txt3);font-weight:500;margin-top:2px;white-space:normal}

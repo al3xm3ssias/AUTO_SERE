@@ -100,3 +100,20 @@ A rematrícula e o "Gerar chaves" usam **uma única página logada** no SERE dur
 partir da mesma tela, como o `alunos.py`; entre seções volta pelo botão "Voltar" ou pelo menu. O SERE só
 aceita uma sessão por usuário, por isso não se abre página nova com login a cada etapa. Só se loga de novo
 se a sessão cair ou depois de um erro crítico. A Área do Aluno continua em páginas próprias (outro site).
+
+
+## Previsão do próximo ano (tela "Previsão <ano+1>") — atualização de 16/11/2026
+- **Turma do ano que vem.** `rematriculas_sucesso.json` guarda a turma em que o aluno está **hoje** (ex.: `1º Ano - A`). A previsão
+  promove à série seguinte (`proxima_turma` em `src/comum/previsao.py`): Infantil IV → Infantil V → 1º Ano → 2º Ano … A seção (letra)
+  é descartada, pois as turmas do ano seguinte ainda não existem; "Integral" é mantido. A turma de hoje fica em `turma_atual`
+  (aparece como "hoje: …" na tela). Nome sem série reconhecível não é alterado e gera aviso. Os **novos** da pré-matrícula já trazem
+  a turma de destino; só têm o rótulo padronizado ("1º Ano do Ensino Fundamental" → "1º Ano") para caírem na mesma turma.
+- **Visão "Por turma".** Um cartão por turma de destino (rematriculados + novos). Ao clicar, abre só aquela turma: de quais turmas
+  de hoje vêm os alunos, novos com vaga/aguardando e a lista dos **esperados que ainda não rematricularam**. "Exportar" baixa a turma aberta.
+- **Visão "Ficaram de fora"** (`analisar_fora_da_rematricula`). Matriculados hoje em `turmas.json` que não estão na previsão.
+  **Transferidos durante o ano são ignorados.** Motivo provável, por prioridade: `erro_rematricula` (consta em `rematriculas_erro.json`),
+  `outra_escola` (cadastro da pré-matrícula refeito em outra escola), `cancelou` (pré-matrícula cancelada / saiu da fila sem confirmação)
+  e `sem_registro`. Alunos da **última série da escola** (maior série entre os matriculados) são `concluinte`: aparecem à parte e não
+  entram na contagem de "ficaram de fora". Quem fez a pré-matrícula do próximo ano (mesmo já sendo aluno) está na previsão, não aqui.
+  Responsável e telefone vêm de `alunos_completo.json`, quando existir. A tabela "Rematrícula por série" mostra o percentual por série.
+- Só leitura: nada é gravado nem enviado ao SERE.

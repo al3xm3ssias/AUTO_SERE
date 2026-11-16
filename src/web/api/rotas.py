@@ -773,7 +773,8 @@ def prematricula_fila():
 def previsao_alunos_rota():
     """
     Módulo "Previsão <ano letivo + 1>": rematriculados (rematriculas_sucesso.json) + alunos novos da pré-matrícula do próximo
-    ano (previsao_alunos_<ano+1>.json), sem repetir quem está nos dois. Só lê; regra em src.comum.previsao.
+    ano (previsao_alunos_<ano+1>.json), sem repetir quem está nos dois. A turma exibida é a do ano que vem (série seguinte).
+    Também devolve "turmas" (resumo por turma) e "fora" (matriculados hoje que não rematricularam). Só lê; regra em src.comum.previsao.
     """
     from src.comum import previsao as _previsao
     from src.comum.arquivos_json import ArquivoJsonCorrompidoError
@@ -789,6 +790,11 @@ def previsao_alunos_rota():
         _cartao("Rematriculados", c["rematriculados"], "rematrícula confirmada", "lime", "student"),
         _cartao("Novos (pré-matrícula)", c["novos"], f"{c['novos_matriculados']} com vaga · {c['novos_pendentes']} aguardando", "amber", "clipboard"),
     ]
+    fora = dados["fora"]
+    if fora["disponivel"]:
+        cf = fora["contagem"]
+        sub = f"de {cf['ativos']} matriculados hoje · {cf['concluintes']} concluintes à parte"
+        dados["cartoes"].append(_cartao("Ficaram de fora", cf["total"], sub, "rose", "transfer"))
     return jsonify(dados)
 
 

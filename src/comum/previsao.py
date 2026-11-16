@@ -16,6 +16,15 @@ Dois assuntos, os dois do ano letivo SEGUINTE ao que está em uso:
        (vaga confirmada) ou pendente (aguardando). Cancelados ficam de fora.
    Quem aparece nas duas fontes conta UMA vez, como rematriculado (CGM ou nome + nascimento).
 
+   A turma do rematriculado é a do PRÓXIMO ano: o ``rematriculas_sucesso.json`` guarda a turma em que o aluno está
+   AGORA (ex.: \"1º Ano - A\"), então a previsão o promove à série seguinte (\"2º Ano\"); a seção (letra) não é
+   prevista, pois as turmas do ano que vem ainda não foram formadas. A turma de hoje fica em ``turma_atual``.
+
+3. QUEM FICOU DE FORA. ``analisar_fora_da_rematricula`` cruza ``turmas.json`` (alunos matriculados agora; transferidos
+   durante o ano são ignorados) com a previsão e lista quem não está nela, com o motivo provável (erro na rematrícula,
+   pré-matrícula em outra escola, pré-matrícula cancelada ou nenhum registro). Concluintes da última série da escola
+   vêm à parte: não são esperados na rematrícula.
+
 Só lê arquivos; não grava nada (exceto a renomeação única do nome antigo, pedida explicitamente
 por ``carregar_previsao_alunos``).
 """
@@ -118,6 +127,62 @@ def _ler_lista(pasta: Path, nome: str) -> list:
     """Lista de um JSON de trabalho; ausente -> []. Ilegível -> ArquivoJsonCorrompidoError."""
     dados = carregar_json(pasta / nome, list, list)
     return [d for d in dados if isinstance(d, dict)]
+
+
+# ──────────────────────────────── série / turma do ano seguinte ────────────────────────────────
+
+_RE_INFANTIL = re.compile(r"infantil\s*(iv|v|4|5)\b", re.IGNORECASE)
+_RE_ANO = re.compile(r"(\d+)\s*[º°ªoO]?\s*ano\b", re.IGNORECASE)
+ORDEM_DESCONHECIDA = 99
+
+
+def _decompor_turma(nome: Any) -> Optional[tuple[int, bool]]:
+    """
+    (ordem da série, é integral) ou None se o nome não tem série reconhecível.
+    Ordem: Infantil IV = -2, Infantil V = -1, N º Ano = N. A seção (letra) é descartada.
+    """
+    t = str(nome or "").strip()
+    m = _RE_INFANTIL.search(t)
+    if m:
+        ordem = -2 if m.group(1).lower() in ("iv", "4") else -1
+    else:
+        m = _RE_ANO.search(t)
+        if not m:
+            return None
+        ordem = int(m.group(1))
+    return ordem, bool(re.search(r"integral", t[m.end():], re.IGNORECASE))
+
+
+def _rotulo_serie(ordem: int, integral: bool = False) -> str:
+    if ordem == -2:
+        return "Infantil IV"
+    if ordem == -1:
+        return "Infantil V"
+    return f"{ordem}º Ano" + (" Integral" if integral else "")
+
+
+def rotulo_serie_da_turma(nome: Any) -> str:
+    """'1º Ano - A' / '1º Ano do Ensino Fundamental' -> '1º Ano'; 'INFANTIL 4' -> 'Infantil IV'. Sem série: o texto como veio."""
+    d = _decompor_turma(nome)
+    return _rotulo_serie(*d) if d else str(nome or "").strip()
+
+
+def proxima_turma(nome: Any) -> tuple[str, bool]:
+    """
+    Turma (série) do ano seguinte para quem hoje está em ``nome``, e se o nome foi reconhecido.
+    Infantil IV -> Infantil V -> 1º Ano -> 2º Ano ... Mantém \"Integral\"; descarta a seção (A, B...).
+    Nome sem série reconhecível volta igual, com False.
+    """
+    d = _decompor_turma(nome)
+    if not d:
+        return str(nome or "").strip(), False
+    ordem, integral = d
+    return _rotulo_serie(1 if ordem == -1 else ordem + 1, integral), True
+
+
+def _ordem_turma(nome: Any) -> int:
+    d = _decompor_turma(nome)
+    return d[0] if d else ORDEM_DESCONHECIDA
 
 
 # ──────────────────────────────── a previsão ────────────────────────────────
@@ -237,6 +302,210 @@ def _alunos_atuais(pasta: Path) -> tuple[set[str], set[str]]:
     return cgms, chaves
 
 
+# ──────────────────────────────── quem ficou de fora da rematrícula ────────────────────────────────
+
+ARQUIVO_ERROS_REMATRICULA = "rematriculas_erro.json"
+ARQUIVO_ALUNOS_COMPLETO = "alunos_completo.json"
+
+CAT_ERRO = "erro_rematricula"
+CAT_OUTRA_ESCOLA = "outra_escola"
+CAT_CANCELOU = "cancelou"
+CAT_SEM_REGISTRO = "sem_registro"
+CAT_CONCLUINTE = "concluinte"
+
+
+def _registros_turmas(pasta: Path) -> Optional[list[dict]]:
+    """
+    Alunos de turmas.json como {cgm, nome, nascimento, turma, situacao, ativo}. None se o arquivo não existe ou está
+    ilegível. ``ativo`` = Situação contém \"matriculado\" (mesma regra da tela Turmas); transferido nunca é ativo.
+    """
+    if not (pasta / ARQUIVO_TURMAS).exists():
+        return None
+    try:
+        turmas = carregar_json(pasta / ARQUIVO_TURMAS, dict, dict)
+    except Exception:                                    # noqa: BLE001 — informação extra; nunca derruba a previsão
+        return None
+    saida: list[dict] = []
+    for turma, alunos in turmas.items():
+        for a in alunos if isinstance(alunos, list) else []:
+            if not isinstance(a, dict):
+                continue
+            sit = str(a.get("Situação", a.get("Situacao", "")) or "").strip()
+            sit_l = sit.lower()
+            saida.append({
+                "cgm": str(a.get("CGM") or "").strip(), "nome": str(a.get("Nome") or "").strip(),
+                "nascimento": _nascimento(a.get("Data Nasc.") or a.get("Data Nascimento")),
+                "turma": str(turma).strip(), "situacao": sit, "ativo": "matriculado" in sit_l and "transf" not in sit_l,
+            })
+    return saida
+
+
+def _contatos(pasta: Path) -> dict[str, dict]:
+    """{cgm: {responsavel, telefone}} de alunos_completo.json, se existir (só ajuda a achar a família; nunca obrigatório)."""
+    try:
+        completo = carregar_json(pasta / ARQUIVO_ALUNOS_COMPLETO, dict, dict)
+    except Exception:                                    # noqa: BLE001
+        return {}
+    saida: dict[str, dict] = {}
+    for cgm, d in completo.items():
+        if not isinstance(d, dict):
+            continue
+        saida[str(cgm).strip()] = {
+            "responsavel": str(d.get("nome_responsavel") or d.get("nome_mae") or "").strip(),
+            "telefone": str(d.get("cel_responsavel") or d.get("cel_mae") or d.get("fone_residencial") or "").strip(),
+        }
+    return saida
+
+
+def _saidas_da_pre_matricula(previsao_alunos: dict) -> tuple[dict[str, tuple[str, str]], dict[str, tuple[str, str]]]:
+    """
+    Quem pediu pré-matrícula do próximo ano mas NÃO ficou: ({cgm: (categoria, detalhe)}, {chave nome+nascimento: ...}).
+    Categorias: outra escola (cadastro refeito em outra escola) e cancelou (cancelado ou saiu da fila sem confirmação).
+    """
+    por_cgm: dict[str, tuple[str, str]] = {}
+    por_chave: dict[str, tuple[str, str]] = {}
+    cadastros = previsao_alunos.get("cadastros") if isinstance(previsao_alunos.get("cadastros"), dict) else {}
+    intencoes = _indice_intencoes(previsao_alunos.get("turmas_intencao"))
+
+    def anotar(cgm: str, chave: str, par: tuple[str, str]) -> None:
+        if cgm:
+            por_cgm.setdefault(cgm, par)
+        if chave:
+            por_chave.setdefault(chave, par)
+
+    for cid, c in cadastros.items():
+        if not isinstance(c, dict):
+            continue
+        cpf = str(c.get("cpf") or cid).strip()
+        intencao = intencoes.get(cpf) or intencoes.get(str(c.get("tr_id") or "").strip()) or {}
+        escolhas = c.get("escolas_escolhidas") if isinstance(c.get("escolas_escolhidas"), dict) else {}
+        situacao = situacao_da_pre_matricula([o for o in (escolhas.get("opcoes") or []) if isinstance(o, dict)])
+        vinculo = c.get("vinculo_base_abc") if isinstance(c.get("vinculo_base_abc"), dict) else {}
+        cgm = str(vinculo.get("cgm") or "").strip()
+        chave = _chave_pessoa(c.get("nome_aluno") or intencao.get("nome"), c.get("data_nascimento"))
+        if c.get("cadastro_refeito_outra_escola") or intencao.get("cadastro_refeito_outra_escola"):
+            anotar(cgm, chave, (CAT_OUTRA_ESCOLA, "Refez o cadastro da pré-matrícula para outra escola"))
+        elif situacao == SITUACAO_CANCELADO:
+            anotar(cgm, chave, (CAT_CANCELOU, "Pré-matrícula cancelada"))
+        elif situacao == SITUACAO_PENDENTE and intencao.get("presente_na_ultima_coleta") is False:
+            anotar(cgm, chave, (CAT_CANCELOU, "Saiu da fila da pré-matrícula sem confirmação de vaga"))
+
+    for item in intencoes.values():
+        vinculo = item.get("vinculo_base_abc") if isinstance(item.get("vinculo_base_abc"), dict) else {}
+        cgm = str(vinculo.get("cgm") or "").strip()
+        if not cgm:
+            continue                                      # sem CGM nem nascimento não dá para ligar com segurança a um aluno
+        if item.get("cadastro_refeito_outra_escola"):
+            anotar(cgm, "", (CAT_OUTRA_ESCOLA, "Refez o cadastro da pré-matrícula para outra escola"))
+        elif str(item.get("situacao") or "").upper().startswith("CANCELADO"):
+            anotar(cgm, "", (CAT_CANCELOU, "Pré-matrícula cancelada"))
+    return por_cgm, por_chave
+
+
+def _chave_ordem(l: dict) -> tuple:
+    return (_ordem_turma(l.get("turma")), _sem_acento(l.get("turma")), _sem_acento(l.get("nome")))
+
+
+def analisar_fora_da_rematricula(pasta: Path, linhas_previsao: list[dict], previsao_alunos: dict) -> dict:
+    """
+    Alunos MATRICULADOS hoje (turmas.json) que não estão na previsão: não rematricularam nem entraram pela pré-matrícula.
+    Transferidos durante o ano ficam de fora da análise. Quem está na última série da escola (maior série entre os
+    matriculados) é ``concluinte``: sai porque terminou a etapa, não por ter deixado de rematricular.
+
+    Cada linha: {cgm, nome, nascimento, turma_atual, turma_prevista, categoria, motivo, tentativas, responsavel, telefone}.
+    ``resumo_series``: por série de hoje, {serie, ativos, na_previsao, fora, concluintes}.
+    """
+    registros = _registros_turmas(pasta)
+    if registros is None:
+        return {"disponivel": False, "ultima_serie": None, "linhas": [], "resumo_series": [],
+                "contagem": {"total": 0, "ativos": 0, CAT_ERRO: 0, CAT_OUTRA_ESCOLA: 0, CAT_CANCELOU: 0,
+                             CAT_SEM_REGISTRO: 0, "concluintes": 0}}
+
+    # uma pessoa conta uma vez (CGM, ou nome + nascimento sem CGM); o registro matriculado vale sobre o transferido
+    pessoas: dict[str, dict] = {}
+    for r in registros:
+        id_ = r["cgm"] or _chave_pessoa(r["nome"], r["nascimento"])
+        if not id_:
+            continue
+        if id_ not in pessoas or (r["ativo"] and not pessoas[id_]["ativo"]):
+            pessoas[id_] = r
+    ativos = [r for r in pessoas.values() if r["ativo"]]
+
+    ordens = [o for o in (_ordem_turma(r["turma"]) for r in ativos) if o != ORDEM_DESCONHECIDA and o > 0]
+    ultima = max(ordens) if ordens else None
+
+    cgms_prev = {l["cgm"] for l in linhas_previsao if l.get("cgm")}
+    chaves_prev = {k for l in linhas_previsao if (k := _chave_pessoa(l.get("nome"), l.get("nascimento")))}
+    saidas_cgm, saidas_chave = _saidas_da_pre_matricula(previsao_alunos)
+    try:
+        erros = {str(e.get("cgm") or "").strip(): e for e in _ler_lista(pasta, ARQUIVO_ERROS_REMATRICULA)}
+    except Exception:                                    # noqa: BLE001
+        erros = {}
+    contatos = _contatos(pasta)
+
+    linhas: list[dict] = []
+    series: dict[str, dict] = {}
+    for r in ativos:
+        chave = _chave_pessoa(r["nome"], r["nascimento"])
+        serie = rotulo_serie_da_turma(r["turma"])
+        resumo = series.setdefault(serie, {"serie": serie, "ordem": _ordem_turma(r["turma"]), "ativos": 0,
+                                           "na_previsao": 0, "fora": 0, "concluintes": 0})
+        resumo["ativos"] += 1
+        if (r["cgm"] and r["cgm"] in cgms_prev) or (chave and chave in chaves_prev):
+            resumo["na_previsao"] += 1
+            continue
+
+        ordem = _ordem_turma(r["turma"])
+        erro = erros.get(r["cgm"]) if r["cgm"] else None
+        tentativas = 0
+        if ultima is not None and ordem == ultima:
+            categoria, motivo = CAT_CONCLUINTE, f"Concluiu a etapa ({serie} é a última série da escola)"
+        elif erro:
+            tentativas = int(erro.get("tentativas") or 1) if str(erro.get("tentativas") or "1").isdigit() else 1
+            categoria = CAT_ERRO
+            motivo = f"Rematrícula deu erro ({tentativas} tentativa(s)): {str(erro.get('erro') or 'sem detalhe').strip()[:160]}"
+        else:
+            achado = saidas_cgm.get(r["cgm"]) if r["cgm"] else None
+            achado = achado or (saidas_chave.get(chave) if chave else None)
+            categoria, motivo = achado if achado else (CAT_SEM_REGISTRO, "Sem rematrícula e sem pré-matrícula para o próximo ano")
+
+        resumo["concluintes" if categoria == CAT_CONCLUINTE else "fora"] += 1
+        prevista = "" if categoria == CAT_CONCLUINTE else proxima_turma(r["turma"])[0]
+        contato = contatos.get(r["cgm"], {})
+        linhas.append({
+            "cgm": r["cgm"], "nome": r["nome"], "nascimento": r["nascimento"], "turma_atual": r["turma"],
+            "turma_prevista": prevista, "categoria": categoria, "motivo": motivo, "tentativas": tentativas,
+            "responsavel": contato.get("responsavel", ""), "telefone": contato.get("telefone", ""),
+        })
+
+    linhas.sort(key=lambda l: (_ordem_turma(l["turma_atual"]), _sem_acento(l["turma_atual"]), _sem_acento(l["nome"])))
+    resumo_series = sorted(series.values(), key=lambda x: x["ordem"])
+    contagem = {c: sum(1 for l in linhas if l["categoria"] == c) for c in (CAT_ERRO, CAT_OUTRA_ESCOLA, CAT_CANCELOU, CAT_SEM_REGISTRO)}
+    contagem["concluintes"] = sum(1 for l in linhas if l["categoria"] == CAT_CONCLUINTE)
+    contagem["total"] = len(linhas) - contagem["concluintes"]
+    contagem["ativos"] = len(ativos)
+    return {"disponivel": True, "ultima_serie": ultima, "linhas": linhas, "resumo_series": resumo_series, "contagem": contagem}
+
+
+def resumo_por_turma(linhas: list[dict]) -> list[dict]:
+    """Uma entrada por turma da previsão (série do ano seguinte): totais e de quais turmas de hoje vêm os rematriculados."""
+    grupos: dict[str, dict] = {}
+    for l in linhas:
+        g = grupos.setdefault(l["turma"] or "Sem turma", {
+            "turma": l["turma"] or "Sem turma", "ordem": _ordem_turma(l["turma"]), "total": 0,
+            "rematriculados": 0, "novos": 0, "novos_matriculados": 0, "novos_pendentes": 0, "origens": {}})
+        g["total"] += 1
+        if l["tipo"] == TIPO_NOVO:
+            g["novos"] += 1
+            g["novos_matriculados" if l["situacao"] == SITUACAO_MATRICULADO else "novos_pendentes"] += 1
+        else:
+            g["rematriculados"] += 1
+            origem = rotulo_serie_da_turma(l.get("turma_atual") or l.get("turma_origem"))
+            if origem:
+                g["origens"][origem] = g["origens"].get(origem, 0) + 1
+    return sorted(grupos.values(), key=lambda g: (g["ordem"], _sem_acento(g["turma"])))
+
+
 def montar_previsao(pasta, ano_letivo) -> dict:
     """
     Previsão do ano letivo ``ano_letivo`` (o PRÓXIMO), a partir dos arquivos em ``pasta`` (dados/<ano em uso>).
@@ -268,6 +537,9 @@ def montar_previsao(pasta, ano_letivo) -> dict:
     linhas: list[dict] = []
     cgms_re: set[str] = set()
     chaves_re: set[str] = set()
+    registros_turmas = _registros_turmas(pasta) or []
+    turma_hoje_por_cgm = {r["cgm"]: r["turma"] for r in registros_turmas if r["cgm"] and r["ativo"]}
+    sem_serie = 0
     for r in _ler_lista(pasta, ARQUIVO_REMATRICULADOS):
         cgm = str(r.get("cgm") or "").strip()
         nasc = _nascimento(r.get("data_nascimento"))
@@ -278,10 +550,15 @@ def montar_previsao(pasta, ano_letivo) -> dict:
         chave = _chave_pessoa(r.get("nome"), nasc)
         if chave:
             chaves_re.add(chave)
+        # O arquivo guarda a turma de HOJE; a previsão mostra a do ano que vem (série seguinte).
+        turma_atual = str(r.get("turma") or "").strip() or turma_hoje_por_cgm.get(cgm, "")
+        turma_prevista, reconhecida = proxima_turma(turma_atual)
+        if not reconhecida:
+            sem_serie += 1
         linhas.append({
             "tipo": TIPO_REMATRICULADO, "nome": str(r.get("nome") or "").strip(), "nascimento": nasc, "cgm": cgm, "cpf": "",
-            "turma": str(r.get("turma") or "").strip(), "situacao": "rematriculado", "responsavel": "", "telefone": "",
-            "escola_origem": "", "turma_origem": str(r.get("turma") or "").strip(), "posicao": "", "ja_e_aluno": True,
+            "turma": turma_prevista, "turma_atual": turma_atual, "situacao": "rematriculado", "responsavel": "",
+            "telefone": "", "escola_origem": "", "turma_origem": turma_atual, "posicao": "", "ja_e_aluno": True,
         })
 
     atuais_cgm, atuais_chave = _alunos_atuais(pasta)
@@ -292,6 +569,9 @@ def montar_previsao(pasta, ano_letivo) -> dict:
             repetidos += 1
             continue                                      # já está como rematriculado
         n["tipo"] = TIPO_NOVO
+        n["turma_pedida"] = n["turma"]                    # como veio da pré-matrícula; "turma" passa ao rótulo comum às duas fontes
+        n["turma"] = rotulo_serie_da_turma(n["turma"])
+        n["turma_atual"] = ""
         n["ja_e_aluno"] = bool((n["cgm"] and n["cgm"] in atuais_cgm) or (chave and chave in atuais_chave))
         linhas.append(n)
     if repetidos:
@@ -303,7 +583,10 @@ def montar_previsao(pasta, ano_letivo) -> dict:
         avisos.append(f"{ja_alunos} aluno(s) novo(s) da pré-matrícula já constam como alunos da escola neste ano "
                       "(ainda sem rematrícula confirmada); confira se não são rematrículas pendentes.")
 
-    linhas.sort(key=lambda l: (_sem_acento(l["turma"]), _sem_acento(l["nome"])))
+    if sem_serie:
+        avisos.append(f"{sem_serie} rematriculado(s) estão numa turma sem série reconhecível (ex.: sem \"º Ano\" ou \"Infantil\" "
+                      "no nome); ficaram na mesma turma de hoje. Confira.")
+    linhas.sort(key=_chave_ordem)
     contagem = {
         "total": len(linhas),
         "rematriculados": len(linhas) - len(novos),
@@ -317,4 +600,6 @@ def montar_previsao(pasta, ano_letivo) -> dict:
         "rematriculados_existe": rematriculados_existe,
         "atualizado_em": "" if not atualizado or atualizado.lower().startswith("x") else atualizado,
         "linhas": linhas, "contagem": contagem, "avisos": avisos,
+        "turmas": resumo_por_turma(linhas),
+        "fora": analisar_fora_da_rematricula(pasta, linhas, previsao_alunos),
     }

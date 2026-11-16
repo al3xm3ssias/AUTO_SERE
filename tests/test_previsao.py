@@ -199,3 +199,121 @@ def test_pagina_tem_o_modulo_previsao_no_menu(cliente):
     html = cliente.get("/web").get_data(as_text=True)
     assert 'data-view="previsao"' in html and 'id="sec-previsao"' in html and "js/previsao.js" in html
     assert "Previsão 2027" in html
+
+
+# ───────────── promoção de série: a previsão mostra a turma do ANO QUE VEM ─────────────
+
+@pytest.mark.parametrize("hoje, esperado", [
+    ("1º Ano - A", "2º Ano"), ("1º Ano A", "2º Ano"), ("4º Ano B", "5º Ano"),
+    ("Infantil IV A", "Infantil V"), ("INFANTIL 4", "Infantil V"), ("Infantil V - B", "1º Ano"),
+    ("1º Ano Integral A", "2º Ano Integral"), ("3º Ano do Ensino Fundamental", "4º Ano"),
+])
+def test_proxima_turma_sobe_a_serie_e_descarta_a_secao(hoje, esperado):
+    assert pv.proxima_turma(hoje) == (esperado, True)
+
+
+def test_turma_sem_serie_reconhecivel_fica_como_esta():
+    assert pv.proxima_turma("SEM SERIAÇÃO") == ("SEM SERIAÇÃO", False)
+    assert pv.proxima_turma("") == ("", False)
+
+
+def test_rematriculado_do_1o_ano_aparece_no_2o_ano_e_guarda_a_turma_de_hoje(tmp_path):
+    _gravar(tmp_path, "rematriculas_sucesso.json", [
+        {"cgm": "100", "nome": "ANA LIMA", "turma": "1º Ano - A", "data_nascimento": "05/03/2019"},
+        {"cgm": "101", "nome": "BETO SOUZA", "turma": "Infantil V A", "data_nascimento": "10/05/2020"}])
+    p = pv.montar_previsao(tmp_path, 2027)
+    por_nome = {l["nome"]: l for l in p["linhas"]}
+    assert por_nome["ANA LIMA"]["turma"] == "2º Ano" and por_nome["ANA LIMA"]["turma_atual"] == "1º Ano - A"
+    assert por_nome["BETO SOUZA"]["turma"] == "1º Ano"
+    assert p["avisos"] == [] or all("série reconhecível" not in a for a in p["avisos"])
+
+
+def test_rematriculado_sem_turma_no_arquivo_usa_a_turma_do_turmas_json(tmp_path):
+    _gravar(tmp_path, "turmas.json", {"3º Ano A": [{"CGM": "100", "Nome": "ANA", "Situação": "Matriculado"}]})
+    _gravar(tmp_path, "rematriculas_sucesso.json", [{"cgm": "100", "nome": "ANA", "turma": "", "data_nascimento": ""}])
+    assert pv.montar_previsao(tmp_path, 2027)["linhas"][0]["turma"] == "4º Ano"
+
+
+def test_novo_e_rematriculado_caem_na_mesma_turma_do_resumo(tmp_path):
+    _gravar(tmp_path, "rematriculas_sucesso.json", [
+        {"cgm": "100", "nome": "ANA", "turma": "Infantil IV A", "data_nascimento": "01/02/2020"},
+        {"cgm": "101", "nome": "BETO", "turma": "Infantil IV B", "data_nascimento": "01/02/2020"}])
+    _gravar(tmp_path, "previsao_alunos_2027.json", {
+        "turmas_intencao": {}, "cadastros": {"1": _cad("1", "CAIO", turma="Infantil V", situacao="MATRICULADO")}})
+    turmas = {t["turma"]: t for t in pv.montar_previsao(tmp_path, 2027)["turmas"]}
+    assert list(turmas) == ["Infantil V"]
+    assert turmas["Infantil V"]["total"] == 3 and turmas["Infantil V"]["rematriculados"] == 2
+    assert turmas["Infantil V"]["novos"] == 1 and turmas["Infantil V"]["origens"] == {"Infantil IV": 2}
+
+
+def test_linhas_e_turmas_saem_na_ordem_das_series(tmp_path):
+    _gravar(tmp_path, "rematriculas_sucesso.json", [
+        {"cgm": "1", "nome": "A", "turma": "3º Ano A", "data_nascimento": ""},
+        {"cgm": "2", "nome": "B", "turma": "Infantil IV A", "data_nascimento": ""},
+        {"cgm": "3", "nome": "C", "turma": "1º Ano A", "data_nascimento": ""}])
+    assert [t["turma"] for t in pv.montar_previsao(tmp_path, 2027)["turmas"]] == ["Infantil V", "2º Ano", "4º Ano"]
+
+
+# ───────────── quem ficou de fora da rematrícula ─────────────
+
+def _aluno(cgm, nome, sit="Matriculado", nasc="01/01/2018"):
+    return {"CGM": cgm, "Nome": nome, "Situação": sit, "Data Nasc.": nasc}
+
+
+def test_fora_lista_so_matriculado_que_nao_esta_na_previsao_e_ignora_transferido(tmp_path):
+    _gravar(tmp_path, "turmas.json", {
+        "1º Ano A": [_aluno("1", "FEZ"), _aluno("2", "NAO FEZ"), _aluno("3", "SAIU NO ANO", sit="Transferido")],
+        "5º Ano A": [_aluno("9", "CONCLUINTE")]})
+    _gravar(tmp_path, "rematriculas_sucesso.json", [{"cgm": "1", "nome": "FEZ", "turma": "1º Ano A", "data_nascimento": "01/01/2018"}])
+    fora = pv.montar_previsao(tmp_path, 2027)["fora"]
+    assert fora["disponivel"] and fora["ultima_serie"] == 5
+    nomes = {l["nome"]: l for l in fora["linhas"]}
+    assert set(nomes) == {"NAO FEZ", "CONCLUINTE"}                       # o transferido do ano nem aparece
+    assert nomes["NAO FEZ"]["categoria"] == "sem_registro" and nomes["NAO FEZ"]["turma_prevista"] == "2º Ano"
+    assert nomes["CONCLUINTE"]["categoria"] == "concluinte" and nomes["CONCLUINTE"]["turma_prevista"] == ""
+    assert fora["contagem"]["total"] == 1 and fora["contagem"]["concluintes"] == 1 and fora["contagem"]["ativos"] == 3
+
+
+def test_fora_explica_o_motivo_erro_outra_escola_e_cancelamento(tmp_path):
+    _gravar(tmp_path, "turmas.json", {"2º Ano A": [
+        _aluno("1", "COM ERRO"), _aluno("2", "OUTRA ESCOLA"), _aluno("3", "CANCELOU"), _aluno("4", "NADA")],
+        "5º Ano A": [_aluno("9", "C")]})
+    _gravar(tmp_path, "rematriculas_erro.json", [{"cgm": "1", "nome": "COM ERRO", "erro": "senha recusada", "tentativas": 3}])
+    _gravar(tmp_path, "previsao_alunos_2027.json", {"turmas_intencao": {}, "cadastros": {
+        "22": _cad("22", "OUTRA ESCOLA", cadastro_refeito_outra_escola=True, vinculo_base_abc={"cgm": "2"}),
+        "33": _cad("33", "CANCELOU", situacao="CANCELADO. MOTIVO: X", nasc="01/01/2018")}})
+    cat = {l["nome"]: l for l in pv.montar_previsao(tmp_path, 2027)["fora"]["linhas"]}
+    assert cat["COM ERRO"]["categoria"] == "erro_rematricula" and cat["COM ERRO"]["tentativas"] == 3
+    assert "senha recusada" in cat["COM ERRO"]["motivo"]
+    assert cat["OUTRA ESCOLA"]["categoria"] == "outra_escola"
+    assert cat["CANCELOU"]["categoria"] == "cancelou"                    # ligado por nome + nascimento (sem CGM no cadastro)
+    assert cat["NADA"]["categoria"] == "sem_registro"
+
+
+def test_aluno_atual_que_fez_a_pre_matricula_nao_conta_como_fora(tmp_path):
+    _gravar(tmp_path, "turmas.json", {"Infantil V A": [_aluno("555", "CAIO PINTO", nasc="05/03/2021")], "5º Ano A": [_aluno("9", "C")]})
+    _gravar(tmp_path, "previsao_alunos_2027.json", {"turmas_intencao": {}, "cadastros": {"111": _cad("111", "CAIO PINTO")}})
+    fora = pv.montar_previsao(tmp_path, 2027)["fora"]
+    assert [l["nome"] for l in fora["linhas"]] == ["C"]
+
+
+def test_resumo_por_serie_e_contatos(tmp_path):
+    _gravar(tmp_path, "turmas.json", {"1º Ano A": [_aluno("1", "FEZ"), _aluno("2", "NAO FEZ")], "5º Ano A": [_aluno("9", "C")]})
+    _gravar(tmp_path, "rematriculas_sucesso.json", [{"cgm": "1", "nome": "FEZ", "turma": "1º Ano A", "data_nascimento": "01/01/2018"}])
+    _gravar(tmp_path, "alunos_completo.json", {"2": {"nome_responsavel": "RITA", "cel_responsavel": "(42) 9"}})
+    fora = pv.montar_previsao(tmp_path, 2027)["fora"]
+    primeiro = next(s for s in fora["resumo_series"] if s["serie"] == "1º Ano")
+    assert (primeiro["ativos"], primeiro["na_previsao"], primeiro["fora"]) == (2, 1, 1)
+    assert fora["linhas"][0]["responsavel"] == "RITA" and fora["linhas"][0]["telefone"] == "(42) 9"
+
+
+def test_sem_turmas_json_a_analise_avisa_que_nao_ha_como_fazer(tmp_path):
+    fora = pv.montar_previsao(tmp_path, 2027)["fora"]
+    assert fora["disponivel"] is False and fora["linhas"] == []
+
+
+def test_transferido_nunca_vira_fora_mesmo_com_retorno_so_conta_o_matriculado(tmp_path):
+    _gravar(tmp_path, "turmas.json", {"2º Ano A": [_aluno("7", "VOLTOU", sit="Transferido"), _aluno("7", "VOLTOU", sit="Matriculado")],
+                                       "5º Ano A": [_aluno("9", "C")]})
+    linhas = pv.montar_previsao(tmp_path, 2027)["fora"]["linhas"]
+    assert [l["nome"] for l in linhas if l["categoria"] != "concluinte"] == ["VOLTOU"]
