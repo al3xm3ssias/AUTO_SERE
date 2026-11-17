@@ -679,7 +679,23 @@ def test_ano_vigente_vincula_cgm_turma_escola_e_situacao():
     v = _vinculo(cb.Consulta(nome="Claudio Alex", nascimento=D(2015, 3, 12), mae="Maria"),
                  [_h(2025, "ESC A", "ENSINO FUNDAMENTAL", "3", "Aprovado"), _h(2026, "AMADEU", "ENSINO FUNDAMENTAL", "1", "Matriculado")])
     assert v == {"periodo": "ano_vigente", "ano_referencia": 2026, "nome": "CLAUDIO ALEX MENDES DE SOUZA", "cgm": "1025059227",
-                 "turma": "1º Ano do Ensino Fundamental", "escola": "AMADEU", "situacao": "Matriculado", "status": "ok"}
+                 "turma": "1º Ano do Ensino Fundamental", "escola": "AMADEU", "situacao": "Matriculado", "status": "ok",
+                 "escola_anterior": "ESC A", "ano_anterior": 2025, "turma_anterior": "3º Ano do Ensino Fundamental"}
+
+
+def test_vinculo_guarda_a_escola_anterior_so_se_for_outra_escola():
+    c = cb.Consulta(nome="Claudio Alex", nascimento=D(2015, 3, 12), mae="Maria")
+    # entrou na nossa escola neste ano: a anterior é a última linha de OUTRA escola, mesmo que a nossa apareça escrita 2 jeitos
+    v = _vinculo(c, [_h(2024, "ESC A", "ENSINO FUNDAMENTAL", "2", "Aprovado"), _h(2025, "ESC B", "ENSINO FUNDAMENTAL", "3", "Aprovado"),
+                     _h(2026, "JUDITH M SILVEIRA,E M PROFA-EI EF", "ENSINO FUNDAMENTAL", "4", "Transferido"),
+                     _h(2026, "JUDITH MACEDO SILVEIRA", "ENSINO FUNDAMENTAL", "4", "Matriculado")])
+    assert (v["escola"], v["escola_anterior"], v["ano_anterior"]) == ("JUDITH MACEDO SILVEIRA", "ESC B", 2025)
+    # sem outra escola no histórico: nada de escola_anterior
+    v = _vinculo(c, [_h(2026, "AMADEU", "ENSINO FUNDAMENTAL", "1", "Matriculado")])
+    assert "escola_anterior" not in v
+    # linha de ano posterior ao de referência nunca vira "anterior"
+    v = _vinculo(c, [_h(2026, "AMADEU", "ENSINO FUNDAMENTAL", "1", "Matriculado"), _h(2027, "OUTRA", "ENSINO FUNDAMENTAL", "2", "Matriculado")])
+    assert "escola_anterior" not in v
 
 
 def test_ano_vigente_transferido_tambem_e_ok():

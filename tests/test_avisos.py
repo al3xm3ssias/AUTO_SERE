@@ -107,6 +107,9 @@ def test_email_valido(texto, ok):
     ("Escola Municipal Ana Néri", PROPRIA, False),
     ("Escola Municipal Macedo Soares", PROPRIA, False),
     ("Escola Municipal Judith", PROPRIA, False),           # só 1 palavra em comum: é outra escola
+    ("JUDITH M SILVEIRA,E M PROFA-EI EF", PROPRIA, True),  # como a Base ABC escreve: inicial solta e o que vem depois da vírgula
+    ("JUDITH MACEDO SILVEIRA,E M PROFA-EF", PROPRIA, True),
+    ("ANA NERI,E M-EF", PROPRIA, False),
 ])
 def test_reconhece_a_propria_escola(candidata, propria, esperado):
     assert av._e_a_propria_escola(candidata, propria) is esperado
@@ -408,7 +411,7 @@ def test_registrada(amb):
     assert s is not None and "avisos" not in rotas.AUTOMACOES_NAO_IMPLEMENTADAS and s.confirmar is False
     nomes = [e["nome"] for e in s.extras()]
     assert nomes == ["publico", "canal", "modo", "unidades", "situacao_pais", "fonte", "alunos", "tipo_mensagem", "modelo_acoes",
-                     "assunto", "mensagem", "intervalo_s", "limite_lote"]
+                     "assunto", "mensagem", "exemplo_mensagem", "intervalo_s", "limite_lote"]
     assert "filtro_nome" not in nomes and "email_teste" not in nomes                  # saíram da tela a pedido
     mensagem = next(e for e in s.extras() if e["nome"] == "mensagem")
     assert mensagem["multilinha"] is True
@@ -1108,3 +1111,77 @@ def test_previa_respeita_os_alunos_marcados(web, chegando):
     d = web.post("/web/api/automacoes/avisos/previa", json={"publico": "escolas", "alunos": '["111"]',
                                                            **{k: TRANSF[k] for k in ("assunto", "mensagem")}}).get_json()["texto"]
     assert d.startswith("1 e-mail(s) para escolas de origem, um por aluno que chega (de 1 aluno(s) novo(s))")
+
+
+# ───────────── nome da escola no formato da Base ABC, escola anterior e o exemplo da mensagem ─────────────
+
+NOSSA_NA_BASE = "JUDITH M SILVEIRA,E M PROFA-EI EF"
+
+
+def test_nome_da_base_abc_casa_com_a_lista_de_escolas():
+    unidades = [{"nome": "Escola Municipal Ana Néri", "eh_cmei": False, "emails": ["a@x.com"]},
+                {"nome": "CMEI Pequeno Príncipe", "eh_cmei": True, "emails": ["c@x.com"]}]
+    assert av._achar_unidade("ANA NERI,E M-EF", unidades)["emails"] == ["a@x.com"]
+    assert av._achar_unidade("PEQUENO PRINCIPE,CMEI-EI", unidades)["emails"] == ["c@x.com"]
+    assert av._achar_unidade("OUTRA ESCOLA,E M-EF", unidades) is None
+
+
+def _so_a_nossa(chegando_pre, **vinculo):
+    pre = chegando_pre
+    for c in pre["cadastros"].values():
+        c.pop("vinculo_base_abc", None)
+    for lista in pre["turmas_intencao"].values():
+        for a in lista:
+            a.pop("vinculo_base_abc", None)
+    pre["cadastros"]["111"].update(_vinc(NOSSA_NA_BASE, cgm="1000000001", turma="1º Ano", **vinculo))
+    (paths.dados_ano_atual() / "pre_matricula.json").write_text(json.dumps(pre), encoding="utf-8")
+
+
+def test_aluno_que_ja_entrou_na_nossa_escola_pede_a_escola_anterior(chegando):
+    _so_a_nossa(chegando, escola_anterior="ESCOLA MUNICIPAL ANA NERI", turma_anterior="5º Ano do Ensino Fundamental", ano_anterior=2025)
+    r = av.destinatarios_alunos_origem()
+    [d] = r["destinatarios"]
+    assert d["email"] == "ana@pg.gov.br" and d["contexto"]["ALUNO"] == "ANA LIMA"
+    assert d["contexto"]["SERIE"] == "5º Ano do Ensino Fundamental" and d["contexto"]["TURMA"] == "Infantil IV"   # série de origem x turma daqui
+    assert r["da_propria_escola"] == [] and r["origem_desconhecida"] == []
+    [a] = [x for x in av.listar_alunos_novos() if x["id"] == "111"]
+    assert (a["estado"], a["escola_origem"], a["serie"], a["na_nossa_escola"]) == ("ok", "ESCOLA MUNICIPAL ANA NERI", "5º Ano do Ensino Fundamental", False)
+
+
+def test_aluno_na_nossa_escola_sem_escola_anterior_nao_e_origem_desconhecida(chegando):
+    _so_a_nossa(chegando)                                                          # vínculo antigo: sem escola_anterior
+    r = av.destinatarios_alunos_origem(alunos=["111"])
+    assert r["destinatarios"] == [] and r["da_propria_escola"] == ["ANA LIMA (Infantil IV)"] and r["origem_desconhecida"] == []
+    with pytest.raises(ValueError, match="já estão na nossa escola e sem escola anterior.*refaça a Consulta na Base ABC"):
+        av.reunir_destinatarios("escolas", por_aluno=True, alunos=["111"])
+    [a] = [x for x in av.listar_alunos_novos() if x["id"] == "111"]
+    assert a["na_nossa_escola"] is True and a["estado"] == "ok"
+
+
+def test_exemplo_mostra_o_texto_do_aluno_marcado(chegando):
+    r = av.exemplo_da_mensagem("escolas", TRANSF["assunto"], TRANSF["mensagem"], alunos=["112"])
+    assert (r["para"], r["aluno"], r["total"]) == ("sj@pg.gov.br", "BETO LIMA", 1) and "aviso" not in r
+    assert r["assunto"] == "Transferência de BETO LIMA"
+    assert r["corpo"] == f"Aluno BETO LIMA, CGM 1000000002, série 3º ano, vai para a turma Infantil IV de {PROPRIA} para Escola Municipal Rural São José."
+    primeiro = av.exemplo_da_mensagem("escolas", TRANSF["assunto"], TRANSF["mensagem"])                      # nada marcado: o primeiro da lista
+    assert primeiro["aluno"] == "ANA LIMA" and primeiro["total"] == 2
+
+
+def test_exemplo_de_quem_nao_receberia_mostra_o_texto_e_o_motivo(chegando):
+    r = av.exemplo_da_mensagem("escolas", TRANSF["assunto"], TRANSF["mensagem"], alunos=["118"])               # HUGO: vínculo a verificar
+    assert r["para"] == "" and r["aluno"] == "HUGO MELO" and "Nenhum aluno novo com escola de origem e e-mail" in r["aviso"]
+    assert "HUGO MELO" in r["corpo"] and "CGM 1000000008" in r["corpo"]               # o texto aparece mesmo sem poder enviar
+
+
+def test_exemplo_vazio_marcador_errado_e_pais(amb):
+    assert av.exemplo_da_mensagem("escolas", "", "") == {"vazio": True}
+    assert av.exemplo_da_mensagem(None, "A", "B") == {"vazio": True}
+    assert "marcador" in av.exemplo_da_mensagem("pais", "A", "$CGM")["aviso"]
+    r = av.exemplo_da_mensagem("pais", "Aviso para $ALUNO", "Olá $RESPONSAVEL, $ALUNO em $TURMA", alunos=["111"])
+    assert (r["para"], r["assunto"], r["corpo"]) == ("mae@x.com", "Aviso para ANA LIMA", "Olá MARIA LIMA, ANA LIMA em Infantil IV")
+
+
+def test_rota_do_exemplo(web, chegando):
+    r = web.post("/web/api/avisos/exemplo", json={"publico": "escolas", "alunos": '["111"]', **{k: TRANSF[k] for k in ("assunto", "mensagem")}})
+    assert r.status_code == 200 and r.get_json()["aluno"] == "ANA LIMA" and "CGM 1000000001" in r.get_json()["corpo"]
+    assert web.post("/web/api/avisos/exemplo", json={}).get_json() == {"vazio": True}

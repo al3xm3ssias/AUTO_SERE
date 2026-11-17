@@ -123,9 +123,13 @@ def email_valido(texto) -> bool:
 
 
 def _chave_nome_escola(nome: str) -> frozenset:
-    """Palavras que identificam a escola (sem 'Escola Municipal', 'Profª', 'de'...), para reconhecer a própria escola."""
-    palavras = re.findall(r"[a-z0-9]+", _sem_acento(nome))
-    return frozenset(p for p in palavras if p not in _PALAVRAS_GENERICAS)
+    """
+    Palavras que identificam a escola (sem 'Escola Municipal', 'Profª', 'de'...), para reconhecer a própria escola.
+    A Base ABC escreve \"JUDITH M SILVEIRA,E M PROFA-EI EF\": vale só o que vem antes da vírgula, e letras soltas (a inicial
+    do nome do meio) não contam.
+    """
+    palavras = re.findall(r"[a-z0-9]+", _sem_acento(str(nome or "").split(",")[0]))
+    return frozenset(p for p in palavras if len(p) > 1 and p not in _PALAVRAS_GENERICAS)
 
 
 def _e_a_propria_escola(nome_candidata: str, nome_propria: str) -> bool:
@@ -340,24 +344,40 @@ def _alunos_da_base(base: dict, aceitas: set, vistos: set, escolhidos: Optional[
 _SITUACOES_ACEITAS = {"matriculados": {"matriculado"}, "aguardando": {"aguardando"}, "ambos": {"matriculado", "aguardando"}}
 
 
+def _origem_e_serie(v: dict, propria: str, turma_limpa: str) -> tuple[str, str, bool]:
+    """
+    (escola de origem, série nela, já_está_na_nossa_escola) a partir do vínculo da Base ABC. Se a linha do ano é a NOSSA escola
+    (o aluno já entrou), a origem é a escola anterior do histórico; sem ela, o aluno já está aqui e não há a quem pedir.
+    """
+    origem, serie = _uma_linha(v.get("escola")), _uma_linha(v.get("turma")) or turma_limpa
+    if propria and origem and _e_a_propria_escola(origem, propria):
+        anterior = _uma_linha(v.get("escola_anterior"))
+        if anterior and not _e_a_propria_escola(anterior, propria):
+            return anterior, _uma_linha(v.get("turma_anterior")) or serie, False
+        return origem, serie, True
+    return origem, serie, False
+
+
 def listar_alunos_novos(situacao: str = "matriculados", fonte: str = "ano") -> list[dict]:
     """
-    Os alunos novos para a tela escolher: [{id, nome, turma, fonte, estado, cgm, escola_origem, motivo}], por nome.
+    Os alunos novos para a tela escolher: [{id, nome, turma, serie, fonte, estado, cgm, escola_origem, na_nossa_escola, motivo}],
+    por nome. `escola_origem`/`serie` são as de quem receberia o pedido (a escola anterior, se o aluno já entrou aqui).
     `estado`: "ok" (vínculo da Base ABC com CGM e escola), "verificar" (vínculo incompleto) ou "sem_vinculo" (a Consulta na
     Base ABC ainda não achou/gravou o aluno). Mostra quem já está pronto para um texto com $CGM e $SERIE.
     """
     if situacao not in _SITUACOES_ACEITAS:
         raise ValueError("Situação inválida: use matriculados, aguardando ou ambos.")
-    saida, vistos = [], set()
+    saida, vistos, propria = [], set(), escola.nome()
     for rotulo, base in _bases_de_alunos(fonte):
         for turma, a, cad in _alunos_da_base(base, _SITUACOES_ACEITAS[situacao], vistos):
             v = a.get("vinculo_base_abc") or cad.get("vinculo_base_abc") or {}
             cgm = re.sub(r"\D", "", str(v.get("cgm") or ""))
             estado = "sem_vinculo" if not v else ("ok" if v.get("status") == "ok" and cgm and v.get("escola") else "verificar")
+            turma_limpa = _uma_linha(str(turma).replace(" do Ensino Fundamental", ""))
+            origem, serie, ja_aqui = _origem_e_serie(v, propria, turma_limpa)
             saida.append({"id": id_do_aluno(a), "nome": _uma_linha(a.get("nome") or cad.get("nome_aluno")),
-                          "turma": _uma_linha(str(turma).replace(" do Ensino Fundamental", "")), "fonte": rotulo,
-                          "estado": estado, "cgm": cgm, "escola_origem": _uma_linha(v.get("escola")),
-                          "motivo": _uma_linha(v.get("motivo"))})
+                          "turma": turma_limpa, "serie": serie, "fonte": rotulo, "estado": estado, "cgm": cgm,
+                          "escola_origem": origem, "na_nossa_escola": bool(v) and ja_aqui, "motivo": _uma_linha(v.get("motivo"))})
     return sorted(saida, key=lambda x: _sem_acento(x["nome"]))
 
 
@@ -439,11 +459,12 @@ def destinatarios_alunos_origem(situacao: str = "matriculados", fonte: str = "an
             if not v:
                 r["sem_vinculo"].append(quem)
                 continue
-            origem, cgm = _uma_linha(v.get("escola")), re.sub(r"\D", "", str(v.get("cgm") or ""))
-            if v.get("status") != "ok" or not origem or not cgm:
+            cgm = re.sub(r"\D", "", str(v.get("cgm") or ""))
+            if v.get("status") != "ok" or not _uma_linha(v.get("escola")) or not cgm:
                 r["a_verificar"].append(f"{quem} — {v.get('motivo') or 'vínculo incompleto'}")
                 continue
-            if propria and _e_a_propria_escola(origem, propria):
+            origem, serie, ja_aqui = _origem_e_serie(v, propria, turma_limpa)
+            if ja_aqui:
                 r["da_propria_escola"].append(quem)
                 continue
             un = _achar_unidade(origem, lista)
@@ -459,8 +480,7 @@ def destinatarios_alunos_origem(situacao: str = "matriculados", fonte: str = "an
                 r["sem_email"].append(f"{un['nome']} (aluno {nome_aluno})")
                 continue
             r["destinatarios"].append({"nome": un["nome"], "email": un["emails"][0], "contexto": {
-                "ESCOLA_DESTINO": un["nome"], "ALUNO": nome_aluno, "CGM": cgm,
-                "SERIE": _uma_linha(v.get("turma")) or turma_limpa, "TURMA": turma_limpa}})
+                "ESCOLA_DESTINO": un["nome"], "ALUNO": nome_aluno, "CGM": cgm, "SERIE": serie, "TURMA": turma_limpa}})
     return r
 
 
@@ -574,7 +594,8 @@ def _por_que_nao_ha_alunos(r: dict) -> str:
     for chave, texto in (("sem_vinculo", "sem o vínculo da Base ABC (rode a 'Consulta na Base ABC' com a pré-matrícula)"),
                          ("a_verificar", "com o vínculo da Base ABC a verificar"),
                          ("origem_desconhecida", "com escola de origem que não está na lista de escolas"),
-                         ("da_propria_escola", "que já estão na nossa escola"),
+                         ("da_propria_escola", "que já estão na nossa escola e sem escola anterior no vínculo (se acabaram de entrar, "
+                                               "refaça a Consulta na Base ABC para trazer a escola anterior)"),
                          ("sem_email", "cuja escola de origem está sem e-mail")):
         if r.get(chave):
             partes.append(f"{len(r[chave])} {texto}")
@@ -600,6 +621,47 @@ def reunir_destinatarios(publico: str, tipo_escola="todas", filtro_nome="", situ
     if not r["destinatarios"]:
         raise ValueError("Nenhum destinatário com e-mail válido para este público e estes filtros.")
     return r
+
+
+def exemplo_da_mensagem(publico, assunto, mensagem, tipo_escola="todas", filtro_nome="", situacao_pais="matriculados",
+                        unidades=None, fonte="ano", alunos=None) -> dict:
+    """
+    Como o texto fica para o PRIMEIRO destinatário (ou aluno marcado), para a tela mostrar ao vivo. Nunca levanta:
+    {"vazio": True} sem texto; {"aviso": ...} se não dá para montar; senão {para, nome, assunto, corpo, aluno, total} (+ "aviso"
+    quando o aluno aparece mas não receberia o e-mail, ex.: sem vínculo ou escola de origem fora da lista).
+    """
+    assunto, mensagem = str(assunto or "").strip(), str(mensagem or "").strip()
+    if publico not in PUBLICOS or not (assunto or mensagem):
+        return {"vazio": True}
+    try:
+        conferir_marcadores(assunto, publico, "Assunto")
+        conferir_marcadores(mensagem, publico, "Mensagem")
+        por_aluno = publico == "escolas" and bool(_marcadores_de_aluno(assunto + " " + mensagem))
+    except ValueError as exc:
+        return {"aviso": str(exc)}
+    try:
+        r = reunir_destinatarios(publico, tipo_escola or "todas", filtro_nome or "", situacao_pais or "matriculados",
+                                 unidades, fonte or "ano", por_aluno, alunos)
+        m = montar_mensagens(r["destinatarios"][:1], assunto, mensagem, por_aluno)[0]
+        return {"para": m["para"], "nome": m["nome"], "assunto": m["assunto"], "corpo": m["corpo"], "aluno": m.get("aluno", ""),
+                "total": len(r["destinatarios"])}
+    except ValueError as exc:
+        aviso = str(exc)
+    if por_aluno:                       # ninguém receberia, mas o texto ainda dá para ver com os dados do primeiro aluno
+        try:
+            marcados = set(_itens_unidades(alunos))
+            lista = [a for a in listar_alunos_novos(situacao_pais or "matriculados", fonte or "ano") if not marcados or a["id"] in marcados]
+        except ValueError:
+            lista = []
+        if lista:
+            a = lista[0]
+            contexto = {"ESCOLA_DESTINO": a["escola_origem"] or "(escola de origem)", "ALUNO": a["nome"],
+                        "CGM": a["cgm"] or "(sem CGM)", "SERIE": a["serie"], "TURMA": a["turma"]}
+            m = montar_mensagens([{"nome": a["escola_origem"] or "(escola de origem)", "email": "(sem e-mail)", "contexto": contexto}],
+                                 assunto, mensagem, True)[0]
+            return {"para": "", "nome": m["nome"], "assunto": m["assunto"], "corpo": m["corpo"], "aluno": a["nome"], "total": 0,
+                    "aviso": aviso}
+    return {"aviso": aviso}
 
 
 def _chave_estavel(d: dict, assunto: str, mensagem: str) -> str:

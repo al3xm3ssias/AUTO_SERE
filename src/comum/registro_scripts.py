@@ -1004,6 +1004,7 @@ def _extras_avisos() -> list[dict]:
         {"tipo": "texto", "id": "campo-assunto", "nome": "assunto", "label": "Assunto"},
         {"tipo": "texto", "multilinha": True, "id": "campo-mensagem", "nome": "mensagem", "label": "Mensagem",
          "placeholder": "Escreva o comunicado ou escolha um tipo de mensagem acima. Use os marcadores para personalizar."},
+        {"tipo": "exemplo_mensagem", "id": "exemplo-mensagem", "nome": "exemplo_mensagem"},
         {"tipo": "select", "id": "campo-intervalo", "nome": "intervalo_s", "label": "Pausa entre os e-mails", "semVazio": True,
          "padrao": "10", "opcoes": [{"valor": str(n), "texto": f"{n} segundos"} for n in (5, 10, 20, 30, 60)],
          "visivelSe": so("campo-modo-aviso", "enviar")},

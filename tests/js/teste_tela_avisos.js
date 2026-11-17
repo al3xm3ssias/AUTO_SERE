@@ -15,6 +15,12 @@ w.fetch = async (url, op = {}) => {
   const ok = (j, status = 200) => ({ ok: status < 400, status, json: async () => j });
   if (url.endsWith("/componentes")) return ok(salvou ? D.info2 : D.info);
   if (url.endsWith("/avisos/unidades")) return ok({ unidades: D.unidades });
+  if (url.endsWith("/avisos/exemplo")) {
+    const corpo = JSON.parse(op.body || "{}");
+    if (!corpo.assunto && !corpo.mensagem) return ok({ vazio: true });
+    if ((corpo.alunos || "").includes('"118"')) return ok({ para: "", nome: "ESCOLA MUNICIPAL ANA NERI", assunto: "Transferência de HUGO", corpo: "Aluno HUGO MELO <b>x</b>", aluno: "HUGO MELO", total: 0, aviso: "Nenhum aluno novo com escola de origem e e-mail" });
+    return ok({ para: "ana@pg.gov.br", nome: "Escola Municipal Ana Néri", assunto: "Transferência de ANA LIMA", corpo: "Aluno ANA LIMA, CGM 1000000001, série 5º ano", aluno: "ANA LIMA", total: 2 });
+  }
   if (url.includes("/avisos/alunos")) {
     const f = new URL("http://x" + url).searchParams.get("fonte");
     if (f === "proximo") return ok({ alunos: [], aviso: "Ainda não existe previsao_alunos_2027.json" });
@@ -123,6 +129,21 @@ const marcar = (cx, v) => { cx.checked = v; cx.dispatchEvent(new w.Event("change
   ok($("campo-publico").value === "escolas", "o tipo ajusta 'Para quem' para escolas");
   $("campo-mensagem").value = "meu texto"; mudar(tipo, "livre");
   ok($("campo-mensagem").value === "meu texto", "tipo 'livre' não apaga o que foi digitado");
+
+  console.log("# como fica a mensagem (texto do aluno)");
+  const exemplo = () => $("exemplo-mensagem").textContent;
+  ok(!!$("exemplo-mensagem"), "caixa 'Como fica a mensagem' existe");
+  mudar(tipo, "transferencia"); await esperar(500);
+  ok(exemplo().includes("Para: Escola Municipal Ana Néri <ana@pg.gov.br> — aluno ANA LIMA (1º de 2)"), "mostra para quem e de qual aluno: " + exemplo().slice(0, 90));
+  ok(exemplo().includes("Assunto: Transferência de ANA LIMA") && exemplo().includes("CGM 1000000001"), "assunto e corpo já preenchidos com o aluno");
+  $("campo-alunos-limpar").click();
+  marcar($("campo-alunos-lista").querySelectorAll("input")[2], true); await esperar(500);
+  ok(exemplo().includes("⚠️ Nenhum aluno novo com escola de origem e e-mail") && exemplo().includes("aluno HUGO MELO"), "aluno que não receberia: mostra o aviso e o texto dele");
+  ok(!$("exemplo-mensagem").innerHTML.includes("<b>x</b>"), "texto do exemplo é inserido como texto, não como HTML");
+  $("campo-assunto").value = ""; $("campo-mensagem").value = ""; $("campo-assunto").dispatchEvent(new w.Event("input")); await esperar(500);
+  ok(exemplo().includes("Escolha um tipo de mensagem"), "sem texto: orienta a escolher um tipo");
+  $("campo-alunos-limpar").click(); marcar($("campo-alunos-lista").querySelectorAll("input")[0], true);
+  mudar(tipo, "transferencia"); mudar(tipo, "livre"); await esperar(100);
 
   console.log("# payload");
   const p = w.eval("_execMontarPayload()");

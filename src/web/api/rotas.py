@@ -1471,6 +1471,16 @@ def avisos_alunos():
         return jsonify({"alunos": [], "aviso": str(exc)})
 
 
+@api_bp.route("/avisos/exemplo", methods=["POST"])
+def avisos_exemplo():
+    """O texto montado para o primeiro aluno/destinatário da seleção atual (a tela mostra ao vivo). Mesmos campos da prévia."""
+    from src.automacao import avisos as _avisos
+    p = request.get_json(silent=True) or {}
+    return jsonify(_avisos.exemplo_da_mensagem(
+        p.get("publico"), p.get("assunto"), p.get("mensagem"), p.get("tipo_escola") or "todas", p.get("filtro_nome") or "",
+        p.get("situacao_pais") or "matriculados", p.get("unidades") or None, p.get("fonte") or "ano", p.get("alunos") or None))
+
+
 def _modelos_resposta(**extra):
     from src.comum import modelos_avisos as _modelos
     return jsonify({"modelos": _modelos.listar(), **extra})

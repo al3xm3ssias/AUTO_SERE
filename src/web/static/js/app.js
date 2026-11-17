@@ -1909,6 +1909,14 @@ function campoHTML(campo) {
         ${campo.ajuda ? `<div class="campo-ajuda">${campo.ajuda}</div>` : ""}
       </div>`;
   }
+  if (campo.tipo === "exemplo_mensagem") {
+    return `
+      <div class="field"${cond}>
+        <label>Como fica a mensagem</label>
+        <div id="${campo.id}" class="exemplo-mensagem" style="white-space:pre-wrap; border:1px solid var(--border); border-radius:8px; padding:12px; font-size:13px; min-height:48px;"></div>
+        <div class="campo-ajuda">Mostra o texto já preenchido com o primeiro aluno (ou destinatário) da seleção. Cada aluno recebe o seu.</div>
+      </div>`;
+  }
   if (campo.tipo === "modelo_acoes") {
     return `
       <div class="field"${cond} id="${campo.id}">
@@ -2130,6 +2138,7 @@ async function atualizarPrevia() {
   const alvo = document.getElementById("comp-previa");
   if (!info || !alvo) return;
   const payload = _execMontarPayload();
+  if (chave === "avisos") atualizarExemploMensagem(payload);
 
   if (info.recursos.includes("cgm")) {
     const caixa = document.getElementById("comp-cgm-previa");
@@ -2259,6 +2268,7 @@ async function inicializarCampoAlunos() {
   let aviso = "";
 
   const selo = (a) => {
+    if (a.na_nossa_escola) return { texto: `CGM ${a.cgm} · já está na nossa escola, sem escola anterior no vínculo (refaça a consulta)`, cor: "var(--amber)" };
     if (a.estado === "ok") return { texto: `CGM ${a.cgm} · ${a.escola_origem}`, cor: "var(--cyan)" };
     if (a.estado === "verificar") return { texto: `vínculo a verificar${a.motivo ? ": " + a.motivo : ""}`, cor: "var(--amber)" };
     return { texto: "sem vínculo da Base ABC (rode a consulta)", cor: "var(--amber)" };
@@ -2313,6 +2323,35 @@ async function inicializarCampoAlunos() {
   document.getElementById(`${id}-limpar`)?.addEventListener("click", () => { marcados.clear(); desenhar(); sincronizar(); });
   ["campo-situacao-pais", "campo-fonte-alunos"].forEach((c) => document.getElementById(c)?.addEventListener("change", carregar));
   await carregar();
+}
+
+let _seqExemplo = 0;
+/** Mostra o texto montado para o primeiro aluno/destinatário da seleção (e por que ele não receberia, se for o caso). */
+async function atualizarExemploMensagem(payload) {
+  const alvo = document.getElementById("exemplo-mensagem");
+  if (!alvo) return;
+  const minha = ++_seqExemplo;
+  let r;
+  try {
+    r = await apiPost("/avisos/exemplo", payload);
+  } catch (e) {
+    r = { aviso: e.message || "Não foi possível montar o exemplo." };
+  }
+  if (minha !== _seqExemplo) return;                         // chegou uma resposta mais nova enquanto esta voltava
+  alvo.textContent = "";
+  const linha = (texto, estilo = "") => {
+    const el = document.createElement("div");
+    el.textContent = texto;
+    if (estilo) el.style.cssText = estilo;
+    alvo.appendChild(el);
+  };
+  if (r.vazio) { linha("Escolha um tipo de mensagem ou escreva o texto para ver como fica.", "color:var(--txt3)"); return; }
+  if (r.aviso) linha(`⚠️ ${r.aviso}`, "color:var(--amber); margin-bottom:8px");
+  if (!r.corpo) return;
+  const destino = r.para ? `${r.nome} <${r.para}>` : r.nome;
+  linha(`Para: ${destino}${r.aluno ? ` — aluno ${r.aluno}` : ""}${r.total > 1 ? ` (1º de ${r.total})` : ""}`, "color:var(--txt3); margin-bottom:6px");
+  linha(`Assunto: ${r.assunto}`, "font-weight:600; margin-bottom:8px");
+  linha(r.corpo);
 }
 
 const _modeloDaTela = () => {

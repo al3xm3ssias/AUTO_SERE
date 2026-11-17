@@ -730,12 +730,32 @@ def situacao_do_historico(resultado) -> str:
     return str(resultado or "").strip().capitalize()
 
 
+def _chave_escola(nome) -> frozenset:
+    """Palavras que identificam a escola, só para saber se duas linhas do histórico são a MESMA escola (letras soltas e o
+    que vem depois da vírgula — \"NOME,E M PROFA-EI EF\" — não contam)."""
+    base = unicodedata.normalize("NFKD", str(nome or "").split(",")[0]).encode("ascii", "ignore").decode("ascii").lower()
+    return frozenset(p for p in re.findall(r"[a-z0-9]+", base) if len(p) > 1)
+
+
+def _mesma_escola(a, b) -> bool:
+    """Duas linhas do histórico são da mesma escola: palavras iguais, ou as de uma contidas na outra (nome abreviado x completo)."""
+    texto = lambda n: re.sub(r"[^a-z0-9]+", " ", unicodedata.normalize("NFKD", str(n or "").split(",")[0]).encode("ascii", "ignore").decode("ascii").lower()).strip()
+    if texto(a) and texto(a) == texto(b):                 # escrita igual (as letras soltas distinguem \"ESC A\" de \"ESC B\")
+        return True
+    ka, kb = _chave_escola(a), _chave_escola(b)
+    menor, maior = (ka, kb) if len(ka) <= len(kb) else (kb, ka)
+    return len(menor) >= 2 and menor <= maior
+
+
 def montar_vinculo(consulta: Consulta, nome: str, cgm: str, historico: list[dict], ano_referencia: int,
                    periodo: Optional[str] = None) -> dict:
     """
     CGM + aluno + turma/escola de origem + situação, a partir da linha do histórico do ano letivo vigente (`ano_referencia`).
     Com mais de uma linha no ano (transferências), vale a \"Matriculado\"; sem ela, a última. Nunca levanta: o que não
     fecha vira status \"verificar\" + motivo, e o vínculo é gravado assim mesmo.
+
+    `escola_anterior`/`turma_anterior`/`ano_anterior`: a linha mais recente do histórico de OUTRA escola. Serve quando o
+    aluno já entrou na nossa escola (a linha do ano é a nossa): o pedido de transferência vai para a escola anterior.
     """
     periodo = periodo or periodo_da_consulta(consulta)
     linhas = [(i, r) for i, r in enumerate(historico) if r.get("ano") == ano_referencia]
@@ -757,8 +777,20 @@ def montar_vinculo(consulta: Consulta, nome: str, cgm: str, historico: list[dict
         motivos.append(f"o histórico não tem linha de {ano_referencia}")
     if not cgm:
         motivos.append("aluno sem CGM")
+    anterior: dict = {}
+    if linhas:
+        escolhida, atual = linhas[0][0], linhas[0][1].get("escola")
+        for i in range(len(historico) - 1, -1, -1):
+            x = historico[i]
+            if i == escolhida or not x.get("escola") or (x.get("ano") or 0) > ano_referencia:
+                continue
+            if not _mesma_escola(x.get("escola"), atual):
+                anterior = {"escola_anterior": str(x["escola"]), "ano_anterior": x.get("ano"),
+                            "turma_anterior": turma_equivalente(x.get("curso", ""), x.get("serie", "")) or str(x.get("serie") or "")}
+                break
     vinculo = {"periodo": periodo, "ano_referencia": ano_referencia, "nome": nome, "cgm": cgm, "turma": turma,
                "escola": escola, "situacao": situacao, "status": "verificar" if motivos else "ok"}
+    vinculo.update(anterior)
     if motivos:
         vinculo["motivo"] = "; ".join(motivos)
     return vinculo
