@@ -50,6 +50,25 @@ Cadastro refeito para OUTRA escola:
       "CADASTRO REFEITO PARA OUTRA ESCOLA"), deixando de ser re-consultado.
     - Etapa 2: o CPF é apenas ignorado (não entra em "cadastros" nem nos contatos).
 
+Posição da NOSSA escola no "Último cadastro" (cadastro refeito):
+  Vale só o último cadastro (o da página, sufixo 0). Conforme a posição da nossa escola
+  nas Escolas Escolhidas (ver classificar_posicao_da_escola):
+    - Opção 1                                        -> fluxo normal.
+    - Opção 2 ou 3 e alguma opção ANTERIOR ainda sem
+      situação (ou já matriculado lá)                -> IGNORA: quem cancela ou matricula é
+                                                        a escola da opção anterior. O aluno não
+                                                        é registrado (sai de "cadastros" e dos
+                                                        contatos) e fica marcado com
+                                                        nao_e_primeira_opcao=True.
+    - Opção 2 ou 3 e TODAS as anteriores já com
+      situação (texto livre, ex.: "A escola não
+      dispõe de vaga no momento", "Cancelado...")    -> FILA DE ANÁLISE: o aluno é registrado
+                                                        normalmente e marcado com
+                                                        fila_analise=True e encaminhado_de=[o que
+                                                        cada escola anterior respondeu], para a
+                                                        escola decidir se matricula ou confirma
+                                                        com a Central de Matrícula.
+
 Diferenças em relação ao script original:
   - Caminhos vêm de paths.dados_ano_atual() (nada de caminho fixo do Samba).
   - Credenciais e "modo análise" são parâmetros, não globais.
@@ -117,6 +136,10 @@ MENSAGEM_SEM_CADASTRO = (
 _TRECHO_SEM_CADASTRO = "Nenhum aluno cadastrado com esse CPF"   # trecho usado na detecção por texto
 SITUACAO_CANCELADO = "Cancelado"
 MOTIVO_OUTRA_ESCOLA = "CADASTRO REFEITO PARA OUTRA ESCOLA"
+
+# Cadastro refeito em que nossa escola é a Opção 2/3 e a escola anterior ainda não decidiu:
+# o aluno não é nosso (a escola da opção anterior é quem cancela ou matricula).
+MOTIVO_NAO_E_PRIMEIRA_OPCAO = "CADASTRO REFEITO: NOSSA ESCOLA NÃO É A 1ª OPÇÃO"
 
 COLUNAS_CONTATOS_PADRAO = [
     "Name Prefix", "First Name", "Middle Name", "Last Name", "Name Suffix",
@@ -1161,6 +1184,101 @@ async def consultar_cpf(page, cpf, etapa="cadastro", analise=False):
     return aluno_dados
 
 
+# ----------------------------------------------------------
+# Posição da NOSSA escola no "Último cadastro" (cadastro refeito)
+# ----------------------------------------------------------
+
+POSICAO_PRIMEIRA = "primeira"
+POSICAO_ENCAMINHADO = "encaminhado"
+POSICAO_IGNORAR = "ignorar"
+
+
+def classificar_posicao_da_escola(opcoes, escola_alvo=NOME_ESCOLA_ALVO):
+    """
+    Olha as Escolas Escolhidas do ÚLTIMO cadastro e devolve (posicao, anteriores).
+
+      "primeira"    -> nossa escola é a Opção 1 (ou o formato é inesperado: na dúvida
+                       NÃO descarta o aluno). Fluxo normal.
+      "encaminhado" -> nossa escola é a Opção 2 ou 3 e TODAS as opções anteriores já
+                       têm situação (texto livre escrito por outras escolas: "Cancelado...",
+                       "A escola não dispõe de vaga no momento"...) e nenhuma é matrícula.
+                       Vai para a FILA DE ANÁLISE: a escola decide se matricula ou confirma
+                       com a Central de Matrícula.
+      "ignorar"     -> nossa escola é a Opção 2 ou 3 e alguma opção anterior ainda está sem
+                       situação (ou o aluno já foi matriculado lá): quem cancela ou matricula
+                       é a escola anterior. Não registrar.
+
+    `anteriores` = [{"opcao", "escola", "situacao"}] das opções antes da nossa (vazio na
+    "primeira"). Como o texto da situação é livre, a regra olha só se está preenchido.
+    """
+    opcoes = sorted(opcoes or [], key=lambda o: o.get("opcao") or 99)
+    alvo = escola_alvo.upper()
+    idx = next((i for i, op in enumerate(opcoes) if alvo in (op.get("escola") or "").upper()), None)
+    if idx is None or idx == 0:
+        return POSICAO_PRIMEIRA, []
+
+    anteriores = [
+        {
+            "opcao": op.get("opcao"),
+            "escola": op.get("escola") or "",
+            "situacao": (op.get("situacao") or "").strip(),
+        }
+        for op in opcoes[:idx]
+    ]
+    if any(not a["situacao"] for a in anteriores):
+        return POSICAO_IGNORAR, anteriores
+    if any(a["situacao"].upper().startswith("MATRICULAD") for a in anteriores):
+        return POSICAO_IGNORAR, anteriores          # já matriculado em outra escola: nada a analisar
+    return POSICAO_ENCAMINHADO, anteriores
+
+
+def _marcar_nao_e_primeira_opcao(aluno):
+    """Nossa escola não é a 1ª opção e a anterior não decidiu: cancelado DE FATO para esta escola."""
+    aluno["situacao"] = SITUACAO_CANCELADO
+    aluno["motivo_cancelamento"] = MOTIVO_NAO_E_PRIMEIRA_OPCAO
+    aluno["observacao"] = ""
+    aluno["nao_e_primeira_opcao"] = True
+    aluno.pop("fila_analise", None)
+    aluno.pop("encaminhado_de", None)
+
+
+def _marcar_fila_analise(aluno, anteriores):
+    """Encaminhado por outra escola: entra na fila (matricular ou confirmar com a Central)."""
+    aluno["fila_analise"] = True
+    aluno["encaminhado_de"] = anteriores
+    aluno.pop("nao_e_primeira_opcao", None)
+
+
+def _limpar_marcas_posicao(aluno):
+    """Voltou a ser Opção 1 (cadastro refeito de novo): tira as marcas antigas."""
+    for chave in ("fila_analise", "encaminhado_de", "nao_e_primeira_opcao"):
+        aluno.pop(chave, None)
+
+
+def _aplicar_posicao_no_aluno(aluno, posicao, anteriores):
+    if posicao == POSICAO_IGNORAR:
+        _marcar_nao_e_primeira_opcao(aluno)
+    elif posicao == POSICAO_ENCAMINHADO:
+        _marcar_fila_analise(aluno, anteriores)
+    else:
+        _limpar_marcas_posicao(aluno)
+
+
+def listar_fila_analise(pre_matricula):
+    """
+    Alunos na fila de análise (encaminhados por outra escola), sem acessar o site.
+    Devolve [(turma, aluno)] ignorando tentativas antigas já substituídas.
+    """
+    fila = []
+    for turma, alunos in (pre_matricula.get("turmas_intencao") or {}).items():
+        for aluno in alunos:
+            if tentativa_substituida(aluno):
+                continue
+            if aluno.get("fila_analise"):
+                fila.append((turma, aluno))
+    return fila
+
+
 async def etapa_cadastro(page, dados_prematricula, analise=False):
     print("\n" + "=" * 60)
     print("ETAPA 2/4 - CONSULTA DE CADASTRO POR CPF")
@@ -1176,6 +1294,7 @@ async def etapa_cadastro(page, dados_prematricula, analise=False):
     print(f"Total de CPFs encontrados: {len(cpfs)}")
 
     resultados = {}
+    posicoes = {}          # cpf -> (posicao, anteriores)
     for cpf in cpfs:
         aluno_dados, outra_escola = await consultar_cpf_com_status(
             page, cpf, etapa="cadastro", analise=analise
@@ -1183,16 +1302,41 @@ async def etapa_cadastro(page, dados_prematricula, analise=False):
         if outra_escola:
             print(f"   (CPF {cpf} ignorado: cadastro refeito para outra escola)")
             continue
-        if aluno_dados is not None:
-            resultados[cpf] = aluno_dados
+        if aluno_dados is None:
+            continue
+
+        opcoes = (aluno_dados.get("escolas_escolhidas") or {}).get("opcoes", [])
+        posicao, anteriores = classificar_posicao_da_escola(opcoes)
+        posicoes[cpf] = (posicao, anteriores)
+
+        if posicao == POSICAO_IGNORAR:
+            print(f"   (CPF {cpf} ignorado: nossa escola não é a 1ª opção e a escola anterior ainda não decidiu)")
+            continue
+        if posicao == POSICAO_ENCAMINHADO:
+            print(f"   ➡️ CPF {cpf}: encaminhado por outra escola -> fila de análise")
+
+        resultados[cpf] = aluno_dados
 
     pre_matricula = carregar_pre_matricula()
     for cpf, novo in resultados.items():
         _herdar_vinculo(pre_matricula["cadastros"].get(cpf), novo)
     pre_matricula["cadastros"].update(resultados)
+
+    for cpf, (posicao, anteriores) in posicoes.items():
+        if posicao == POSICAO_IGNORAR:
+            pre_matricula["cadastros"].pop(cpf, None)      # cadastro antigo deixa de valer
+        for alunos in pre_matricula["turmas_intencao"].values():
+            for aluno in alunos:
+                if (aluno.get("cpf") or "").strip() == cpf:
+                    _aplicar_posicao_no_aluno(aluno, posicao, anteriores)
+
     salvar_pre_matricula(pre_matricula)
 
+    na_fila = sum(1 for p, _ in posicoes.values() if p == POSICAO_ENCAMINHADO)
+    ignorados = sum(1 for p, _ in posicoes.values() if p == POSICAO_IGNORAR)
     print(f"\n✅ Etapa 2 concluída. Arquivo salvo em: {caminho_pre_matricula()}")
+    print(f"   Na fila de análise (encaminhados por outra escola): {na_fila}")
+    print(f"   Ignorados (nossa escola não é a 1ª opção): {ignorados}")
     return resultados
 
 
@@ -1279,8 +1423,13 @@ async def etapa_verificar_pendentes(page, dados_pre_matricula=None, analise=Fals
     que esse usuário tem acesso.", o responsável refez o cadastro para outra
     escola: o aluno é gravado como CANCELADO (MOTIVO_OUTRA_ESCOLA).
 
+    Se o último cadastro tem nossa escola como Opção 2/3 e a opção anterior ainda não
+    decidiu, o aluno é gravado como CANCELADO (MOTIVO_NAO_E_PRIMEIRA_OPCAO) e sai de
+    "cadastros". Se todas as anteriores já têm situação, segue o fluxo e entra na fila
+    de análise (fila_analise=True).
+
     Retorna {"total_pendentes", "confirmados", "sem_resposta": [cpfs], "outra_escola": [cpfs]}.
-    ("confirmados" inclui os cancelados por cadastro em outra escola.)
+    ("confirmados" inclui os cancelados por cadastro em outra escola ou por não ser a 1ª opção.)
     """
     print("\n" + "=" * 60)
     print("ETAPA 4/4 - VERIFICAÇÃO DE PENDENTES (MATRICULADOS/CANCELADOS)")
@@ -1299,6 +1448,7 @@ async def etapa_verificar_pendentes(page, dados_pre_matricula=None, analise=Fals
     confirmados = 0
     sem_resposta = []
     outra_escola_cpfs = []
+    nao_primeira_cpfs = []
     cadastros = pre_matricula.setdefault("cadastros", {})
 
     for turma, cpf, aluno in pendentes:
@@ -1317,10 +1467,23 @@ async def etapa_verificar_pendentes(page, dados_pre_matricula=None, analise=Fals
             sem_resposta.append(cpf)
             continue
 
+        opcoes = (aluno_dados.get("escolas_escolhidas") or {}).get("opcoes", [])
+        posicao, anteriores = classificar_posicao_da_escola(opcoes)
+
+        if posicao == POSICAO_IGNORAR:
+            cadastros.pop(cpf, None)
+            _aplicar_posicao_no_aluno(aluno, posicao, anteriores)
+            confirmados += 1
+            nao_primeira_cpfs.append(cpf)
+            print(f"✅ CPF {cpf} ({turma}): nossa escola não é a 1ª opção -> não registrado")
+            continue
+
         _herdar_vinculo(cadastros.get(cpf), aluno_dados)
         cadastros[cpf] = aluno_dados
+        _aplicar_posicao_no_aluno(aluno, posicao, anteriores)
+        if posicao == POSICAO_ENCAMINHADO:
+            print(f"   ➡️ CPF {cpf} ({turma}): encaminhado por outra escola -> fila de análise")
 
-        opcoes = (aluno_dados.get("escolas_escolhidas") or {}).get("opcoes", [])
         opcao = opcao_da_escola_alvo(opcoes)
 
         if opcao and opcao.get("situacao"):
@@ -1337,6 +1500,7 @@ async def etapa_verificar_pendentes(page, dados_pre_matricula=None, analise=Fals
     print(f"   Pendentes verificados: {len(pendentes)}")
     print(f"   Confirmados (matriculado/cancelado real): {confirmados}")
     print(f"   Cancelados por cadastro em outra escola: {len(outra_escola_cpfs)}")
+    print(f"   Cancelados por nossa escola não ser a 1ª opção: {len(nao_primeira_cpfs)}")
     print(f"   Sem resposta clara (mantidos como presumidos): {len(sem_resposta)}")
     print(f"   Arquivo salvo em: {caminho_pre_matricula()}")
 
@@ -1372,6 +1536,8 @@ def reconciliar_situacoes(pre_matricula, aplicar=False):
                 continue          # histórico da tentativa antiga: a situação do cadastro é da nova
             if aluno.get("cadastro_refeito_outra_escola"):
                 continue          # cancelado por cadastro em outra escola; o cadastro antigo não vale mais
+            if aluno.get("nao_e_primeira_opcao"):
+                continue          # nossa escola não é a 1ª opção do último cadastro; a outra escola decide
             cpf = (aluno.get("cpf") or "").strip()
             cadastro = cadastros.get(cpf)
             if not cadastro:

@@ -175,6 +175,8 @@ TELAS: dict[str, dict] = {
             "(posição e pontuação), escolas escolhidas e situação da matrícula.",
             "Para atualizar os dados, clique em **Executar** no alto, escolha as opções e clique em **Iniciar pré-matrícula**.",
             "Use **Exportar** para baixar a lista que está na tela em CSV (abre no Excel).",
+            "Na aba **Cancelados**, a coluna **Motivo da Recusa** explica o porquê. Se estiver escrito **CADASTRO REFEITO: NOSSA ESCOLA NÃO É A 1ª OPÇÃO**, "
+            "o responsável refez o cadastro e a nossa escola ficou como 2ª ou 3ª opção (veja **Cadastro refeito** em Cuidados).",
         ],
         "elementos": [
             E("Executar", "Abre ou fecha o painel de execução da pré-matrícula.", "#pm-btn-executar"),
@@ -199,6 +201,14 @@ TELAS: dict[str, dict] = {
         "cuidados": [
             "A execução abre o portal da pré-matrícula e depende da senha salva em Configurações.",
             "A coleta só lê o site; ela não altera cadastros no portal.",
+            "**Cadastro refeito:** se o responsável refaz o cadastro, vale o **último**. A escola da **Opção 1** é quem matricula ou cancela. "
+            "Se a nossa escola (Judith Macedo Silveira) é a Opção 2 ou 3 e a escola anterior **ainda não escreveu a situação**, o aluno **não é registrado**: "
+            "sai dos cadastros e dos contatos e aparece em Cancelados com o motivo \"nossa escola não é a 1ª opção\".",
+            "**Fila de análise:** se a nossa escola é a Opção 2 ou 3 e **todas as opções anteriores já têm situação** "
+            "(texto escrito pelas outras escolas, como \"A escola não dispõe de vaga no momento\"), o aluno é marcado para análise: "
+            "a escola decide se matricula ou confirma antes com a **Central de Matrícula**. Se alguma anterior já matriculou o aluno, ele também não é registrado.",
+            "Por enquanto a fila de análise é só uma **marca no arquivo** `pre_matricula.json` (campos `fila_analise` e `encaminhado_de`); "
+            "esta tela ainda não tem uma aba própria para ela. Se o responsável refizer o cadastro e a nossa escola voltar a ser a Opção 1, a marca é retirada.",
         ],
         "veja_tambem": [R("automacao", "prematricula_completa"), R("configuracao", "senha_prematricula"),
                         R("tela", "previsao"), R("tela", "whatsapp")],

@@ -29,6 +29,9 @@
   "navegador_scripts": {
     "base_abc": {
       "mostrar_janela": true
+    },
+    "prematricula_completa": {
+      "mostrar_janela": true
     }
   },
   "google_sheets": {}

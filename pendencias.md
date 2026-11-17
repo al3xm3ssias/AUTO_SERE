@@ -118,7 +118,7 @@ Adaptação do script antigo `consulta_transferidos_ano_anterior.py`: automaçã
 
 ## 4. Ajuda para os usuários
 
-- [x] Ajuda (F1) de todas as telas, abas, painéis, janelas e automações: feita em `src/comum/ajuda*.py` + `static/js/ajuda.js` (os três `partials/help/*.html` vazios não são mais necessários e podem ser apagados)
+- [x] Ajuda (F1) de todas as telas, abas, painéis, janelas e automações: feita em `src/comum/ajuda*.py` + `static/js/ajuda.js` (os três `partials/help/*.html` vazios não são mais necessários e podem ser apagados) Atualizada em 2026-11-17 com os recursos novos: avisos (envio real, escola de origem, unidades, alunos, modelos), Base ABC (vínculo, escola anterior, limpeza), funcionários (retomada), backup automático, turmas e pré-matrícula (nome da mãe); `tests/test_ajuda.py` confere.
 
 ---
 

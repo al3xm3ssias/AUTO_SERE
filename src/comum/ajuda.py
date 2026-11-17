@@ -42,8 +42,8 @@ def _catalogo() -> dict[str, dict]:
 def _campo_extra(c: dict) -> dict:
     """Um campo próprio do script (extras do registro) como item de ajuda."""
     partes = []
-    if c.get("descricao"):
-        partes.append(str(c["descricao"]))
+    if c.get("descricao") or c.get("ajuda"):                  # `ajuda`: texto de apoio dos campos de lista (unidades, alunos)
+        partes.append(str(c.get("descricao") or c["ajuda"]))
     opcoes = c.get("opcoes") or []
     if c.get("tipo") == "select" and opcoes and len(opcoes) <= _OPCOES_MAX:
         linhas = []

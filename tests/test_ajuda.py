@@ -217,3 +217,46 @@ def test_f1_esta_ligado_na_interface():
     assert 'e.key === "F1"' in AJUDA_JS and "preventDefault" in AJUDA_JS
     for id_ in ("aj-busca", "aj-lista-telas", "aj-lista-automacoes", "aj-lista-config", "aj-vazio"):
         assert f'id="{id_}"' in TEMPLATES, id_
+
+
+# ───────────── ajuda das automações que ganharam recursos (avisos, Base ABC, funcionários, backup) ─────────────
+
+def _texto_da_ajuda(tipo, chave) -> str:
+    import json as _json
+    return _json.dumps(ajuda.obter(tipo, chave), ensure_ascii=False)
+
+
+def test_ajuda_dos_avisos_descreve_o_envio_real_e_nao_diz_que_esta_bloqueado():
+    t = _texto_da_ajuda("automacao", "avisos")
+    assert "ainda não está liberado" not in t and "só existem os modos Simular e Teste" not in t
+    for trecho in ("Enviar de verdade", "não pode ser desfeito", "AVISOS/enviados.json", "escola de origem", "Consulta na Base ABC",
+                   "config/modelos_avisos.json", "escola anterior", "só para quem está chegando"):
+        assert trecho in t, trecho
+
+
+def test_ajuda_dos_avisos_traz_todos_os_campos_da_tela_com_nome_proprio():
+    t = _texto_da_ajuda("automacao", "avisos")
+    for rotulo in ("Quais unidades", "Quais alunos", "De onde vêm os alunos novos", "Tipo de mensagem", "Salvar e excluir modelos",
+                   "Como fica a mensagem", "Pausa entre os e-mails", "Máximo de e-mails por execução"):
+        assert rotulo in t, rotulo
+    assert '"Campo"' not in t and "Preencha conforme a necessidade" not in t          # nenhum campo sem rótulo
+    assert "E-mail de teste" not in t and "cujo nome contém" not in t                  # campos que saíram da tela
+
+
+def test_ajuda_das_outras_automacoes_conta_o_que_mudou():
+    assert "Recomeçar do zero" in _texto_da_ajuda("automacao", "funcionarios")
+    b = _texto_da_ajuda("automacao", "backup")
+    assert "backup \\\"automático\\\"" in b and "7 mais recentes" in b and "10 mais recentes" in b
+    a = _texto_da_ajuda("automacao", "base_abc")
+    assert "vinculo_base_abc" in a and "buscas_base.json" in a and "não tem data de nascimento" not in a
+    assert "nome da mãe" in _texto_da_ajuda("automacao", "prematricula_completa")
+    assert "backup automático" in _texto_da_ajuda("automacao", "turmas")
+
+
+def test_ajuda_da_pre_matricula_explica_a_regra_da_opcao_da_escola_e_a_fila_de_analise():
+    tela = " ".join(conteudo.TELAS["prematricula"]["cuidados"] + conteudo.TELAS["prematricula"]["passos"])
+    auto = " ".join(ajuda_automacoes.AUTOMACOES["prematricula_completa"]["cuidados"])
+    for texto in (tela, auto):
+        assert "1ª opção" in texto
+        assert "fila de análise" in texto
+        assert "Central de Matrícula" in texto

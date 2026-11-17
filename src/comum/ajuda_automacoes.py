@@ -92,7 +92,8 @@ AUTOMACOES: dict[str, dict] = {
         "quando": "Na configuração inicial e sempre que houver matrícula, transferência ou troca de turma no SERE.",
         "antes": ["Salvar o login do SERE em Configurações.", "Preencher os dados da escola."],
         "resultado": ["Grava `turmas.json` do ano letivo em uso.",
-                      "Refaz sozinha a fila de transferidos (`fila_transferidos.json`) a cada coleta."],
+                      "Refaz sozinha a fila de transferidos (`fila_transferidos.json`) a cada coleta.",
+                      "Ao terminar, cria um backup automático dos dados."],
         "cuidados": ["Não roda ao mesmo tempo que outra coleta de Turmas: o sistema recusa a segunda."],
         "veja_tambem": [R("tela", "turmas"), R("automacao", "alunos"), R("automacao", "gerar_pastas"), R("automacao", "transferidos_fila")],
     },
@@ -124,7 +125,9 @@ AUTOMACOES: dict[str, dict] = {
         "antes": ["Login do SERE salvo."],
         "resultado": ["Modo Básico: `funcionarios.json` (nome, CPF, função, RG, mãe, e-mail, formação, turmas).",
                       "Modo Completo: também `funcionarios_completo.json` (documentos, filiação, endereço), consultando cada um pelo CPF."],
-        "cuidados": ["O modo Completo é mais lento. Sem marcar **Atualizar a lista antes**, ele reaproveita a lista já salva."],
+        "cuidados": ["O modo Completo é mais lento. Sem marcar **Atualizar a lista antes**, ele reaproveita a lista já salva.",
+                     "Se a coleta completa foi interrompida há menos de 3 dias, rodar de novo continua de onde parou e só consulta quem faltou. Marque **Recomeçar do zero** para consultar todos.",
+                     "Ao terminar, o sistema cria um backup automático."],
         "veja_tambem": [R("tela", "funcionarios"), R("automacao", "vinculos")],
     },
     "vinculos": {
@@ -171,9 +174,17 @@ AUTOMACOES: dict[str, dict] = {
         "quando": "Durante o período de pré-matrícula, para acompanhar a fila e os cadastros.",
         "antes": ["Salvar o login da Pré-matrícula em Configurações."],
         "resultado": ["Grava/atualiza `pre_matricula.json` sem apagar o histórico.",
+                      "No cadastro (etapa 2) guarda também a data de nascimento e, quando o portal mostrar, o nome da mãe, que a Consulta na Base ABC usa na busca.",
                       "A coleta do próximo ano letivo grava `previsao_alunos_<ano>.json`, usado na tela Previsão.",
                       "Ao terminar, o sistema pode avisar os responsáveis pelo WhatsApp (cadastro recebido / matrícula aprovada); cada aviso vai uma vez por aluno, e no modo simulado nada sai."],
-        "cuidados": ["Só lê o site; não altera cadastros no portal. Pode levar vários minutos."],
+        "cuidados": ["Só lê o site; não altera cadastros no portal. Pode levar vários minutos.",
+                     "**Cadastro refeito (Escolas Escolhidas do último cadastro):** se a nossa escola é a **Opção 1**, o fluxo é o normal. "
+                     "Se é a **Opção 2 ou 3** e alguma escola anterior ainda **não tem situação**, o aluno **não é registrado** (a escola da Opção 1 é quem cancela ou matricula): "
+                     "sai dos cadastros e dos contatos e fica como Cancelado, motivo \"nossa escola não é a 1ª opção\". Se alguma anterior já matriculou, também não entra.",
+                     "Se é a Opção 2 ou 3 e **todas as anteriores já têm situação** (texto livre das outras escolas, por exemplo \"A escola não dispõe de vaga no momento\"), "
+                     "o aluno vai para a **fila de análise**: a escola decide se matricula ou confirma antes com a Central de Matrícula. "
+                     "A marca fica em `pre_matricula.json` (`fila_analise`, `encaminhado_de`); ainda não há tela para essa fila.",
+                     "A regra vale nas etapas **2 (Cadastro)** e **4 (Pendentes)**."],
         "veja_tambem": [R("tela", "prematricula"), R("tela", "previsao"), R("tela", "whatsapp"), R("configuracao", "senha_prematricula")],
     },
     "rematricula": {
@@ -415,12 +426,21 @@ AUTOMACOES: dict[str, dict] = {
     # ───── Comunicação ─────
     "avisos": {
         "grupo": "comunicacao",
-        "resumo": "Comunicados oficiais por e-mail: de escola para as escolas e CMEIs de Ponta Grossa, ou de escola para os **pais de alunos novos** (pré-matrícula).",
-        "quando": "Para avisos em massa, sempre começando por **Simular**.",
-        "antes": ["E-mail do Gmail salvo em Configurações.", "Para escolas, a lista de unidades (automação **Coleta e-mails**)."],
-        "resultado": ["No modo **Simular**, lista quem receberia e mostra a prévia, sem enviar nada.",
-                      "No modo **Teste**, envia UM e-mail de verdade, só para o e-mail de teste (para escolas, a escola fictícia ESCOLA MUNICIPAL TESTE DA SILVA)."],
-        "cuidados": ["Por enquanto só existem os modos Simular e Teste: o envio real aos destinatários ainda não está liberado.",
+        "resumo": "Comunicados oficiais por e-mail, **só para quem está chegando**: de escola para as escolas e CMEIs de Ponta Grossa (por exemplo, "
+                  "pedir a transferência de um aluno à escola de origem) ou para os **pais de alunos novos** (pré-matrícula do ano letivo e previsão do próximo ano).",
+        "quando": "Para avisos em massa. Comece sempre por **Simular**: o envio real só libera depois de simular o mesmo comunicado.",
+        "antes": ["E-mail do Gmail salvo em Configurações.", "Para escolas, a lista de unidades (automação **Coleta e-mails**).",
+                  "Para o texto de transferência (com $ALUNO, $CGM, $SERIE), a **Consulta na Base ABC** feita antes: é ela que liga o CGM e a escola de origem a cada aluno novo."],
+        "resultado": ["No modo **Simular**, lista quem receberia, quem fica de fora (e por quê), mostra a prévia e guarda o registro em `AVISOS/`, sem enviar nada.",
+                      "No modo **Teste**, envia UM e-mail de verdade, só para o e-mail de teste (para escolas, a escola fictícia ESCOLA MUNICIPAL TESTE DA SILVA).",
+                      "No modo **Enviar de verdade**, envia um por um, com pausa entre eles e no máximo o limite escolhido por execução; grava cada envio em "
+                      "`AVISOS/enviados.json` e o registro da execução (enviados, falhas, os que faltam)."],
+        "cuidados": ["O envio real **não pode ser desfeito** e pede confirmação. Só funciona depois de **Simular** o mesmo texto e os mesmos destinatários (a simulação vale 24 horas).",
+                     "Quem já recebeu o mesmo texto não recebe de novo: dá para cancelar e rodar outra vez, que continua de onde parou. Três falhas seguidas (senha errada, sem rede) param o envio.",
+                     "Um texto com **$ALUNO, $CGM, $SERIE ou $TURMA** vira um e-mail por aluno que chega, para a escola de origem dele; sem esses marcadores, é um e-mail por unidade. "
+                     "Aluno sem vínculo da Base ABC, com vínculo a verificar ou com escola de origem fora da lista **não recebe** e aparece na lista. "
+                     "Se o aluno já entrou na nossa escola, o pedido vai para a escola anterior do histórico.",
+                     "**Tipo de mensagem** carrega modelos (o de transferência já vem pronto) e dá para salvar, ajustar e excluir os seus, que ficam em `config/modelos_avisos.json`.",
                      "Use os marcadores no assunto e na mensagem; os disponíveis aparecem na descrição de cada público."],
         "veja_tambem": [R("automacao", "coleta_emails"), R("configuracao", "chave_gmail")],
     },
@@ -445,6 +465,7 @@ AUTOMACOES: dict[str, dict] = {
         "resumo": "Cria uma cópia de segurança dos dados do sistema num único arquivo `.zip` datado, com um manifesto (tamanho e SHA-256 de cada arquivo) para conferir a integridade.",
         "quando": "Antes de mudanças grandes e periodicamente.",
         "resultado": ["Grava `dados/backup/backup_AAAA-MM-DD_HHMMSS.zip` e guarda os 10 mais recentes.",
+                      "Ao fim das coletas de turmas, alunos e funcionários o sistema cria sozinho um backup \"automático\"; desses ficam os 7 mais recentes, à parte, sem empurrar os seus.",
                       "**Entram**: os `.json`, `.xlsx`, `.csv` e `.txt` do ano em uso e a configuração (`config_usuario.json` e `config.yaml`).",
                       "**Não entram**: senhas (`credenciais/` e qualquer `.env`), a pasta DIGITALIZAÇÃO, screenshots, logs e os próprios backups."],
         "cuidados": ["Para voltar os dados de um ano, use Configurações → Ano letivo → Restaurar."],
@@ -463,10 +484,13 @@ AUTOMACOES: dict[str, dict] = {
         "quando": "Para descobrir de onde um aluno veio, principalmente na pré-matrícula.",
         "antes": ["Login do SERE salvo."],
         "resultado": ["Grava `buscas_base.json` com data da busca, nome, se tem CGM, CGM, nascimento, mãe e as escolas numeradas (ano, escola, série).",
-                      "Quem não está na base **não é erro**: fica registrado o que foi encontrado."],
-        "cuidados": ["Só lê: não altera nada no SERE.",
-                     "A pré-matrícula não tem data de nascimento nem mãe: a busca por ela é mais fraca (veja \"conferido_por\" no resultado).",
-                     "Mãe e data de nascimento é que separam homônimos."],
+                      "Quem não está na base **não é erro**: fica registrado o que foi encontrado.",
+                      "Com a pré-matrícula, a previsão do próximo ano ou os transferidos como origem, grava também o vínculo (CGM, escola, série e a escola anterior do histórico) "
+                      "no cadastro do aluno (`vinculo_base_abc`): é o que preenche os avisos de transferência."],
+        "cuidados": ["Só lê o SERE: não altera nada lá; os vínculos são gravados nos arquivos do próprio sistema.",
+                     "A pré-matrícula traz a data de nascimento e, se o portal mostrar, o nome da mãe: quanto mais dados, mais forte a busca (veja \"conferido_por\" no resultado).",
+                     "Mãe e data de nascimento é que separam homônimos.",
+                     "Com **Tirar do buscas_base.json quem já foi vinculado** (vem marcada), o registro sai de `buscas_base.json` depois de gravado no cadastro de origem; o que foi digitado fica."],
         "veja_tambem": [R("tela", "prematricula")],
     },
     "gerar_chaves": {

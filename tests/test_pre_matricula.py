@@ -83,7 +83,7 @@ class _Loc:
     async def count(self):
         return self.p._count(self.sel)
 
-    async def inner_text(self):
+    async def inner_text(self, **_k):
         v = self.p._text(self.sel)
         if v is None:
             raise RuntimeError("sem elemento " + self.sel)
@@ -94,6 +94,9 @@ class _Loc:
 
     async def is_disabled(self):
         return False
+
+    async def input_value(self):
+        return self.p.periodo_atual
 
     async def wait_for(self, **_k):
         return None
@@ -125,10 +128,15 @@ class FakePage:
       turmas: {label: [ {pos,nome,cpf,tipo,pontuacao,id}, ... ]}
     """
 
-    def __init__(self, cad=None, turmas=None, login_ok=True, escolas=("Judith Macedo Silveira",)):
+    def __init__(self, cad=None, turmas=None, login_ok=True, escolas=("Judith Macedo Silveira",),
+                 nao_encontrados=()):
         self.cad, self.turmas = cad or {}, turmas or {}
+        self.nao_encontrados = set(nao_encontrados)    # CPFs que o portal responde "Nenhum aluno cadastrado"
         self.login_ok, self.logado = login_ok, False
         self.escolas = list(escolas)
+        # select#anoLetivo ("Abertura"): o código escolhe o período do ano antes de consultar/coletar
+        self.periodos = [{"value": "10", "label": "2026 (01/01/2026 - 31/12/2026)"}]
+        self.periodo_atual = None
         self.url = ""
         self.cpf_atual = None
         self.turma_atual = None
@@ -171,10 +179,15 @@ class FakePage:
             raise pm.PWTimeout("sem linhas")
         return None
 
-    async def select_option(self, _sel, val):
-        self.turma_atual = val
+    async def select_option(self, sel, val):
+        if sel == "select#anoLetivo":
+            self.periodo_atual = val
+        else:
+            self.turma_atual = val
 
-    async def eval_on_selector_all(self, _sel, _js):
+    async def eval_on_selector_all(self, sel, _js):
+        if "anoLetivo" in sel:
+            return [{"value": "", "label": "Selecione"}] + list(self.periodos)
         return [{"value": "", "label": "Selecione"}] + [
             {"value": t, "label": t} for t in self.turmas
         ]
@@ -200,9 +213,13 @@ class FakePage:
             return 1 if (self.url == pm.LOGIN_URL and not self.logado) else 0
         if sel == "#listaEscolas a":
             return len(self.escolas)
+        if sel == "div#divCadastros":
+            return 1 if self.cpf_atual in self.cad else 0
+        if sel == "div#naoencontrado":
+            return 1 if self.cpf_atual in self.nao_encontrados else 0
         if sel.startswith("span#e") and sel.endswith("0") and len(sel) == 8:
             return 1 if sel in self.cad.get(self.cpf_atual, {}) else 0
-        return 0
+        return 1 if sel in self.cad.get(self.cpf_atual, {}) else 0       # h5#dNomeAluno, span#dTelefone... etc.
 
     def _text(self, sel):
         return self.cad.get(self.cpf_atual, {}).get(sel)
@@ -368,7 +385,7 @@ def test_etapa4_confirma_matriculado_aqui_mesmo_cancelado_em_outra_escola(dados_
     })
     resumo = rodar(pm.etapa_verificar_pendentes(page))
 
-    assert resumo == {"total_pendentes": 2, "confirmados": 2, "sem_resposta": []}
+    assert resumo == {"total_pendentes": 2, "confirmados": 2, "sem_resposta": [], "outra_escola": []}
     assert page.consultas == ["100", "200"]  # 300 não foi reconsultado
 
     d = pm.carregar_pre_matricula()
@@ -741,7 +758,7 @@ def test_processo_completo_de_ponta_a_ponta(dados_tmp, monkeypatch):
     r = rodar(pm.processo_completo_via_login(matricula="m", senha="s"))
 
     assert r["ok"] is True
-    assert r["resumo_pendentes"] == {"total_pendentes": 1, "confirmados": 1, "sem_resposta": []}
+    assert r["resumo_pendentes"] == {"total_pendentes": 1, "confirmados": 1, "sem_resposta": [], "outra_escola": []}
     assert r["arquivo_contatos"] and r["arquivo_contatos"].exists()
     d = pm.carregar_pre_matricula()
     por = {a["cpf"]: a for a in d["turmas_intencao"]["1º Ano do Ensino Fundamental"]}
@@ -763,7 +780,7 @@ def test_processo_completo_login_falho_aborta_e_fecha_navegador(dados_tmp, monke
     page = FakePage(login_ok=False)
     pw = _instalar_playwright(monkeypatch, page)
     r = rodar(pm.processo_completo_via_login(matricula="m", senha="s"))
-    assert r == {"ok": False, "resumo_pendentes": None, "arquivo_contatos": None}
+    assert r == {"ok": False, "resumo_pendentes": None, "arquivo_contatos": None, "resultados": {}}
     assert pw.chromium.browser.fechado and pw.parado
     assert not pm.caminho_pre_matricula().exists()  # nada gravado
 
@@ -771,7 +788,8 @@ def test_processo_completo_login_falho_aborta_e_fecha_navegador(dados_tmp, monke
 def test_verificar_pendentes_via_login_e_navegador_configuravel(dados_tmp, monkeypatch):
     page = FakePage()
     pw = _instalar_playwright(monkeypatch, page)
-    resumo = rodar(pm.verificar_pendentes_via_login(matricula="m", senha="s", navegador="firefox", headless=False))
+    resumo = rodar(pm.verificar_pendentes_via_login(matricula="m", senha="s", navegador="firefox", headless=False,
+                                                  alvo="atual"))
     assert resumo["total_pendentes"] == 0
     assert pw.firefox.headless is False
 
@@ -910,3 +928,202 @@ def test_aluno_na_mesma_turma_continua_substituindo_o_antigo_como_antes():
     c1 = pm.mesclar_turmas_intencao({}, {"A": [_aluno("1", "X")]})
     c2 = pm.mesclar_turmas_intencao(c1, {"A": [_aluno("1", "X", pontuacao="99")]})
     assert len(c2["A"]) == 1 and c2["A"][0]["pontuacao"] == "99" and "substituido_por_nova_tentativa" not in c2["A"][0]
+
+
+# ----------------------------------------------------------
+# Opção da escola / fila de análise (regra de 17/11/2026)
+#   Opção 1  -> fluxo normal
+#   Opção 2/3 + alguma anterior SEM situação (ou já matriculado) -> ignorar (cancelado: não é a 1ª opção)
+#   Opção 2/3 + TODAS as anteriores com situação (e nenhuma matrícula) -> fila de análise
+# ----------------------------------------------------------
+
+SEM_VAGA = "A escola não dispõe de vaga no momento"
+
+
+def test_posicao_primeira_opcao_segue_o_fluxo_normal():
+    ops = [opcao(1, ESCOLA, ""), opcao(2, OUTRA, "")]
+    assert pm.classificar_posicao_da_escola(ops) == (pm.POSICAO_PRIMEIRA, [])
+
+
+def test_posicao_escola_ausente_ou_sem_opcoes_nao_descarta_o_aluno():
+    assert pm.classificar_posicao_da_escola([opcao(1, OUTRA, "")]) == (pm.POSICAO_PRIMEIRA, [])
+    assert pm.classificar_posicao_da_escola([]) == (pm.POSICAO_PRIMEIRA, [])
+    assert pm.classificar_posicao_da_escola(None) == (pm.POSICAO_PRIMEIRA, [])
+
+
+def test_posicao_opcao_2_com_anterior_sem_situacao_e_ignorada():
+    ops = [opcao(1, OUTRA, ""), opcao(2, ESCOLA, "")]
+    posicao, anteriores = pm.classificar_posicao_da_escola(ops)
+    assert posicao == pm.POSICAO_IGNORAR
+    assert anteriores == [{"opcao": 1, "escola": OUTRA, "situacao": ""}]
+
+
+def test_posicao_situacao_so_com_espacos_conta_como_vazia():
+    ops = [opcao(1, OUTRA, "   "), opcao(2, ESCOLA, "")]
+    assert pm.classificar_posicao_da_escola(ops)[0] == pm.POSICAO_IGNORAR
+
+
+def test_posicao_opcao_2_com_anterior_ja_decidida_vai_para_a_fila():
+    ops = [opcao(1, OUTRA, SEM_VAGA), opcao(2, ESCOLA, "")]
+    posicao, anteriores = pm.classificar_posicao_da_escola(ops)
+    assert posicao == pm.POSICAO_ENCAMINHADO
+    assert anteriores == [{"opcao": 1, "escola": OUTRA, "situacao": SEM_VAGA}]
+
+
+def test_posicao_texto_livre_qualquer_na_anterior_basta_para_ir_a_fila():
+    ops = [opcao(1, OUTRA, "Cancelado. Motivo: Mudou de bairro"), opcao(2, ESCOLA, "")]
+    assert pm.classificar_posicao_da_escola(ops)[0] == pm.POSICAO_ENCAMINHADO
+
+
+def test_posicao_opcao_3_exige_que_as_duas_anteriores_tenham_situacao():
+    ambas = [opcao(1, OUTRA, SEM_VAGA), opcao(2, "OUTRA 2", "Cancelado"), opcao(3, ESCOLA, "")]
+    posicao, anteriores = pm.classificar_posicao_da_escola(ambas)
+    assert posicao == pm.POSICAO_ENCAMINHADO and [a["opcao"] for a in anteriores] == [1, 2]
+
+    so_uma = [opcao(1, OUTRA, SEM_VAGA), opcao(2, "OUTRA 2", ""), opcao(3, ESCOLA, "")]
+    assert pm.classificar_posicao_da_escola(so_uma)[0] == pm.POSICAO_IGNORAR
+
+
+def test_posicao_ja_matriculado_em_escola_anterior_e_ignorado():
+    ops = [opcao(1, OUTRA, "Matriculado. Observação:"), opcao(2, ESCOLA, "")]
+    assert pm.classificar_posicao_da_escola(ops)[0] == pm.POSICAO_IGNORAR
+
+
+def test_posicao_ordena_pelo_numero_da_opcao_e_nao_pela_ordem_da_lista():
+    ops = [opcao(2, ESCOLA, ""), opcao(1, OUTRA, SEM_VAGA)]
+    assert pm.classificar_posicao_da_escola(ops)[0] == pm.POSICAO_ENCAMINHADO
+
+
+def test_posicao_nome_da_escola_e_achado_sem_diferenciar_caixa():
+    ops = [opcao(1, OUTRA, SEM_VAGA), opcao(2, ESCOLA.title(), "")]
+    assert pm.classificar_posicao_da_escola(ops)[0] == pm.POSICAO_ENCAMINHADO
+
+
+def test_aplicar_posicao_marca_e_limpa_as_marcas_antigas():
+    ant = [{"opcao": 1, "escola": OUTRA, "situacao": SEM_VAGA}]
+    a = {"cpf": "1"}
+
+    pm._aplicar_posicao_no_aluno(a, pm.POSICAO_ENCAMINHADO, ant)
+    assert a["fila_analise"] is True and a["encaminhado_de"] == ant
+    assert "nao_e_primeira_opcao" not in a
+
+    pm._aplicar_posicao_no_aluno(a, pm.POSICAO_IGNORAR, ant)
+    assert a["nao_e_primeira_opcao"] is True
+    assert a["situacao"] == pm.SITUACAO_CANCELADO
+    assert a["motivo_cancelamento"] == pm.MOTIVO_NAO_E_PRIMEIRA_OPCAO
+    assert "fila_analise" not in a and "encaminhado_de" not in a
+
+    pm._aplicar_posicao_no_aluno(a, pm.POSICAO_PRIMEIRA, [])      # voltou a ser a Opção 1
+    assert not {"fila_analise", "encaminhado_de", "nao_e_primeira_opcao"} & set(a)
+
+
+def test_listar_fila_analise_so_traz_marcados_e_ignora_tentativas_substituidas():
+    dados = {"turmas_intencao": {
+        "1º Ano": [
+            {"cpf": "1", "fila_analise": True},
+            {"cpf": "2"},
+            {"cpf": "3", "fila_analise": True, "substituido_por_nova_tentativa": True},
+        ],
+        "2º Ano": [{"cpf": "4", "fila_analise": True}],
+    }}
+    fila = pm.listar_fila_analise(dados)
+    assert [(t, a["cpf"]) for t, a in fila] == [("1º Ano", "1"), ("2º Ano", "4")]
+    assert pm.listar_fila_analise({}) == []
+
+
+def _base_com_alunos(*cpfs):
+    base = pm.carregar_pre_matricula()
+    base["turmas_intencao"] = {"1º Ano": [
+        {"cpf": c, "nome": "Aluno " + c, "presente_na_ultima_coleta": True} for c in cpfs
+    ]}
+    pm.salvar_pre_matricula(base)
+
+
+def test_etapa_cadastro_separa_primeira_opcao_ignorado_e_fila(dados_tmp):
+    _base_com_alunos("1", "2", "3")
+    page = FakePage(cad={
+        "1": pagina_cad("1", [(ESCOLA, ""), (OUTRA, "")]),                    # Opção 1
+        "2": pagina_cad("2", [(OUTRA, ""), (ESCOLA, "")]),                    # anterior ainda não decidiu
+        "3": pagina_cad("3", [(OUTRA, SEM_VAGA), (ESCOLA, "")]),              # anterior já decidiu
+    })
+    res = rodar(pm.etapa_cadastro(page, {"turmas": {"1º Ano": [{"cpf": "1"}, {"cpf": "2"}, {"cpf": "3"}]}}))
+
+    assert set(res) == {"1", "3"}                                              # o 2 não é registrado
+    d = pm.carregar_pre_matricula()
+    assert set(d["cadastros"]) == {"1", "3"}
+    a1, a2, a3 = d["turmas_intencao"]["1º Ano"]
+
+    assert not {"fila_analise", "nao_e_primeira_opcao"} & set(a1)
+    assert a2["nao_e_primeira_opcao"] is True and a2["situacao"] == pm.SITUACAO_CANCELADO
+    assert a2["motivo_cancelamento"] == pm.MOTIVO_NAO_E_PRIMEIRA_OPCAO
+    assert a3["fila_analise"] is True
+    assert a3["encaminhado_de"] == [{"opcao": 1, "escola": OUTRA.upper(), "situacao": SEM_VAGA.upper()}]
+    assert [a["cpf"] for _t, a in pm.listar_fila_analise(d)] == ["3"]
+
+
+def test_etapa_cadastro_cadastro_antigo_some_quando_o_aluno_deixa_de_ser_primeira_opcao(dados_tmp):
+    _base_com_alunos("2")
+    base = pm.carregar_pre_matricula()
+    base["cadastros"]["2"] = {"nome_aluno": "CADASTRO ANTIGO"}
+    pm.salvar_pre_matricula(base)
+
+    page = FakePage(cad={"2": pagina_cad("2", [(OUTRA, ""), (ESCOLA, "")])})
+    rodar(pm.etapa_cadastro(page, {"turmas": {"1º Ano": [{"cpf": "2"}]}}))
+
+    assert "2" not in pm.carregar_pre_matricula()["cadastros"]
+
+
+def test_etapa_cadastro_aluno_volta_a_ser_primeira_opcao_sai_da_fila(dados_tmp):
+    _base_com_alunos("3")
+    dados = {"turmas": {"1º Ano": [{"cpf": "3"}]}}
+
+    rodar(pm.etapa_cadastro(FakePage(cad={"3": pagina_cad("3", [(OUTRA, SEM_VAGA), (ESCOLA, "")])}), dados))
+    assert pm.listar_fila_analise(pm.carregar_pre_matricula())
+
+    rodar(pm.etapa_cadastro(FakePage(cad={"3": pagina_cad("3", [(ESCOLA, ""), (OUTRA, "")])}), dados))
+    d = pm.carregar_pre_matricula()
+    assert pm.listar_fila_analise(d) == []
+    assert not {"fila_analise", "encaminhado_de"} & set(d["turmas_intencao"]["1º Ano"][0])
+
+
+def _pendente(cpf):
+    return {"cpf": cpf, "nome": "Aluno " + cpf, "presente_na_ultima_coleta": False,
+            "situacao": "Cancelado", "motivo_cancelamento": pm.MOTIVO_PRESUNTIVO}
+
+
+def test_etapa4_pendente_que_nao_e_primeira_opcao_vira_cancelado_e_sai_dos_cadastros(dados_tmp):
+    base = pm.carregar_pre_matricula()
+    base["turmas_intencao"] = {"T": [_pendente("1")]}
+    base["cadastros"]["1"] = {"nome_aluno": "ANTIGO"}
+    pm.salvar_pre_matricula(base)
+
+    page = FakePage(cad={"1": pagina_cad("1", [(OUTRA, ""), (ESCOLA, "")])})
+    resumo = rodar(pm.etapa_verificar_pendentes(page))
+
+    assert resumo["confirmados"] == 1 and resumo["sem_resposta"] == []
+    d = pm.carregar_pre_matricula()
+    a = d["turmas_intencao"]["T"][0]
+    assert a["nao_e_primeira_opcao"] is True and a["motivo_cancelamento"] == pm.MOTIVO_NAO_E_PRIMEIRA_OPCAO
+    assert "1" not in d["cadastros"]
+
+
+def test_etapa4_pendente_encaminhado_entra_na_fila_e_aguarda_a_decisao_da_escola(dados_tmp):
+    base = pm.carregar_pre_matricula()
+    base["turmas_intencao"] = {"T": [_pendente("1")]}
+    pm.salvar_pre_matricula(base)
+
+    page = FakePage(cad={"1": pagina_cad("1", [(OUTRA, SEM_VAGA), (ESCOLA, "")])})
+    resumo = rodar(pm.etapa_verificar_pendentes(page))
+
+    assert resumo["sem_resposta"] == ["1"]                  # nossa opção ainda sem situação
+    d = pm.carregar_pre_matricula()
+    assert [a["cpf"] for _t, a in pm.listar_fila_analise(d)] == ["1"]
+    assert "1" in d["cadastros"]
+
+
+def test_reconciliar_nao_corrige_quem_nao_e_primeira_opcao():
+    dados = {
+        "turmas_intencao": {"T": [{"cpf": "1", "nao_e_primeira_opcao": True, "situacao": "Cancelado"}]},
+        "cadastros": {"1": {"escolas_escolhidas": {"opcoes": [opcao(2, ESCOLA, "Matriculado")]}}},
+    }
+    assert pm.reconciliar_situacoes(dados) == []
