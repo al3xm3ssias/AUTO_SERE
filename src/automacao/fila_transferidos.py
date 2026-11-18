@@ -14,6 +14,9 @@ Fila de transferidos: quem foi transferido (turmas.json) e já entra no processo
   marca, pela DATA_CORTE (Configurações), quem entra no processo ("processar") e quem fica de fora
   ("antes_do_corte": já tratado à mão; "retornou": voltou à escola, o processo é feito uma vez só).
 • transferidos.json nunca é sobrescrito: só ganha registro (vazio) para quem entra no processo e ainda não tem.
+• SEGUNDA SAÍDA (regra do usuário, 17/11/2026): quem saiu, foi processado, voltou e saiu DE NOVO precisa de guia,
+  histórico e parecer novos. O registro da 1ª saída vai para `ciclos_anteriores` (nada se perde), os PDFs dela são
+  renomeados "<nome> (saída dd-mm-aaaa).pdf" para o 2º ciclo não sobrescrevê-los, e um registro novo (vazio) é criado.
 
 IDENTIDADE (decisão do usuário, 27/10/2026)
     • Um REGISTRO (cadastro) é identificado por  nº da chamada (N) + nome + data de nascimento.
@@ -222,6 +225,102 @@ def _data_corte(data_corte: Optional[date]) -> date:
     return _config.data_corte_transferidos()
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# SEGUNDA SAÍDA NO MESMO ANO (novo ciclo de documentos)
+# ══════════════════════════════════════════════════════════════════════════
+
+def _data_iso(valor) -> Optional[date]:
+    try:
+        return datetime.fromisoformat(str(valor)).date() if valor else None
+    except ValueError:
+        return None
+
+
+def _ultima_emissao(reg: dict) -> Optional[date]:
+    """Data mais recente em que a guia ou o histórico deste registro foram emitidos (None: nada emitido ainda)."""
+    datas = [_data_iso((reg.get(doc) or {}).get("emitido_em")) for doc in ("guia", "historico")]
+    datas = [d for d in datas if d]
+    return max(datas) if datas else None
+
+
+def _tem_documentos(reg: dict) -> bool:
+    """O registro já tem algo emitido/digitalizado (então não pode ser reaproveitado para outra saída)."""
+    return _ultima_emissao(reg) is not None or bool((reg.get("parecer") or {}).get("digitalizado_em"))
+
+
+def e_nova_saida(reg: dict, aluno_da_fila: dict) -> bool:
+    """
+    O registro de transferidos.json é de uma saída ANTERIOR à que a fila mostra agora?
+
+      • Registro com `data_transferencia`: a saída atual é posterior E a data do registro ainda aparece entre as
+        saídas anteriores (se só a data foi corrigida no SERE, a saída é a mesma e nada se refaz).
+      • Registro antigo (ou pré-corte), sem `data_transferencia`: os documentos dele foram emitidos ANTES da
+        saída atual, logo não podem ser desta saída.
+    Em qualquer caso é preciso existir uma saída anterior (`transferencias_anteriores`).
+    """
+    d_nova = parse_data(aluno_da_fila.get("data_transferencia") or "")
+    anteriores = {parse_data(x.get("data") or "") for x in aluno_da_fila.get("transferencias_anteriores") or []} - {None}
+    if d_nova is None or not anteriores:
+        return False
+    d_reg = parse_data(reg.get("data_transferencia") or "")
+    if d_reg is not None:
+        return d_reg < d_nova and d_reg in anteriores
+    emissao = _ultima_emissao(reg)
+    return emissao is not None and emissao < d_nova
+
+
+def _guardar_pdfs_do_ciclo(pasta: Path, reg: dict) -> list[str]:
+    """
+    Renomeia os PDFs da saída anterior (histórico e guia) para o novo ciclo não sobrescrevê-los.
+    Levanta OSError se algum não puder ser renomeado (ex.: aberto no leitor de PDF): nesse caso o chamador
+    não inicia o novo ciclo, e a próxima execução tenta de novo.
+    """
+    from src.comum import pastas_transferencias as _pastas
+
+    rotulo = (reg.get("data_transferencia") or "").replace("/", "-")
+    if not rotulo:
+        d = _ultima_emissao(reg)
+        rotulo = d.strftime("%d-%m-%Y") if d else "anterior"
+    renomeados = []
+    for subpasta in (_pastas.HISTORICO, _pastas.GUIA):
+        origem = _pastas.subpasta(subpasta, pasta) / str(reg.get("turma") or "") / f"{reg.get('nome')}.pdf"
+        if not origem.exists():
+            continue
+        destino = origem.with_name(f"{origem.stem} (saída {rotulo}).pdf")
+        n = 2
+        while destino.exists():
+            destino = origem.with_name(f"{origem.stem} (saída {rotulo}) {n}.pdf")
+            n += 1
+        origem.rename(destino)
+        renomeados.append(destino.name)
+    return renomeados
+
+
+def iniciar_novo_ciclo(controle: dict, cgm: str, a: dict, pasta: Path) -> str:
+    """
+    Trata a 2ª (3ª...) saída de quem já tem registro em `controle`. Devolve "atualizado" (o registro antigo
+    não tinha nada emitido: só ganha os dados da saída atual) ou "novo_ciclo" (o antigo foi para
+    `ciclos_anteriores`, os PDFs dele foram renomeados e o registro agora está vazio para o processo refazer).
+    """
+    antigo = controle[cgm]
+    if not _tem_documentos(antigo):
+        antigo.update({"nome": a["nome"], "turma": a["turma"], "chamada": a["chamada"],
+                       "data_nascimento": a["data_nascimento"], "data_transferencia": a["data_transferencia"],
+                       "retorno": a["retorno"]})
+        if a.get("transferencias_anteriores"):
+            antigo["transferencias_anteriores"] = a["transferencias_anteriores"]
+        return "atualizado"
+
+    _guardar_pdfs_do_ciclo(pasta, antigo)                       # se falhar, nada abaixo acontece
+    ciclo = {k: antigo.get(k) for k in ("chamada", "turma", "data_transferencia", "retorno", "guia", "historico", "parecer")}
+    ciclo["arquivado_em"] = _agora()
+    novo = _registro_novo(a["nome"], a["turma"], a["chamada"], a["data_nascimento"], a["data_transferencia"],
+                          a["retorno"], a.get("transferencias_anteriores"))
+    novo["ciclos_anteriores"] = list(antigo.get("ciclos_anteriores") or []) + [ciclo]
+    controle[cgm] = novo
+    return "novo_ciclo"
+
+
 def classificar(registro: dict, data_corte: date) -> str:
     """
     'processar' se a transferência é de DATA_CORTE em diante (inclusive) e o aluno não voltou à escola;
@@ -290,24 +389,41 @@ def registrar_fila_transferidos(turmas: dict, dados_dir: Optional[Path] = None,
     Retorna {"fila", "avisos", "novos_em_transferidos"}.
     """
     fila, avisos = montar_fila(turmas, data_corte)
-    novos = 0
+    novos = ciclos = 0
+    alterou = False
     if not simulacao:
         pasta = _dados_dir(dados_dir)
         _gravar_json(pasta / NOME_FILA_JSON, fila)
         caminho = pasta / NOME_TRANSFERIDOS_JSON
         controle = _ler_json(caminho)
         for cgm, a in fila["alunos"].items():
-            if a["processar"] and cgm not in controle:
+            if not a["processar"]:
+                continue
+            if cgm not in controle:
                 controle[cgm] = _registro_novo(a["nome"], a["turma"], a["chamada"], a["data_nascimento"],
                                                a["data_transferencia"], a["retorno"],
                                                a.get("transferencias_anteriores"))
                 novos += 1
-        if novos or not caminho.exists():            # o controle sempre passa a existir (vazio, se ninguém entra)
+            elif e_nova_saida(controle[cgm], a):                       # saiu de novo: precisa de documentos novos
+                try:
+                    resultado = iniciar_novo_ciclo(controle, cgm, a, pasta)
+                except OSError as exc:
+                    avisos.append(f"{a['nome']} (CGM {cgm}): saiu de novo, mas os PDFs da saída anterior não puderam "
+                                  f"ser renomeados ({exc}). Feche-os e rode de novo; nada foi alterado.")
+                    continue
+                alterou = True
+                if resultado == "novo_ciclo":
+                    ciclos += 1
+                    avisos.append(f"{a['nome']} (CGM {cgm}): saiu de novo em {a['data_transferencia']} — novos "
+                                  f"documentos serão feitos; os da saída anterior ficaram guardados.")
+        if novos or alterou or not caminho.exists():  # o controle sempre passa a existir (vazio, se ninguém entra)
             _gravar_json(caminho, controle)
     imprimir_fila(fila, avisos, simulacao)
     if novos:
         print(f"  💾 {novos} registro(s) novo(s) em transferidos.json")
-    return {"fila": fila, "avisos": avisos, "novos_em_transferidos": novos}
+    if ciclos:
+        print(f"  🔁 {ciclos} aluno(s) que saíram de novo ganharam um novo ciclo de documentos")
+    return {"fila": fila, "avisos": avisos, "novos_em_transferidos": novos, "novos_ciclos": ciclos}
 
 
 def registrar_fila_sem_falhar(turmas: dict, dados_dir: Optional[Path] = None) -> Optional[dict]:

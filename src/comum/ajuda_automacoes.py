@@ -208,7 +208,10 @@ AUTOMACOES: dict[str, dict] = {
         "antes": ["Ter o `turmas.json` atualizado."],
         "resultado": ["Grava `fila_transferidos.json` (temporário: não edite à mão) e atualiza o `transferidos.json` (controle permanente)."],
         "cuidados": ["Com **Simulação**, só mostra quem entraria e quem fica de fora pela data de corte, sem gravar nada.",
-                     "O mesmo aluno que voltou à escola não é refeito (a identidade é nome + data de nascimento)."],
+                     "O mesmo aluno que voltou à escola não é refeito (a identidade é nome + data de nascimento).",
+                     "Se ele voltou e **saiu de novo**, a 2ª saída tem documentos próprios: o registro da 1ª vai para `ciclos_anteriores` em `transferidos.json`, "
+                     "os PDFs dela são renomeados \"<nome> (saída dd-mm-aaaa).pdf\" e o processo refaz guia, histórico e parecer. "
+                     "Se um PDF antigo estiver aberto e não puder ser renomeado, nada é alterado: feche-o e rode de novo."],
         "veja_tambem": [R("configuracao", "data_corte_transferidos"), R("automacao", "transferidos_gerar"), R("tela", "transferidos")],
     },
     "transferidos_gerar": {

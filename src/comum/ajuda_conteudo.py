@@ -685,6 +685,8 @@ CONFIGURACOES: dict[str, dict] = {
         "dicas": [
             "Quem foi transferido **antes** da data é considerado já tratado à mão e não é refeito.",
             "Quem foi transferido e voltou à escola também não é refeito.",
+            "Quem foi transferido, voltou e foi **transferido de novo** ganha documentos novos (guia, histórico e parecer). Os da 1ª saída ficam guardados "
+            "(os PDFs passam a se chamar \"<nome> (saída dd-mm-aaaa).pdf\").",
         ],
         "veja_tambem": [R("automacao", "transferidos_fila"), R("automacao", "transferidos_gerar"), R("tela", "transferidos")],
     },

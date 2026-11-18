@@ -352,3 +352,185 @@ def test_a_simulacao_so_de_assinar_nao_fala_de_observacao(processo, capsys):
     asyncio.run(processo.processar_transferencias(etapas=processo.etapas_por_acoes(["assinar"]), simulacao=True))
     saida = capsys.readouterr().out
     assert "Assinar Históricos" in saida and "Assinar Guias" in saida and "observação" not in saida
+
+
+# ══ Segunda saída no mesmo ano: documentos novos (regra do usuário, 17/11/2026) ══════════
+#   matriculado -> transferido -> (processo feito) -> matriculado de novo -> transferido de novo
+
+CORTE = date(2026, 6, 22)
+TURMA = "1º Ano Integral A"
+
+
+def _saida1():
+    """Só a 1ª saída: chamada 5, transferido em 25/07/2026."""
+    return {TURMA: [_al(5, "55", "BETO LIMA", "02/03/2015", "Transferido", "25/07/2026")]}
+
+
+def _saida2():
+    """A 1ª saída + o retorno (chamada 40) que depois virou a 2ª saída, em 10/10/2026."""
+    return {TURMA: [_al(5, "55", "BETO LIMA", "02/03/2015", "Transferido", "25/07/2026"),
+                    _al(40, "55", "BETO LIMA", "02/03/2015", "Transferido", "10/10/2026")]}
+
+
+def _doc(quando):
+    return {"emitido_em": quando, "assinado_secretario": quando, "assinado_diretor": quando, "anexado_em": quando}
+
+
+def _processar_a_primeira_saida(ambiente):
+    """Registra a 1ª saída e simula o processo concluído (guia, histórico e parecer feitos, PDFs gravados)."""
+    ft.registrar_fila_transferidos(_saida1(), ambiente, CORTE)
+    controle = _ler(ambiente / "transferidos.json")
+    controle["55"]["guia"] = _doc("2026-07-26T10:00:00")
+    controle["55"]["historico"] = _doc("2026-07-26T10:05:00")
+    controle["55"]["parecer"] = {"digitalizado_em": "2026-07-27T09:00:00", "anexado_em": "2026-07-27T09:30:00"}
+    _gravar(ambiente / "transferidos.json", controle)
+    for subpasta in ("HISTORICO", "GUIA DE TRANSFERENCIA"):
+        pasta = ambiente / "TRANSFERENCIAS" / subpasta / TURMA
+        pasta.mkdir(parents=True, exist_ok=True)
+        (pasta / "BETO LIMA.pdf").write_bytes(b"%PDF 1a saida " + subpasta.encode())
+    return controle
+
+
+def test_segunda_saida_ganha_novo_ciclo_e_guarda_o_anterior(ambiente):
+    _processar_a_primeira_saida(ambiente)
+    r = ft.registrar_fila_transferidos(_saida2(), ambiente, CORTE)
+
+    assert r["novos_ciclos"] == 1 and r["novos_em_transferidos"] == 0
+    reg = _ler(ambiente / "transferidos.json")["55"]
+    assert reg["data_transferencia"] == "10/10/2026" and reg["chamada"] == 40
+    assert reg["guia"]["emitido_em"] is None and reg["historico"]["emitido_em"] is None        # vazio: o processo refaz
+    assert reg["parecer"] == {"digitalizado_em": None, "anexado_em": None}
+    antigo = reg["ciclos_anteriores"][0]
+    assert antigo["data_transferencia"] == "25/07/2026" and antigo["chamada"] == 5
+    assert antigo["guia"]["emitido_em"] == "2026-07-26T10:00:00" and antigo["parecer"]["digitalizado_em"]
+    assert any("saiu de novo" in a for a in r["avisos"])
+
+
+def test_segunda_saida_nao_sobrescreve_os_pdfs_da_primeira(ambiente):
+    _processar_a_primeira_saida(ambiente)
+    ft.registrar_fila_transferidos(_saida2(), ambiente, CORTE)
+    for subpasta in ("HISTORICO", "GUIA DE TRANSFERENCIA"):
+        pasta = ambiente / "TRANSFERENCIAS" / subpasta / TURMA
+        assert not (pasta / "BETO LIMA.pdf").exists()                      # o nome liberado é do 2º ciclo
+        guardado = pasta / "BETO LIMA (saída 25-07-2026).pdf"
+        assert guardado.read_bytes() == b"%PDF 1a saida " + subpasta.encode()   # conteúdo intacto
+
+
+def test_segunda_saida_entra_no_processo_de_novo(processo, ambiente):
+    _gravar(ambiente / "turmas.json", _saida1())
+    _processar_a_primeira_saida(ambiente)
+    assert processo.carregar_alunos() == []                                # 1ª saída completa: nada a fazer
+    _gravar(ambiente / "turmas.json", _saida2())
+    ft.registrar_fila_transferidos(_saida2(), ambiente, CORTE)
+    assert [(a.cgm, a.nome) for a in processo.carregar_alunos()] == [("55", "BETO LIMA")]
+
+
+def test_rodar_de_novo_nao_cria_outro_ciclo(ambiente):
+    _processar_a_primeira_saida(ambiente)
+    ft.registrar_fila_transferidos(_saida2(), ambiente, CORTE)
+    r = ft.registrar_fila_transferidos(_saida2(), ambiente, CORTE)
+    assert r["novos_ciclos"] == 0
+    assert len(_ler(ambiente / "transferidos.json")["55"]["ciclos_anteriores"]) == 1
+
+
+def test_terceira_saida_acumula_os_ciclos(ambiente):
+    _processar_a_primeira_saida(ambiente)
+    ft.registrar_fila_transferidos(_saida2(), ambiente, CORTE)
+    controle = _ler(ambiente / "transferidos.json")
+    controle["55"]["guia"] = _doc("2026-10-11T10:00:00")
+    controle["55"]["historico"] = _doc("2026-10-11T10:05:00")
+    _gravar(ambiente / "transferidos.json", controle)
+    turmas = _saida2()
+    turmas[TURMA].append(_al(41, "55", "BETO LIMA", "02/03/2015", "Transferido", "20/11/2026"))
+    ft.registrar_fila_transferidos(turmas, ambiente, CORTE)
+    reg = _ler(ambiente / "transferidos.json")["55"]
+    assert [c["data_transferencia"] for c in reg["ciclos_anteriores"]] == ["25/07/2026", "10/10/2026"]
+    assert reg["data_transferencia"] == "20/11/2026"
+
+
+def test_aluno_que_saiu_e_voltou_nao_ganha_ciclo_novo(ambiente):
+    _processar_a_primeira_saida(ambiente)
+    turmas = {TURMA: [_al(5, "55", "BETO LIMA", "02/03/2015", "Transferido", "25/07/2026"),
+                      _al(40, "55", "BETO LIMA", "02/03/2015", "Matriculado", "20/08/2026")]}      # voltou e ficou
+    r = ft.registrar_fila_transferidos(turmas, ambiente, CORTE)
+    assert r["novos_ciclos"] == 0
+    assert "ciclos_anteriores" not in _ler(ambiente / "transferidos.json")["55"]
+
+
+def test_registro_sem_documentos_apenas_acompanha_a_saida_atual(ambiente):
+    ft.registrar_fila_transferidos(_saida1(), ambiente, CORTE)           # criado, o processo ainda não rodou
+    r = ft.registrar_fila_transferidos(_saida2(), ambiente, CORTE)
+    reg = _ler(ambiente / "transferidos.json")["55"]
+    assert r["novos_ciclos"] == 0 and reg["data_transferencia"] == "10/10/2026" and reg["chamada"] == 40
+    assert "ciclos_anteriores" not in reg                                # não havia nada a guardar
+
+
+def test_registro_antigo_sem_data_com_documentos_anteriores_a_nova_saida(ambiente):
+    antigo = {"nome": "BETO LIMA", "turma": TURMA, "guia": _doc("2026-07-26T10:00:00"),
+              "historico": _doc("2026-07-26T10:05:00"), "parecer": {"digitalizado_em": None, "anexado_em": None}}
+    _gravar(ambiente / "transferidos.json", {"55": antigo})              # formato antigo: sem data_transferencia
+    r = ft.registrar_fila_transferidos(_saida2(), ambiente, CORTE)
+    reg = _ler(ambiente / "transferidos.json")["55"]
+    assert r["novos_ciclos"] == 1 and reg["guia"]["emitido_em"] is None
+    assert reg["ciclos_anteriores"][0]["guia"]["emitido_em"] == "2026-07-26T10:00:00"
+
+
+def test_registro_antigo_com_documentos_posteriores_a_saida_nao_e_tocado(ambiente):
+    doc = _doc("2026-10-12T10:00:00")                                    # emitidos depois da 2ª saída: já são dela
+    antigo = {"nome": "BETO LIMA", "turma": TURMA, "guia": doc, "historico": doc,
+              "parecer": {"digitalizado_em": None, "anexado_em": None}}
+    _gravar(ambiente / "transferidos.json", {"55": antigo})
+    r = ft.registrar_fila_transferidos(_saida2(), ambiente, CORTE)
+    assert r["novos_ciclos"] == 0 and _ler(ambiente / "transferidos.json")["55"] == antigo
+
+
+def test_data_corrigida_no_sere_nao_conta_como_nova_saida(ambiente):
+    _processar_a_primeira_saida(ambiente)
+    corrigida = {TURMA: [_al(5, "55", "BETO LIMA", "02/03/2015", "Transferido", "27/07/2026")]}   # só a data mudou
+    r = ft.registrar_fila_transferidos(corrigida, ambiente, CORTE)
+    assert r["novos_ciclos"] == 0 and "ciclos_anteriores" not in _ler(ambiente / "transferidos.json")["55"]
+
+
+def test_pdf_preso_nao_inicia_o_novo_ciclo_e_nada_e_alterado(ambiente, monkeypatch):
+    from pathlib import Path
+    _processar_a_primeira_saida(ambiente)
+    antes = (ambiente / "transferidos.json").read_text(encoding="utf-8")
+
+    def _preso(self, destino):
+        raise PermissionError("arquivo em uso")
+    monkeypatch.setattr(Path, "rename", _preso)
+    r = ft.registrar_fila_transferidos(_saida2(), ambiente, CORTE)
+
+    assert r["novos_ciclos"] == 0 and (ambiente / "transferidos.json").read_text(encoding="utf-8") == antes
+    assert any("não puderam ser renomeados" in a for a in r["avisos"])
+    assert (ambiente / "TRANSFERENCIAS" / "HISTORICO" / TURMA / "BETO LIMA.pdf").exists()
+
+
+def test_pre_corte_nao_preenche_o_registro_de_uma_saida_posterior_ao_corte(processo, ambiente):
+    """Antes: a linha da 1ª saída (pré-corte) 'completava' o registro novo da 2ª saída e ela nunca era processada."""
+    _gravar(ambiente / "turmas.json", {TURMA: [
+        _al(3, "55", "BETO LIMA", "02/03/2015", "Transferido", "10/05/2026"),        # 1ª saída, ANTES do corte
+        _al(40, "55", "BETO LIMA", "02/03/2015", "Transferido", "10/10/2026")]})     # 2ª saída, depois
+    reg = ft._registro_novo("BETO LIMA", TURMA, 40, "02/03/2015", "10/10/2026")
+    _gravar(ambiente / "transferidos.json", {"55": reg})
+    processo.registrar_pre_corte()
+    assert _ler(ambiente / "transferidos.json")["55"]["guia"]["emitido_em"] is None
+
+
+def test_primeira_saida_antes_do_corte_e_segunda_depois_geram_novo_ciclo(processo, ambiente):
+    """1ª saída tratada à mão (pré-corte) + 2ª saída depois do corte: a 2ª precisa do processo completo."""
+    turmas = {TURMA: [_al(3, "55", "BETO LIMA", "02/03/2015", "Transferido", "10/05/2026"),
+                      _al(40, "55", "BETO LIMA", "02/03/2015", "Transferido", "10/10/2026")]}
+    _gravar(ambiente / "turmas.json", turmas)
+    antes = {TURMA: [turmas[TURMA][0]]}
+    _gravar(ambiente / "turmas.json", antes)
+    processo.registrar_pre_corte()                                        # só a 1ª saída existia: registro pré-corte completo
+    assert _ler(ambiente / "transferidos.json")["55"]["guia"]["emitido_em"] == "2026-05-10T00:00:00"
+
+    r = ft.registrar_fila_transferidos(turmas, ambiente, CORTE)          # agora a 2ª saída aparece
+    reg = _ler(ambiente / "transferidos.json")["55"]
+    assert r["novos_ciclos"] == 1 and reg["guia"]["emitido_em"] is None and reg["data_transferencia"] == "10/10/2026"
+    _gravar(ambiente / "turmas.json", turmas)
+    processo.registrar_pre_corte()                                        # rodar o pré-corte depois não desfaz
+    assert _ler(ambiente / "transferidos.json")["55"]["guia"]["emitido_em"] is None
+    assert [a.cgm for a in processo.carregar_alunos()] == ["55"]

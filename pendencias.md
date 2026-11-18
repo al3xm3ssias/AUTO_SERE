@@ -2,7 +2,7 @@
 
 Lista curta do que ainda falta. O detalhe e o histórico estão em [`PROXIMAS_ETAPAS.md`](PROXIMAS_ETAPAS.md) (os números, como 3b e 11q, são os mesmos) e os bugs em [`BUGS_CONHECIDOS.md`](BUGS_CONHECIDOS.md).
 
-Atualizado em 2026-11-07 (itens de 07/11 só nos pareceres; o resto segue como em 02/11). Legenda: `[ ]` pendente · `[!]` depende de ambiente real ou de decisão · `[x]` decidido/feito.
+Atualizado em 2026-11-18 (pré-matrícula, 2ª saída de transferidos e a ideia do banco de dados local; o resto segue como em 07/11). Legenda: `[ ]` pendente · `[!]` depende de ambiente real ou de decisão · `[x]` decidido/feito.
 
 ---
 
@@ -76,7 +76,7 @@ Uso real, definido em 2026-11-02 e **revisado em 2026-11-14**: comunicar **só q
 - [!] Decidir se os termos de ciência pulam quem tem `na_escola = false`
 
 ### Transferidos
-- [ ] **Aluno que sai duas vezes no mesmo ano**: o controle (`transferidos.json`) tem um registro por aluno e não é refeito se o aluno já está nele. Se o aluno sai, o processo é feito, ele volta e sai de novo, a 2ª saída não ganha guia, histórico e parecer novos (a 1ª só fica anotada em `transferencias_anteriores`). Raro: só tratar se acontecer
+- [x] **Aluno que sai duas vezes no mesmo ano** (2026-11-18): regra do usuário: saiu, foi processado, voltou e saiu de novo → a 2ª saída tem guia, histórico e parecer próprios. O registro da 1ª vai para `ciclos_anteriores` em `transferidos.json`, os PDFs dela são renomeados `<nome> (saída dd-mm-aaaa).pdf` (se não der para renomear, nada é alterado) e o processo refaz tudo. Corrigido junto o pré-corte, que preenchia como pronto o registro da 2ª saída quando a 1ª foi antes do corte. Testes em `tests/test_fluxo_transferidos.py`. ⚠️ Falta ver como fica o parecer da 2ª saída (`PARECERES/<turma>/NN-NOME.pdf` pode ter o mesmo nome do da 1ª) e mostrar os ciclos anteriores na tela Transferidos. `deteccao_transferidos.py` (módulo antigo, só `detectar_mudancas` é usado) tem a mesma trava e não foi alterado
 - [ ] **Tabela "Transferidos" não mostra o total da escola**: ela lê só `transferidos.json`, que só tem quem entra no processo (transferido a partir da data de corte e que não voltou). Quem saiu antes do corte e quem voltou está em `fila_transferidos.json`, que a tabela não usa. Ideia: juntar as duas e mostrar uma coluna "Situação no processo"
 - [ ] **Mapeamento de turmas do QR (só QR antigo)**: quando a turma escrita no QR não bate com a do `turmas.json`, é preciso editar `mapeamento_turmas_qr` em `config/config_usuario.json` à mão; falta uma tela em Configurações. Com o QR novo (CGM) não é necessário
 
@@ -98,6 +98,41 @@ Adaptação do script antigo `consulta_transferidos_ano_anterior.py`: automaçã
 - [x] **Decidido (2026-11-14): a coleta da pré-matrícula guarda data de nascimento e nome da mãe.** A data já era coletada (`dDataNasc0`); agora também o `nome_mae` (`CAMPOS_CADASTRO`, ids `dNomeMae{s}`, `dMae{s}`, `dNomeMaeAluno{s}`, `dFiliacao1{s}`, `dFiliacao{s}`) e a Base ABC o usa na busca (`Consulta.mae`). ⚠️ **Os ids da mãe são tentativas: não foram vistos no portal real.** Se nenhum existir o campo fica vazio, sem custo de tempo, e a busca segue só por nome + nascimento. Mande o HTML do modal do cadastro para fixar o id certo. Cadastros já coletados não têm a mãe até a próxima coleta da etapa 2
 - [ ] `escolas` traz **todas** as linhas do histórico (a janela de 3 anos do script antigo saiu). Decidir se volta a limitar
 - [x] **`buscas_base.json` agora alimenta os cadastros (2026-11-14)**: (1) novo público **transferidos** (`transferidos.json`, só quem saiu e não voltou, busca pelo CGM): o vínculo (escola/situação do histórico) é gravado no registro dele em `vinculo_base_abc`, como já era feito na pré-matrícula; (2) caixa **"Tirar do buscas_base.json quem já foi vinculado"** (ligada por padrão): depois de gravar o vínculo no cadastro de origem, o registro sai de `buscas_base.json`, que fica só com o que não está em outro lugar (digitados e vínculos que não puderam ser gravados; nada é podado se a gravação falhou). ⚠️ Validar no SERE real o vínculo dos transferidos (a regra é a do ano vigente: Matriculado/Transferido). Falta usar `vinculo_base_abc` do transferido na ficha/tela de Transferidos e como escola de destino no `avisos`
+
+### Pré-matrícula: opção da escola e correção de dados (2026-11-17/18)
+- [x] **Regra da Opção da escola**: Opção 1 segue o fluxo; Opção 2 ou 3 com alguma escola anterior **sem situação** (ou já com matrícula) → o aluno **não é registrado** (sai dos cadastros e contatos; aparece em Cancelados com o motivo "NOSSA ESCOLA NÃO É A 1ª OPÇÃO"); Opção 2 ou 3 com **todas as anteriores já com situação** → **fila de análise**. Vale nas etapas 2 e 4. Testes em `tests/test_pre_matricula.py` (o simulador `FakePage` foi atualizado ao fluxo atual do período `select#anoLetivo`: 16 testes antigos já falhavam por isso)
+- [x] **Aba "Fila de análise"** na tela Pré-matrícula (com o que cada escola anterior respondeu). O aluno **sai sozinho** quando a nossa opção ganha situação (matriculado ou cancelado). Corrigido junto: o aluno "não é a 1ª opção" aparecia como Pendente e o da fila aparecia como Matriculado
+- [x] **Corrigir dados pela tela** (nome do aluno, nascimento, mãe, responsável, telefones, e-mail; o CPF não muda): rotas `GET/POST /web/api/prematricula/registro/<cpf>`. A correção fica em `correcoes_manuais` no `pre_matricula.json` e é **reaplicada em todo salvamento**, senão a próxima coleta traria de volta o nome errado do site. Recusada com automação rodando e em ano de consulta; guarda `pre_matricula.json.antes_da_edicao` (só a última). Só o `pre_matricula.json` é editável: o `previsao_alunos_<ano>.json` não. Testes em `tests/test_pre_matricula_edicao.py`
+- [!] Validar a regra da Opção com cadastros reais (os textos que as outras escolas escrevem na situação variam)
+- [ ] Conferir se a Etapa 4 reconsulta quem está na fila de análise: o aluno só sai da fila quando uma coleta traz a situação nova da nossa opção
+- [ ] Os outros JSONs (`previsao_alunos_<ano>.json`, `transferidos.json`...) ainda não têm edição pela tela
+
+## 2b. Arquitetura: banco de dados local (IDEIA do usuário, 2026-11-18: só registrar, NÃO implementar agora)
+
+**Problema.** O sistema cresceu e hoje guarda a mesma pessoa em vários JSONs (`turmas.json`, `alunos*.json`, `pre_matricula.json`, `previsao_alunos_<ano>.json`, `transferidos.json`, `fila_transferidos.json`, `buscas_base.json`, `rematriculas_sucesso.json`), ligados por **CGM, CPF ou nome + nascimento + nº da chamada**. Isso gerou remendos:
+- 2ª saída do mesmo aluno (`ciclos_anteriores` e PDFs renomeados à mão);
+- correções manuais que precisam ser reaplicadas a cada coleta (`correcoes_manuais`);
+- aluno da pré-matrícula só tem CPF (ainda não tem CGM), e o vínculo com a Base ABC (`vinculo_base_abc`) é copiado em dois arquivos;
+- "mesmo aluno com chamada diferente" decidido por nome + nascimento (frágil com nome errado, homônimo ou nome corrigido);
+- trava de execução simultânea só por processo (item 11q) e vários programas gravando os mesmos arquivos.
+
+**Ideia.** Um **banco de dados local** (arquivo único, sem servidor; SQLite é o candidato natural, já vem no Python) e um **ID exclusivo e aleatório por aluno** (a pessoa), no lugar de depender de CGM/CPF/nome:
+- tabela de **pessoas** (id aleatório, nome, nascimento, mãe...);
+- tabela de **identificadores** ligados à pessoa (CGM, CPF, chamada por ano, id do site da pré-matrícula...), cada um com a data em que passou a valer. Assim um CGM que aparece depois, ou um nome corrigido, não cria pessoa nova;
+- **matrículas/vínculos** por ano (turma, chamada, situação, datas) e **eventos** (matrícula, transferência, retorno, nova saída). Quem sai e volta mantém o histórico do que aconteceu, e cada saída é um ciclo com seus documentos;
+- **documentos** (guia, histórico, parecer: emitido, assinado, enviado) ligados ao evento, não ao CGM;
+- **correções manuais** como dado de primeira classe (campo, valor do site, valor corrigido, quando), em vez de reaplicar por cima do JSON;
+- cada **coleta** vira uma carga que atualiza a pessoa, não um arquivo que substitui o anterior.
+
+**A decidir antes de começar (não decidido):**
+- [ ] SQLite ou outro; onde fica o arquivo e como entra no `backup` (hoje o backup copia JSONs por ano letivo);
+- [ ] como migrar: ler os JSONs atuais e juntar pessoas duplicadas (regra de junção e tela para conferir os casos duvidosos); se os JSONs continuam existindo como exportação/cópia de segurança;
+- [ ] se o banco é por ano letivo (como `dados/<ano>/`) ou único, com o ano dentro das tabelas (a pessoa atravessa os anos);
+- [ ] como fica o modo "somente consulta" (ano anterior) e a troca de ano letivo;
+- [ ] ordem de migração: começar por pré-matrícula + transferidos (onde mais dói) ou por tudo;
+- [ ] impacto nos testes (hoje quase todos montam JSONs em pasta temporária) e nas telas, que leem direto dos JSONs.
+
+**Não fazer agora.** Antes disso, as pendências de validação no ambiente real (seção 1) e a limpeza (seção 3) têm prioridade, porque o banco só compensa depois que o sistema estiver estável.
 
 ---
 

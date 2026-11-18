@@ -473,6 +473,9 @@ def registrar_pre_corte() -> int:
                     adicionados += 1
                 else:
                     reg   = dados_transf[cgm]
+                    d_reg = _parse_data(reg.get("data_transferencia") or "")
+                    if d_reg is not None and d_reg >= corte:
+                        continue     # o registro é de uma saída DEPOIS do corte; esta linha é de uma saída anterior
                     mudou = False
                     for doc in ("guia", "historico"):
                         for campo in ("emitido_em", "assinado_secretario", "assinado_diretor", "anexado_em"):

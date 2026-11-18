@@ -269,3 +269,9 @@ def test_ajuda_da_pre_matricula_explica_a_correcao_de_dados_e_a_aba_da_fila():
     assert "aba **Fila de análise**" in texto
     assert "esta tela ainda não tem" not in texto        # a versão antiga dizia que a fila não aparecia na tela
     assert "ainda não há tela" not in " ".join(ajuda_automacoes.AUTOMACOES["prematricula_completa"]["cuidados"])
+
+
+def test_ajuda_de_transferidos_explica_a_segunda_saida():
+    corte = " ".join(conteudo.CONFIGURACOES["data_corte_transferidos"]["dicas"])
+    fila = " ".join(ajuda_automacoes.AUTOMACOES["transferidos_fila"]["cuidados"])
+    assert "transferido de novo" in corte and "saiu de novo" in fila and "ciclos_anteriores" in fila
