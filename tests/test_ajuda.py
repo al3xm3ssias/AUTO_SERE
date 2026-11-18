@@ -260,3 +260,12 @@ def test_ajuda_da_pre_matricula_explica_a_regra_da_opcao_da_escola_e_a_fila_de_a
         assert "1ª opção" in texto
         assert "fila de análise" in texto
         assert "Central de Matrícula" in texto
+
+
+def test_ajuda_da_pre_matricula_explica_a_correcao_de_dados_e_a_aba_da_fila():
+    tela = conteudo.TELAS["prematricula"]
+    texto = " ".join(tela["passos"] + tela["cuidados"])
+    assert "Corrigir dados" in texto and "Desfazer" in texto and "CPF não pode ser alterado" in texto
+    assert "aba **Fila de análise**" in texto
+    assert "esta tela ainda não tem" not in texto        # a versão antiga dizia que a fila não aparecia na tela
+    assert "ainda não há tela" not in " ".join(ajuda_automacoes.AUTOMACOES["prematricula_completa"]["cuidados"])

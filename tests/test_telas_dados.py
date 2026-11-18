@@ -263,7 +263,7 @@ def test_a_tela_cadastros_continua_mostrando_matriculados_e_cancelados(dados, c)
         {"nome": "Beto", "cpf": "2", "pos": "2", "presente_na_ultima_coleta": True},
     ], cadastros={"1": _cadastro("1", ["MATRICULADO"]), "2": _cadastro("2", [""])})
     r = c.get("/web/api/prematricula/cadastros").get_json()
-    assert r["contagem"] == {"matriculado": 1, "cancelado": 0, "pendente": 1}
+    assert r["contagem"] == {"matriculado": 1, "cancelado": 0, "pendente": 1, "analise": 0}
     assert _fila(c) and [i["nome"] for i in _fila(c)] == ["Beto"]
 
 
@@ -381,7 +381,7 @@ def test_prematricula_cadastros_deriva_situacao_e_ignora_tentativa_antiga(dados,
     assert [i["turma"] for i in por_nome["Ana"]["intencoes"]] == ["5º Ano B"]            # a tentativa antiga não conta
     assert por_nome["Beto"]["situacao"] == "cancelado" and por_nome["Beto"]["motivo_cancelamento"] == "Mudou"
     assert por_nome["Caio"]["situacao"] == "pendente" and por_nome["Caio"].get("sem_cadastro")
-    assert r["contagem"] == {"matriculado": 1, "cancelado": 1, "pendente": 1} and r["atualizado_em"] == "2026-10-01 09:00"
+    assert r["contagem"] == {"matriculado": 1, "cancelado": 1, "pendente": 1, "analise": 0} and r["atualizado_em"] == "2026-10-01 09:00"
 
 
 def test_prematricula_cadastros_vazio(dados, c):

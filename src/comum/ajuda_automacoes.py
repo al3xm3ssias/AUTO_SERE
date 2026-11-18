@@ -183,7 +183,7 @@ AUTOMACOES: dict[str, dict] = {
                      "sai dos cadastros e dos contatos e fica como Cancelado, motivo \"nossa escola não é a 1ª opção\". Se alguma anterior já matriculou, também não entra.",
                      "Se é a Opção 2 ou 3 e **todas as anteriores já têm situação** (texto livre das outras escolas, por exemplo \"A escola não dispõe de vaga no momento\"), "
                      "o aluno vai para a **fila de análise**: a escola decide se matricula ou confirma antes com a Central de Matrícula. "
-                     "A marca fica em `pre_matricula.json` (`fila_analise`, `encaminhado_de`); ainda não há tela para essa fila.",
+                     "Ele aparece na aba **Fila de análise** da tela Pré-matrícula (a marca fica em `pre_matricula.json`: `fila_analise`, `encaminhado_de`) e sai de lá quando a nossa opção ganha uma situação.",
                      "A regra vale nas etapas **2 (Cadastro)** e **4 (Pendentes)**."],
         "veja_tambem": [R("tela", "prematricula"), R("tela", "previsao"), R("tela", "whatsapp"), R("configuracao", "senha_prematricula")],
     },

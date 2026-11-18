@@ -169,7 +169,7 @@ TELAS: dict[str, dict] = {
         "dados": "`pre_matricula.json` (o histórico nunca é apagado), gerado pela automação **Processo de pré-matrícula**. "
                  "O login do portal fica em Configurações → Salvar senha da Pré-matrícula.",
         "passos": [
-            "Escolha a aba: **Geral**, **Matriculados**, **Cancelados** ou **Pendentes**. As colunas mudam conforme a aba.",
+            "Escolha a aba: **Geral**, **Matriculados**, **Cancelados**, **Pendentes** ou **Fila de análise**. As colunas mudam conforme a aba.",
             "Use a busca para achar por aluno, responsável, CPF ou turma matriculada.",
             "Clique no **+** da linha para ver o cadastro completo: dados, critérios informados, turmas de intenção "
             "(posição e pontuação), escolas escolhidas e situação da matrícula.",
@@ -177,6 +177,11 @@ TELAS: dict[str, dict] = {
             "Use **Exportar** para baixar a lista que está na tela em CSV (abre no Excel).",
             "Na aba **Cancelados**, a coluna **Motivo da Recusa** explica o porquê. Se estiver escrito **CADASTRO REFEITO: NOSSA ESCOLA NÃO É A 1ª OPÇÃO**, "
             "o responsável refez o cadastro e a nossa escola ficou como 2ª ou 3ª opção (veja **Cadastro refeito** em Cuidados).",
+            "A aba **Fila de análise** lista quem a escola precisa decidir: matricular ou confirmar antes com a **Central de Matrícula**. "
+            "Abaixo de **Em análise** aparece o que as escolas anteriores responderam. Quando a nossa opção ganha uma situação (matriculado ou cancelado), o aluno sai da fila sozinho.",
+            "Para **corrigir um dado** (por exemplo, o nome que os pais escreveram errado), abra o **+** do aluno e clique em **✎ Corrigir dados**. "
+            "Altere o que precisar e clique em **Salvar correção**. O aluno passa a ter o selo **corrigido**.",
+            "Para voltar ao que o site tinha, abra **Corrigir dados** de novo e clique em **Desfazer** embaixo do campo.",
         ],
         "elementos": [
             E("Executar", "Abre ou fecha o painel de execução da pré-matrícula.", "#pm-btn-executar"),
@@ -192,7 +197,7 @@ TELAS: dict[str, dict] = {
               "Começa a coleta. Pode levar vários minutos; a tela acompanha. Só lê o site e atualiza o arquivo.", "#pm-exec-iniciar"),
             E("Cancelar execução", "Aparece enquanto a coleta roda; pede a parada.", "#pm-exec-cancelar"),
             E("Cartões de resumo", "Totais por situação.", "#cartoes-prematricula"),
-            E("Abas", "Geral, Matriculados, Cancelados e Pendentes.", "#sec-prematricula .fbar"),
+            E("Abas", "Geral, Matriculados, Cancelados, Pendentes e Fila de análise (quem a escola precisa decidir).", "#sec-prematricula .fbar"),
             E("Busca", "Aluno, responsável, CPF ou turma matriculada.", "#pm-search"),
             E("Tabela", "Clique nos títulos que têm seta para ordenar. O **+** abre o cadastro completo.", "#pm-tbody"),
             E("Paginação", "Navega entre as páginas de resultados.", "#pm-pag-btns"),
@@ -207,8 +212,12 @@ TELAS: dict[str, dict] = {
             "**Fila de análise:** se a nossa escola é a Opção 2 ou 3 e **todas as opções anteriores já têm situação** "
             "(texto escrito pelas outras escolas, como \"A escola não dispõe de vaga no momento\"), o aluno é marcado para análise: "
             "a escola decide se matricula ou confirma antes com a **Central de Matrícula**. Se alguma anterior já matriculou o aluno, ele também não é registrado.",
-            "Por enquanto a fila de análise é só uma **marca no arquivo** `pre_matricula.json` (campos `fila_analise` e `encaminhado_de`); "
-            "esta tela ainda não tem uma aba própria para ela. Se o responsável refizer o cadastro e a nossa escola voltar a ser a Opção 1, a marca é retirada.",
+            "Se o responsável refizer o cadastro e a nossa escola voltar a ser a Opção 1, o aluno sai da fila de análise na próxima coleta.",
+            "**Correções à mão:** valem também nas próximas coletas (a coleta traz de novo o dado errado do site, mas o sistema reaplica a sua correção). "
+            "Dá para corrigir nome do aluno, data de nascimento, nome da mãe, nome do responsável, telefones e e-mail. O **CPF não pode ser alterado**. "
+            "Quem ainda não tem cadastro coletado só pode ter o nome corrigido.",
+            "A correção não é feita enquanto uma automação estiver rodando, porque ela regrava o arquivo. Antes de cada correção o sistema guarda uma cópia em "
+            "`pre_matricula.json.antes_da_edicao` (só a última). A tela **Previsão** usa outro arquivo (`previsao_alunos_<ano>.json`), que não é corrigido por aqui.",
         ],
         "veja_tambem": [R("automacao", "prematricula_completa"), R("configuracao", "senha_prematricula"),
                         R("tela", "previsao"), R("tela", "whatsapp")],

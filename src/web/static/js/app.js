@@ -1413,18 +1413,19 @@ async function carregarFuncionarios() {
   renderFuncRows();
 }
 
-/* ---------- Pré-matrícula (mesma tela "Pré-Matrícula" do index.html, somente leitura) ---------- */
+/* ---------- Pré-matrícula (mesma tela "Pré-Matrícula" do index.html; os dados podem ser corrigidos à mão) ---------- */
 
 const pmState = { tab: "geral", search: "", pageSize: 25, page: 1, sort: { col: "nome_aluno", dir: 1 } };
 let _pmDados = null;
 
-const _pmSituacaoBadge = (s) => (s === "matriculado" ? badge("Matriculado", "bg-lime") : s === "cancelado" ? badge("Cancelado", "bg-rose") : badge("Pendente", "bg-amber"));
+const _pmSituacaoBadge = (s) => (s === "matriculado" ? badge("Matriculado", "bg-lime") : s === "cancelado" ? badge("Cancelado", "bg-rose")
+  : s === "analise" ? badge("Em análise", "bg-violet") : badge("Pendente", "bg-amber"));
 
 function _pmFiltrados() {
   if (!_pmDados) return [];
   const q = semAcento(pmState.search.trim());
   let dados = _pmDados.cadastros;
-  const aba = { matriculados: "matriculado", cancelados: "cancelado", pendentes: "pendente" }[pmState.tab];
+  const aba = { matriculados: "matriculado", cancelados: "cancelado", pendentes: "pendente", analise: "analise" }[pmState.tab];
   if (aba) dados = dados.filter((c) => c.situacao === aba);
   if (q) dados = dados.filter((c) => [c.nome_aluno, c.nome_responsavel, c.cpf, c.turma_matriculada].some((v) => semAcento(v).includes(q)));
   const { col, dir } = pmState.sort;
@@ -1451,13 +1452,78 @@ function _pmDetalhe(c) {
     ? `<div style="grid-column:1/-1" class="tbl-wrap"><table><thead><tr><th>Escola</th><th>Situação</th><th>Motivo / observação</th></tr></thead><tbody>${c.opcoes.map((o) =>
         `<tr><td>${escaparHtml(o.escola || "—")}</td><td>${escaparHtml(o.situacao || "—")}</td><td>${escaparHtml(o.motivo_cancelamento || o.observacao || "—")}</td></tr>`).join("")}</tbody></table></div>`
     : "";
-  return _secao("Dados do Cadastro") + _campo("Nome do aluno", c.nome_aluno) + _campo("CPF", c.cpf, true) + _campo("Responsável", c.nome_responsavel) +
+  const botaoEditar = /^\d+$/.test(String(c.cpf || ""))
+    ? `<div class="al-field-group" style="grid-column:1/-1"><button class="btn-sm" data-pm-editar="${escaparHtml(c.cpf)}" title="Corrige nome, telefone, e-mail etc. A correção vale também nas próximas coletas">✎ Corrigir dados</button>` +
+      `${c.corrigidos && c.corrigidos.length ? ` <span class="badge bg-blue">corrigido à mão: ${escaparHtml(c.corrigidos.join(", "))}</span>` : ""}</div>` : "";
+  const analise = c.situacao === "analise"
+    ? `<div class="al-field-group" style="grid-column:1/-1"><span class="al-field-lbl">Fila de análise</span><span class="al-field-val">Nossa escola é a 2ª ou 3ª opção e as escolas anteriores já responderam. A escola decide se matricula ou confirma antes com a Central de Matrícula. Ao constar uma situação na nossa opção, o aluno sai desta fila.</span></div>` +
+      _pmEncaminhadoDe(c)
+    : "";
+  return _secao("Dados do Cadastro") + botaoEditar + _campo("Nome do aluno", c.nome_aluno) + _campo("CPF", c.cpf, true) + _campo("Responsável", c.nome_responsavel) +
     _campo("Telefone", c.telefone, true) + _campo("E-mail", c.email) + `<div class="al-field-group" style="grid-column:1/-1"><span class="al-field-lbl">Endereço</span><span class="al-field-val">${escaparHtml(c.endereco)}</span></div>` +
     _secao("Critérios Informados") + criterios + _secao("Turmas de Intenção") + intencoes +
     (opcoes ? _secao("Escolas Escolhidas") + opcoes : "") +
     _secao("Situação da Matrícula") + `<div class="al-field-group"><span class="al-field-lbl">Situação</span><span class="al-field-val">${_pmSituacaoBadge(c.situacao)}</span></div>` +
     (c.situacao === "matriculado" ? _campo("Turma matriculada", c.turma_matriculada) + _campo("Escola", c.escola_matriculada) : "") +
-    (c.situacao === "cancelado" ? `<div class="al-field-group" style="grid-column:1/-1"><span class="al-field-lbl">Motivo da recusa</span><span class="al-field-val">${escaparHtml(c.motivo_cancelamento || "—")}</span></div>` : "");
+    (c.situacao === "cancelado" ? `<div class="al-field-group" style="grid-column:1/-1"><span class="al-field-lbl">Motivo da recusa</span><span class="al-field-val">${escaparHtml(c.motivo_cancelamento || "—")}</span></div>` : "") +
+    analise;
+}
+
+/** Respostas das escolas anteriores (as opções antes da nossa) de quem está na fila de análise. */
+function _pmEncaminhadoDe(c) {
+  const lista = c.encaminhado_de || [];
+  if (!lista.length) return "";
+  return `<div style="grid-column:1/-1" class="tbl-wrap"><table><thead><tr><th>Opção</th><th>Escola</th><th>O que a escola respondeu</th></tr></thead><tbody>${lista.map((o) =>
+    `<tr><td class="td-mono">${escaparHtml(o.opcao ?? "—")}</td><td>${escaparHtml(o.escola || "—")}</td><td>${escaparHtml(o.situacao || "—")}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+/* ----- Corrigir dados do aluno (GET/POST /prematricula/registro/<cpf>) ----- */
+
+async function abrirEdicaoPm(cpf) {
+  let reg;
+  try {
+    reg = await apiGet(`/prematricula/registro/${encodeURIComponent(cpf)}`);
+  } catch (e) {
+    toast("Não foi possível abrir este aluno para edição");
+    return;
+  }
+  abrirModal("Corrigir dados do aluno", (corpo, fechar) => {
+    const campos = (reg.ordem || Object.keys(reg.campos)).map((campo) => [campo, reg.campos[campo]]).map(([campo, f]) => `
+      <div class="field"><label for="pm-ed-${campo}">${escaparHtml(f.rotulo)}</label>
+        <input type="text" id="pm-ed-${campo}" data-campo="${campo}" data-orig="${escaparHtml(f.valor)}" value="${escaparHtml(f.valor)}">
+        ${f.corrigido ? `<div class="campo-ajuda">Corrigido à mão. O site tinha: <b>${escaparHtml(f.original || "—")}</b>. <a href="#" data-desfazer="${campo}" style="color:var(--cyan); text-decoration:underline">Desfazer</a></div>` : ""}
+      </div>`).join("");
+    corpo.innerHTML = `
+      <p class="campo-ajuda" style="margin-bottom:12px">CPF ${escaparHtml(reg.cpf)}. A correção fica guardada e continua valendo nas próximas coletas da pré-matrícula.
+        ${reg.tem_cadastro ? "" : "Este aluno ainda não tem cadastro coletado: só o nome pode ser corrigido."}</p>
+      ${campos}
+      <div class="campo-ajuda" id="pm-ed-erro" style="color:var(--rose); min-height:1.2em"></div>
+      <div class="modal-acoes">
+        <button class="btn-sm" id="pm-ed-cancelar" style="padding:9px 16px;font-size:.78rem">Cancelar</button>
+        <button class="btn-primary" id="pm-ed-salvar">Salvar correção</button>
+      </div>`;
+    const erro = (msg) => { corpo.querySelector("#pm-ed-erro").textContent = msg || ""; };
+    const concluir = async (msg) => { fechar(); toast(msg); await carregarPreMatricula(); };
+    corpo.querySelector("#pm-ed-cancelar").addEventListener("click", fechar);
+    corpo.querySelectorAll("[data-desfazer]").forEach((a) => a.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      try {
+        await apiPost(`/prematricula/registro/${encodeURIComponent(cpf)}`, { desfazer: [a.dataset.desfazer] });
+        await concluir("Correção desfeita");
+      } catch (e) { erro(e.message); }
+    }));
+    const salvar = async () => {
+      const campos = {};
+      corpo.querySelectorAll("input[data-campo]").forEach((i) => { if (i.value !== i.dataset.orig) campos[i.dataset.campo] = i.value; });
+      if (!Object.keys(campos).length) { fechar(); toast("Nada foi alterado"); return; }
+      try {
+        const r = await apiPost(`/prematricula/registro/${encodeURIComponent(cpf)}`, { campos });
+        await concluir(r.mudou && r.mudou.length ? "Dados corrigidos" : "Nada foi alterado");
+      } catch (e) { erro(e.message); }
+    };
+    corpo.querySelector("#pm-ed-salvar").addEventListener("click", salvar);
+    corpo.addEventListener("keydown", (e) => { if (e.key === "Enter") salvar(); });
+  });
 }
 
 function renderPmRows() {
@@ -1487,16 +1553,16 @@ function renderPmRows() {
     return;
   }
   document.getElementById("pm-empty").style.display = "none";
-  const colspan = pmState.tab === "geral" || pmState.tab === "pendentes" ? 7 : 5;
+  const colspan = ["geral", "pendentes", "analise"].includes(pmState.tab) ? 7 : 5;
   document.getElementById("pm-tbody").innerHTML = todos.slice(inicio, inicio + pmState.pageSize).map((c, i) => {
     const rowId = `pm-det-${inicio + i}`;
     const comum = `<td style="text-align:center"><button class="al-expand-btn" data-btn="${rowId}" data-i="${inicio + i}" title="Ver cadastro completo">+</button></td>
-      <td class="td-name">${escaparHtml(c.nome_aluno)}<small>CPF: ${escaparHtml(c.cpf)}</small></td>
+      <td class="td-name">${escaparHtml(c.nome_aluno)}${c.corrigidos && c.corrigidos.length ? ' <span class="badge bg-blue" title="Dado corrigido à mão">corrigido</span>' : ""}<small>CPF: ${escaparHtml(c.cpf)}</small></td>
       <td class="td-mono">${escaparHtml(c.cpf)}</td><td>${escaparHtml(c.nome_responsavel)}</td>`;
     let resto;
     if (pmState.tab === "matriculados") resto = `<td>${escaparHtml(c.turma_matriculada || "—")}</td>`;
     else if (pmState.tab === "cancelados") resto = `<td style="white-space:pre-line">${escaparHtml(c.motivo_cancelamento || "—")}</td>`;
-    else resto = `<td class="td-mono" style="font-size:.75rem">${escaparHtml(c.telefone)}</td><td>${_pmSituacaoBadge(c.situacao)}</td>
+    else resto = `<td class="td-mono" style="font-size:.75rem">${escaparHtml(c.telefone)}</td><td>${_pmSituacaoBadge(c.situacao)}${c.situacao === "analise" && (c.encaminhado_de || []).length ? `<small style="display:block;color:var(--txt3)">${c.encaminhado_de.map((o) => escaparHtml(`${o.opcao}ª: ${o.situacao || "—"}`)).join(" · ")}</small>` : ""}</td>
       <td>${c.intencoes.length ? c.intencoes.map((x) => `<span class="badge bg-muted">${escaparHtml(x.turma)}${x.pos ? " · #" + escaparHtml(x.pos) : ""}</span>`).join(" ") : '<span style="color:var(--txt3); font-size:.75rem">—</span>'}</td>`;
     return `<tr>${comum}${resto}</tr><tr class="al-detail-row" id="${rowId}"><td colspan="${colspan}"><div class="al-detail-inner"></div></td></tr>`;
   }).join("");
@@ -1657,12 +1723,16 @@ async function carregarPreMatricula() {
   }
   desenharExtrasTabela("prematricula", _pmDados);
   const n = _pmDados.contagem || {};
-  const rotulos = { geral: `Geral (${_pmDados.total})`, matriculados: `Matriculados (${n.matriculado || 0})`, cancelados: `Cancelados (${n.cancelado || 0})`, pendentes: `Pendentes (${n.pendente || 0})` };
+  const rotulos = { geral: `Geral (${_pmDados.total})`, matriculados: `Matriculados (${n.matriculado || 0})`, cancelados: `Cancelados (${n.cancelado || 0})`, pendentes: `Pendentes (${n.pendente || 0})`, analise: `Fila de análise (${n.analise || 0})` };
   sec.querySelectorAll("[data-pmtab]").forEach((b) => { b.textContent = rotulos[b.dataset.pmtab]; });
   if (sec.dataset.ligada !== "1") {
     sec.dataset.ligada = "1";
     ligarPilulas(sec, "data-pmtab", pmState, "tab", renderPmRows);
     document.getElementById("pm-search").addEventListener("input", (e) => { pmState.search = e.target.value; pmState.page = 1; renderPmRows(); });
+    document.getElementById("pm-tbody").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-pm-editar]");
+      if (b) abrirEdicaoPm(b.dataset.pmEditar);
+    });
   }
   renderPmRows();
 }

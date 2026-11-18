@@ -677,13 +677,21 @@ def prematricula_cadastros():
     dados = dados if isinstance(dados, dict) else {}
     cadastros = dados.get("cadastros") if isinstance(dados.get("cadastros"), dict) else {}
     turmas_intencao = dados.get("turmas_intencao") if isinstance(dados.get("turmas_intencao"), dict) else {}
+    correcoes_manuais = dados.get("correcoes_manuais") if isinstance(dados.get("correcoes_manuais"), dict) else {}
 
     intencoes: dict[str, list[dict]] = {}
     so_na_fila: dict[str, dict] = {}        # quem está na fila mas ainda não tem cadastro coletado (Etapa 2)
+    marcas: dict[str, dict] = {}            # regra da Opção da escola (pre_matricula.py): por CPF e por tr_id
     for turma, lista in turmas_intencao.items():
         for item in lista if isinstance(lista, list) else []:
             if not isinstance(item, dict) or item.get("substituido_por_nova_tentativa"):
                 continue
+            if item.get("nao_e_primeira_opcao") or item.get("fila_analise"):
+                m = {"nao_primeira": bool(item.get("nao_e_primeira_opcao")), "fila": bool(item.get("fila_analise")),
+                     "motivo": str(item.get("motivo_cancelamento") or ""),
+                     "encaminhado_de": item.get("encaminhado_de") if isinstance(item.get("encaminhado_de"), list) else []}
+                for chave_m in {str(item.get("cpf") or "").strip(), str(item.get("tr_id") or "").strip()} - {""}:
+                    marcas[chave_m] = m
             ints = {
                 "turma": turma, "pos": item.get("pos", ""), "pontuacao": item.get("pontuacao", ""),
                 "tipo": item.get("tipo", ""), "presente_na_ultima_coleta": item.get("presente_na_ultima_coleta"),
@@ -714,6 +722,12 @@ def prematricula_cadastros():
         else:
             motivo = c.get("motivo_cancelamento") or ""
         ints = intencoes.get(str(cid)) or intencoes.get(cpf) or intencoes.get(str(c.get("tr_id") or "")) or []
+        marca = marcas.get(cpf) or marcas.get(str(cid)) or {}
+        encaminhado_de: list = []
+        if marca.get("nao_primeira"):
+            situacao, motivo, aceita = "cancelado", marca.get("motivo") or MOTIVO_NAO_PRIMEIRA, None
+        elif marca.get("fila"):
+            situacao, motivo, aceita, encaminhado_de = _situacao_fila_analise(opcoes, marca)
         registros.append({
             "id": str(cid),
             "cpf": cpf,
@@ -730,19 +744,28 @@ def prematricula_cadastros():
             "motivo_cancelamento": motivo,
             "opcoes": opcoes,
             "intencoes": ints,
+            "encaminhado_de": encaminhado_de,
+            "corrigidos": sorted((correcoes_manuais.get(cpf) or {}).keys()),
         })
     for ident, info in so_na_fila.items():
         if ident in com_cadastro or info["cpf"] in com_cadastro or info["tr_id"] in com_cadastro:
             continue
+        marca = marcas.get(info["cpf"]) or marcas.get(info["tr_id"]) or {}
+        situacao_f, motivo_f = "pendente", ""
+        if marca.get("nao_primeira"):                 # o cadastro dele foi removido de propósito (não é a 1ª opção)
+            situacao_f, motivo_f = "cancelado", marca.get("motivo") or MOTIVO_NAO_PRIMEIRA
+        elif marca.get("fila"):
+            situacao_f = "analise"
         registros.append({
             "id": ident, "cpf": info["cpf"] or "—", "nome_aluno": info["nome"], "nome_responsavel": "—", "telefone": "—",
-            "email": "—", "endereco": "—", "criterios": [], "situacao": "pendente", "turma_pedida": "",
-            "turma_matriculada": "", "escola_matriculada": "", "motivo_cancelamento": "", "opcoes": [],
-            "intencoes": info["ints"], "sem_cadastro": True,
+            "email": "—", "endereco": "—", "criterios": [], "situacao": situacao_f, "turma_pedida": "",
+            "turma_matriculada": "", "escola_matriculada": "", "motivo_cancelamento": motivo_f, "opcoes": [],
+            "intencoes": info["ints"], "sem_cadastro": True, "encaminhado_de": marca.get("encaminhado_de") or [],
+            "corrigidos": sorted((correcoes_manuais.get(info["cpf"]) or {}).keys()),
         })
     registros.sort(key=lambda r: _sem_acento(r["nome_aluno"]))
 
-    n = {s_: sum(1 for r in registros if r["situacao"] == s_) for s_ in ("matriculado", "cancelado", "pendente")}
+    n = {s_: sum(1 for r in registros if r["situacao"] == s_) for s_ in ("matriculado", "cancelado", "pendente", "analise")}
     cartoes = []
     if registros:
         cartoes = [
@@ -750,6 +773,7 @@ def prematricula_cadastros():
             _cartao("Matriculados", n["matriculado"], "vaga confirmada", "lime", "student"),
             _cartao("Cancelados", n["cancelado"], "todas as opções canceladas", "rose", "mapPinOff"),
             _cartao("Pendentes", n["pendente"], "aguardando resposta", "amber", "clock"),
+            _cartao("Fila de análise", n["analise"], "a escola decide", "violet", "clipboard"),
         ]
     atualizado = str(dados.get("atualizado_em") or "")
     return jsonify({
@@ -759,6 +783,103 @@ def prematricula_cadastros():
         "total": len(registros),
         "atualizado_em": "" if not atualizado or atualizado.lower().startswith("x") else atualizado,
     })
+
+
+MOTIVO_NAO_PRIMEIRA = "CADASTRO REFEITO: NOSSA ESCOLA NÃO É A 1ª OPÇÃO"
+
+
+def _situacao_fila_analise(opcoes: list, marca: dict):
+    """
+    Aluno marcado pela automação como "fila de análise" (a nossa escola é a Opção 2 ou 3 e as anteriores já têm situação).
+    Enquanto a opção da NOSSA escola não tiver situação, ele fica em "analise". Quando a escola decide (matricula ou
+    cancela), a opção dela ganha situação e ele sai da fila sozinho.
+    Devolve (situacao, motivo, opcao_aceita, encaminhado_de).
+    """
+    from src.automacao.pre_matricula import NOME_ESCOLA_ALVO   # import tardio: o módulo carrega o Playwright
+
+    alvo = NOME_ESCOLA_ALVO.upper()
+    nossa = next((o for o in opcoes if alvo in str(o.get("escola") or "").upper()), None)
+    sit = str((nossa or {}).get("situacao") or "").strip()
+    if nossa and sit:
+        if sit.upper().startswith("CANCELADO"):
+            return "cancelado", str(nossa.get("motivo_cancelamento") or nossa.get("observacao") or ""), None, []
+        return "matriculado", "", nossa, []
+    return "analise", "", None, marca.get("encaminhado_de") or []
+
+
+def _automacoes_rodando() -> list[str]:
+    with _EXECUCOES_LOCK:
+        return [k for k, r in _EXECUCOES.items() if r.get("status") == StatusExecucao.EXECUTANDO.value]
+
+
+def _abrir_pre_matricula_para_edicao():
+    """(caminho, dados) do pre_matricula.json; levanta ArquivoJsonCorrompidoError se estiver ilegível."""
+    from src.comum.arquivos_json import carregar_json
+
+    caminho = _dados_dir() / "pre_matricula.json"
+    if not caminho.exists():
+        return caminho, None
+    return caminho, carregar_json(caminho, dict, tipo_esperado=dict)
+
+
+def _gravar_pre_matricula_editado(caminho, dados) -> None:
+    """Guarda uma cópia do arquivo antes (uma só, sobrescrita a cada edição) e grava de forma atômica."""
+    import shutil
+    from src.comum.arquivos_json import salvar_json_atomico
+
+    shutil.copy2(caminho, caminho.with_name(caminho.name + ".antes_da_edicao"))
+    salvar_json_atomico(caminho, dados, indent=2)       # não mexe em "atualizado_em": ele marca a última COLETA
+
+
+@api_bp.route("/prematricula/registro/<cpf>", methods=["GET"])
+def prematricula_registro(cpf):
+    """Campos editáveis do aluno (valor atual, se foi corrigido à mão e o valor original do site)."""
+    from src.comum import pre_matricula_edicao as edicao
+    from src.comum.arquivos_json import ArquivoJsonCorrompidoError
+
+    try:
+        _caminho, dados = _abrir_pre_matricula_para_edicao()
+    except ArquivoJsonCorrompidoError as exc:
+        return jsonify({"erro": str(exc)}), 500
+    registro = edicao.ler_registro(dados, cpf) if dados else None
+    if registro is None:
+        return jsonify({"erro": "Aluno não encontrado no pre_matricula.json."}), 404
+    return jsonify(registro)
+
+
+@api_bp.route("/prematricula/registro/<cpf>", methods=["POST"])
+def prematricula_registro_salvar(cpf):
+    """
+    Corrige dados do aluno (ex.: nome digitado errado pelos pais). Corpo: {"campos": {"nome_aluno": "...", ...}}.
+    A correção fica em `correcoes_manuais` e é reaplicada a cada coleta, para não ser desfeita pela automação.
+    Para desfazer: {"desfazer": ["nome_aluno"]} (lista vazia = todas as correções do aluno).
+    """
+    from src.comum import pre_matricula_edicao as edicao
+    from src.comum.arquivos_json import ArquivoJsonCorrompidoError
+
+    corpo = request.get_json(silent=True)
+    if not isinstance(corpo, dict) or not ("campos" in corpo or "desfazer" in corpo):
+        return jsonify({"erro": "Envie {\"campos\": {...}} para corrigir ou {\"desfazer\": [...]} para desfazer."}), 400
+    rodando = _automacoes_rodando()
+    if rodando:
+        return jsonify({"erro": "Há uma automação em execução (" + ", ".join(rodando) + "). Espere terminar para editar: "
+                                "ela regrava o pre_matricula.json e a correção podia se perder."}), 409
+    try:
+        caminho, dados = _abrir_pre_matricula_para_edicao()
+    except ArquivoJsonCorrompidoError as exc:
+        return jsonify({"erro": str(exc)}), 500
+    if not dados:
+        return jsonify({"erro": "pre_matricula.json ainda não existe."}), 404
+    try:
+        if "campos" in corpo:
+            mudou = edicao.corrigir(dados, cpf, corpo["campos"])
+        else:
+            mudou = edicao.desfazer(dados, cpf, corpo.get("desfazer") or None)
+    except edicao.EdicaoInvalidaError as exc:
+        return jsonify({"erro": str(exc)}), 400
+    if mudou:
+        _gravar_pre_matricula_editado(caminho, dados)
+    return jsonify({"ok": True, "mudou": mudou, "registro": edicao.ler_registro(dados, cpf)})
 
 
 @api_bp.route("/prematricula/fila")

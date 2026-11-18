@@ -110,6 +110,7 @@ from src.comum.arquivos_json import (
     salvar_json_atomico,
 )
 from src.comum import navegador as _navegador
+from src.comum import pre_matricula_edicao as _edicao
 
 
 # ==========================================================
@@ -379,7 +380,13 @@ def carregar_pre_matricula() -> dict:
 
 
 def salvar_pre_matricula(dados: dict) -> None:
-    """Grava o pre_matricula.json de forma atômica, atualizando o timestamp."""
+    """
+    Grava o pre_matricula.json de forma atômica, atualizando o timestamp.
+
+    Reaplica antes as correções manuais (src.comum.pre_matricula_edicao): a coleta regrava nome e cadastro com o
+    que está no site, e sem isso um nome corrigido à mão voltaria a ficar errado a cada execução.
+    """
+    _edicao.aplicar_correcoes_manuais(dados)
     dados["atualizado_em"] = datetime.now().isoformat(timespec="seconds")
     salvar_json_atomico(caminho_pre_matricula(), dados, indent=2)
 
