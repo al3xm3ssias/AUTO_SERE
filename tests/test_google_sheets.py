@@ -467,26 +467,18 @@ def test_sem_autorizacao_e_modo_nao_interativo_nunca_abre_navegador(cred_env):
 def test_oauth_primeira_autorizacao_salva_token(cred_env, monkeypatch, capsys):
     from google_auth_oauthlib.flow import InstalledAppFlow
     _oauth_pronto(cred_env)
-    import subprocess
-    import webbrowser
-    visto, abertos = {}, []
+    visto = {}
 
     class Fluxo:
         def run_local_server(self, **kw):
             visto.update(kw)
-            if kw["open_browser"]:                      # como a biblioteca faz: pede o navegador registrado a abrir o endereço
-                webbrowser.get(kw["browser"]).open("https://accounts.exemplo/auth", new=1, autoraise=True)
             return CredFalsa()
     monkeypatch.setattr(InstalledAppFlow, "from_client_secrets_file", classmethod(lambda c, f, s: Fluxo()))
-    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: abertos.append(a))
-    monkeypatch.setattr(webbrowser, "open", lambda *a, **k: abertos.append(a))
-    monkeypatch.setattr("src.comum.google_oauth_navegador.copiar_para_area_de_transferencia", lambda t: False)
     monkeypatch.setenv("GOOGLE_OAUTH_ABRIR_NAVEGADOR", "0")
     ga.obter_credenciais()
-    assert abertos == []                                # ABRIR_NAVEGADOR=0: nenhum navegador é aberto
-    assert visto["port"] == 0 and visto["timeout_seconds"] == ga.TEMPO_MAXIMO_AUTORIZACAO_S
+    assert visto["open_browser"] is False and visto["port"] == 0 and visto["timeout_seconds"] == ga.TEMPO_MAXIMO_AUTORIZACAO_S
     assert (cred_env / "token.json").is_file()
-    assert "endereço mostrado" in capsys.readouterr().out
+    assert "copie o link" in capsys.readouterr().out
 
 
 def test_falha_na_autorizacao_nao_vaza_detalhes(cred_env, monkeypatch):

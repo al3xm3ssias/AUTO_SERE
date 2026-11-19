@@ -96,6 +96,7 @@ _RE_PERMITIDAS_EM_CONSULTA = (
     re.compile(r"^/web/api/automacoes/[^/]+/(previa|cancelar)$"),  # prévia só lê; cancelar só encerra
     re.compile(r"^/web/api/whatsapp/webhook$"),                    # evento que o gateway manda para cá (não é ação do usuário)
     re.compile(r"^/web/api/planilhas(/\d+)?$"),                    # cadastro de planilhas: atravessa os anos letivos, não é dado de um ano
+    re.compile(r"^/web/api/google/autorizacao/(abrir|colar)$"),    # só mexe na tentativa de login do Google em andamento (uma prévia pode pedi-la); não grava dado do ano
 )
 _METODOS_DE_LEITURA = ("GET", "HEAD", "OPTIONS")
 

@@ -34,5 +34,11 @@
       "mostrar_janela": true
     }
   },
-  "google_sheets": {}
+  "google_sheets": {},
+  "google_oauth": {
+    "conta": "judith@pontagrossa.pr.gov.br",
+    "navegador": "chrome",
+    "perfil": "Profile 2",
+    "abrir": true
+  }
 }

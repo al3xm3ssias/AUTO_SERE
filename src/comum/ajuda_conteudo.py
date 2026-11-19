@@ -790,6 +790,25 @@ CONFIGURACOES: dict[str, dict] = {
         ],
         "cuidados": ["O script do RCO precisa do Chrome e ignora esta escolha."],
     },
+
+    "google_conta": {
+        "titulo": "Painel: Conta Google da autorização", "icone": "lock",
+        "resumo": "Define com qual conta, em qual navegador e em qual perfil abre o link de autorização do Google (planilhas e contatos).",
+        "passos": [
+            "Digite o **e-mail da conta Google** que é dona das planilhas. O Google já abre o login com essa conta escolhida.",
+            "Escolha o **navegador**. No Chrome e no Edge, se um perfil estiver logado nessa conta, o perfil certo é achado sozinho; se preferir, escolha o perfil na lista.",
+            "Clique em **Testar abertura** para ver se abre na conta certa e, estando certo, em **Salvar**.",
+            "Se preferir copiar o link e colar você mesmo, desmarque **Abrir o navegador sozinho**: na hora de autorizar, a janela mostra o link com o botão **Copiar link**.",
+        ],
+        "elementos": [
+            E("E-mail da conta Google", "Conta que deve autorizar.", "#cfg-gconta-email"),
+            E("Navegador", "Navegador padrão do computador, Chrome, Edge ou Firefox.", "#cfg-gconta-nav"),
+            E("Perfil do navegador", "Perfil do Chrome/Edge em que o link abre (Automático = o logado na conta).", "#cfg-gconta-perfil"),
+            E("Testar abertura", "Abre a página da sua conta Google com estas escolhas, ainda sem salvar.", "#cfg-gconta-testar"),
+        ],
+        "cuidados": ["A autorização só se completa no computador onde o AUTO SERE roda; de outro computador, use o campo de colar o endereço final na janela de autorização."],
+        "veja_tambem": [R("modal", "autorizar-google")],
+    },
 }
 
 
@@ -818,6 +837,17 @@ MODAIS: dict[str, dict] = {
             "**Cancelar execução** encerra a automação.",
         ],
         "dicas": ["Se você fechar a janela com Esc sem responder, ela reabre em poucos segundos porque a automação continua esperando."],
+    },
+
+    "autorizar-google": {
+        "titulo": "Janela: Autorizar acesso ao Google", "icone": "lock",
+        "resumo": "Aparece sozinha quando o Google precisa da sua permissão. Mostra o link de autorização para você abrir ou copiar.",
+        "passos": [
+            "Se o link abriu no navegador/perfil certo, entre na conta indicada e clique em **Permitir**; a janela fecha sozinha.",
+            "Se abriu na conta errada, clique em **Copiar link** e cole no navegador (ou perfil) da conta certa.",
+            "Em outro computador, depois do **Permitir** cole na janela o endereço completo que apareceu (começa com http://localhost) e clique em **Concluir com este endereço**.",
+        ],
+        "veja_tambem": [R("configuracao", "google_conta")],
     },
 
     "credenciais-sere": {

@@ -84,6 +84,7 @@
       ["Confirmar execução", "confirmar-execucao"],
       ["Credenciais do SERE", "credenciais-sere"],
       ["Dados da escola", "dados-escola"],
+      ["Autorizar acesso ao Google", "autorizar-google"],
       ["Nova planilha", "planilha-formulario"],
       ["Editar planilha", "planilha-formulario"],
       ["Criar planilha a partir", "planilha-modelo"],

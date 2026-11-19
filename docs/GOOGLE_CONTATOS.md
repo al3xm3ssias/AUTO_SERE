@@ -50,9 +50,6 @@ Se `google_contatos.json` estiver ilegível, nada é enviado e o arquivo não é
 5. Na primeira execução com a opção marcada o navegador abre; clique em **Permitir** com a conta dona dos contatos.
    O token fica em `credenciais/google_token_contatos.json`, à parte do token das planilhas.
 
-Se o navegador abrir na conta errada, cole o endereço copiado no navegador/perfil da conta certa, ou configure o perfil e a
-conta no `credenciais/.env` (veja "Conta e navegador certos na autorização" em `docs/GOOGLE_SHEETS.md`).
-
 Se a conta for institucional (Prefeitura), o administrador pode bloquear apps de terceiros ("acesso bloqueado").
 
 ## Usar

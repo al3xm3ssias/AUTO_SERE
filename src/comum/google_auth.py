@@ -25,6 +25,12 @@ Configuração (credenciais/.env ou variáveis de ambiente; nada disso fica no c
                              Um token.json do antigo sheets_sync pode ser reaproveitado apontando para ele.
     GOOGLE_OAUTH_ABRIR_NAVEGADOR   1 (padrão) abre o navegador na autorização; 0 só mostra o endereço
                              (útil em WSL/servidor sem navegador).
+    GOOGLE_OAUTH_CONTA       e-mail da conta Google que deve autorizar: o Google já abre com ela escolhida
+                             (login_hint) e, se houver um perfil do Chrome/Edge logado nela, o link abre nesse perfil.
+    GOOGLE_OAUTH_NAVEGADOR   chrome | edge | firefox | caminho do programa (vazio = navegador padrão do sistema).
+    GOOGLE_OAUTH_PERFIL      pasta do perfil do Chrome/Edge (ex.: "Profile 2") ou nome do perfil do Firefox.
+    Tudo isso também se escolhe na tela (Configurações → Conta Google da autorização) e, a qualquer momento, o
+    link pode ser COPIADO na janela "Autorizar acesso ao Google" e colado no navegador que você quiser.
 
 Segurança: credenciais/ e os arquivos google_*.json estão no .gitignore e fora do backup. Nada daqui grava
 token, chave ou segredo em log: só o modo usado e o NOME do arquivo.
@@ -34,10 +40,14 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
+import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from . import credenciais as _credenciais  # noqa: F401  (importar já carrega credenciais/.env no ambiente)
 from .arquivos_json import salvar_json_atomico
+from . import google_navegador as _navegador
 from .paths import CREDENCIAIS_DIR, RAIZ_PROJETO
 
 log = logging.getLogger(__name__)
@@ -111,6 +121,91 @@ def _abrir_navegador() -> bool:
     return (os.getenv("GOOGLE_OAUTH_ABRIR_NAVEGADOR") or "1").strip().lower() not in ("0", "false", "nao", "não")
 
 
+# ───────────────────────────── autorização em andamento (link para copiar) ─────
+
+_TRAVA_PENDENTE = threading.Lock()
+_pendente: dict | None = None
+
+
+def _preferencias() -> dict:
+    """Conta / navegador / perfil / abrir-sozinho: variáveis de ambiente > tela de Configurações > padrões."""
+    try:
+        from . import configuracao
+        return configuracao.google_oauth_preferencias()
+    except Exception:                                              # noqa: BLE001 — configuração ilegível não impede autorizar
+        return {"conta": (os.getenv("GOOGLE_OAUTH_CONTA") or "").strip(), "navegador": (os.getenv("GOOGLE_OAUTH_NAVEGADOR") or "").strip(),
+                "perfil": (os.getenv("GOOGLE_OAUTH_PERFIL") or "").strip(), "abrir": _abrir_navegador()}
+
+
+def _registrar_pendente(url: str, prefs: dict, aberto: bool, descricao: str) -> None:
+    global _pendente
+    consulta = parse_qs(urlparse(url).query)
+    with _TRAVA_PENDENTE:
+        _pendente = {"url": url, "conta": prefs.get("conta", ""), "aberto": aberto, "aberto_com": descricao,
+                     "desde": time.time(), "expira_em": time.time() + TEMPO_MAXIMO_AUTORIZACAO_S,
+                     "_redirect_uri": (consulta.get("redirect_uri") or [""])[0], "_state": (consulta.get("state") or [""])[0]}
+
+
+def _limpar_pendente() -> None:
+    global _pendente
+    with _TRAVA_PENDENTE:
+        _pendente = None
+
+
+def autorizacao_pendente() -> dict | None:
+    """
+    A autorização do Google que está esperando o usuário agora (None se não há). Serve à tela, que mostra o link com
+    o botão COPIAR: {"url", "conta", "aberto", "aberto_com", "desde", "expira_em"}. O link é de uso único e vale só
+    para esta tentativa (state/PKCE); mesmo assim ele só é devolvido enquanto a tentativa está de pé.
+    """
+    with _TRAVA_PENDENTE:
+        if not _pendente or _pendente["expira_em"] < time.time():
+            return None
+        return {k: v for k, v in _pendente.items() if not k.startswith("_")}
+
+
+def abrir_pendente(*, navegador: str | None = None, perfil: str | None = None) -> tuple[bool, str]:
+    """Abre (de novo) o link pendente no navegador/perfil configurados — ou nos informados. Só abre o link da tentativa atual."""
+    with _TRAVA_PENDENTE:
+        atual = dict(_pendente) if _pendente else None
+    if not atual:
+        return False, "Não há autorização do Google esperando agora."
+    prefs = _preferencias()
+    abriu, descricao = _navegador.abrir_url(atual["url"], navegador=prefs["navegador"] if navegador is None else navegador,
+                                            perfil=prefs["perfil"] if perfil is None else perfil, conta=prefs["conta"])
+    with _TRAVA_PENDENTE:
+        if _pendente and _pendente["url"] == atual["url"]:
+            _pendente.update(aberto=abriu, aberto_com=descricao)
+    return abriu, descricao
+
+
+def concluir_colando(endereco: str) -> None:
+    """
+    Para quem autorizou em OUTRO computador/navegador que não alcança o endereço http://localhost:<porta> deste programa:
+    depois do "Permitir" o navegador mostra uma página de erro cujo ENDEREÇO contém o código — cole-o aqui. Entrega ao
+    servidor local desta tentativa (só localhost; confere o 'state'). Levanta CredenciaisGoogleErro com mensagem pronta.
+    """
+    import requests
+    with _TRAVA_PENDENTE:
+        atual = dict(_pendente) if _pendente else None
+    if not atual or atual["expira_em"] < time.time():
+        raise CredenciaisGoogleErro("Não há autorização do Google esperando agora. Inicie a ação de novo.")
+    colado = urlparse((endereco or "").strip())
+    consulta = parse_qs(colado.query)
+    if not consulta.get("code") or not consulta.get("state"):
+        raise CredenciaisGoogleErro("Esse endereço não tem o código do Google. Cole o endereço COMPLETO da página que abriu depois de "
+                                    "clicar em Permitir (começa com http://localhost e tem ?state=... &code=...).")
+    if consulta["state"][0] != atual["_state"]:
+        raise CredenciaisGoogleErro("Esse endereço é de outra tentativa de autorização. Use o link mais recente.")
+    destino = urlparse(atual["_redirect_uri"])
+    if destino.hostname not in ("localhost", "127.0.0.1") or not destino.port:
+        raise CredenciaisGoogleErro("Não consegui identificar o endereço local desta autorização.")
+    try:
+        requests.get(f"{destino.scheme}://{destino.hostname}:{destino.port}/", params={k: v[0] for k, v in consulta.items()}, timeout=10)
+    except requests.RequestException:
+        raise CredenciaisGoogleErro("Não consegui entregar o código ao programa. A tentativa pode ter expirado: inicie a ação de novo.") from None
+
+
 # ───────────────────────────── leitura do arquivo de credenciais ───────────────
 
 def detectar_modo(caminho: Path | None = None) -> str:
@@ -181,24 +276,37 @@ def _oauth(caminho_cred: Path, escopos: list[str], interativo: bool, arquivo_tok
             "(Primeira execução → Google API, ou Automações → Planilha no Google Sheets) e repita.")
 
     from google_auth_oauthlib.flow import InstalledAppFlow
-    from . import google_oauth_navegador as navegador
     fluxo = InstalledAppFlow.from_client_secrets_file(str(caminho_cred), escopos)
-    abrir = _abrir_navegador()
-    conta = navegador.parametros_da_conta()
-    print("Autorização do Google: " + ("o navegador vai abrir; entre na sua conta e clique em Permitir."
-                                        if abrir else "abra o endereço mostrado abaixo no navegador e clique em Permitir."))
-    if conta.get("login_hint"):
-        print(f"   Conta esperada: {conta['login_hint']}")
+    prefs = _preferencias()
+    abrir = prefs["abrir"]
+    print("Autorização do Google: " + ("o link vai abrir no navegador; entre na conta indicada e clique em Permitir. Se abrir na conta errada, use o botão Copiar link na tela."
+                                        if abrir else "copie o link mostrado na tela (ou abaixo) e abra no navegador da conta certa; clique em Permitir."))
+
+    # O link é montado dentro de run_local_server; interceptamos aqui para (1) abrir no navegador/perfil escolhidos em vez do padrão
+    # do sistema e (2) guardá-lo para a tela mostrar o botão "Copiar link".
+    montar_url = getattr(fluxo, "authorization_url", None)
+    if callable(montar_url):
+        def _url_com_registro(**kw):
+            url, estado = montar_url(**kw)
+            abriu, descricao = (False, "")
+            if abrir:
+                abriu, descricao = _navegador.abrir_url(url, navegador=prefs["navegador"], perfil=prefs["perfil"], conta=prefs["conta"])
+            _registrar_pendente(url, prefs, abriu, descricao)
+            if abriu:
+                print(f"Link aberto em: {descricao}.")
+            return url, estado
+        fluxo.authorization_url = _url_com_registro
+
+    extra = {"login_hint": prefs["conta"]} if prefs["conta"] else {}        # o Google já abre com esta conta escolhida
     try:
-        # A biblioteca sempre "abre o navegador" que lhe damos (open_browser=True): quem decide se abre mesmo, em qual
-        # navegador/perfil e se copia o endereço é o NavegadorAutorizacao (google_oauth_navegador.py), conforme o .env.
-        with navegador.navegador_de_autorizacao(abrir):
-            creds = fluxo.run_local_server(
-                port=0, open_browser=True, browser=navegador.NOME_REGISTRADO, timeout_seconds=TEMPO_MAXIMO_AUTORIZACAO_S,
-                authorization_prompt_message="Endereço de autorização: {url}",
-                success_message="Autorização concluída. Pode fechar esta aba e voltar ao AUTO SERE.", **conta)
+        creds = fluxo.run_local_server(
+            port=0, open_browser=False, timeout_seconds=TEMPO_MAXIMO_AUTORIZACAO_S,
+            authorization_prompt_message="Endereço de autorização: {url}",
+            success_message="Autorização concluída. Pode fechar esta aba e voltar ao AUTO SERE.", **extra)
     except Exception as exc:                                              # noqa: BLE001 — a mensagem do Google pode ter detalhes
         raise CredenciaisGoogleErro(f"A autorização do Google não foi concluída ({type(exc).__name__}). Tente de novo.") from None
+    finally:
+        _limpar_pendente()
     if not creds:
         raise CredenciaisGoogleErro("A autorização do Google não foi concluída. Tente de novo.")
     _salvar_token(creds, caminho_tok)

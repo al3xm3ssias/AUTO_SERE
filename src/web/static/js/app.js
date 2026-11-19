@@ -3227,6 +3227,20 @@ const DETALHE_CONFIG = {
     <div id="cfg-nav-opcoes" style="display:flex; flex-direction:column; gap:10px; margin-bottom:14px;">Carregando…</div>
     <div id="cfg-nav-status" style="font-family:var(--mono); font-size:.72rem; color:var(--txt3); margin-bottom:14px;"></div>
     <button class="btn-primary" id="cfg-nav-salvar">Salvar navegador</button>`,
+  google_conta: `
+    <h4 style="margin-bottom:14px; font-size:.9rem;">Conta Google da autorização</h4>
+    <p style="color:var(--txt3); font-size:.82rem; margin-bottom:12px;">Quando o AUTO SERE precisa da sua autorização no Google (planilhas, contatos), ele abre um link de login. Aqui você escolhe <b>com qual conta</b> e <b>em qual navegador/perfil</b> esse link abre. No Chrome e no Edge, se algum perfil estiver logado na conta informada, o perfil certo é achado sozinho. Em qualquer caso, a janela de autorização tem o botão <b>Copiar link</b> para colar no navegador que você preferir.</p>
+    <div class="field"><label>E-mail da conta Google</label><input type="email" id="cfg-gconta-email" placeholder="nome@gmail.com" autocomplete="off"></div>
+    <div class="field"><label>Navegador</label><select id="cfg-gconta-nav"></select></div>
+    <div class="field" id="cfg-gconta-perfil-caixa"><label>Perfil do navegador</label><select id="cfg-gconta-perfil"></select></div>
+    <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:.86rem; margin:4px 0 14px;">
+      <input type="checkbox" id="cfg-gconta-abrir" checked> Abrir o navegador sozinho (desmarque para só mostrar o link)
+    </label>
+    <div id="cfg-gconta-status" style="font-family:var(--mono); font-size:.72rem; color:var(--txt3); margin-bottom:14px;">Carregando…</div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <button class="btn-primary" id="cfg-gconta-salvar">Salvar</button>
+      <button class="btn-sm" id="cfg-gconta-testar" style="padding:9px 16px;font-size:.78rem">Testar abertura</button>
+    </div>`,
   pasta_digitalizacao: `
     <h4 style="margin-bottom:14px; font-size:.9rem;">Pasta de digitalização</h4>
     <p style="color:var(--txt3); font-size:.82rem; margin-bottom:12px;">Pasta raiz onde ficam os documentos digitalizados dos alunos (as pastas das turmas). Por padrão é <code>dados/&lt;ano&gt;/DIGITALIZAÇÃO</code>.</p>
@@ -3334,6 +3348,9 @@ function initConfiguracoes() {
       if (row.dataset.config === "navegador") {
         conectarFormNavegador();
       }
+      if (row.dataset.config === "google_conta") {
+        conectarFormGoogleConta();
+      }
       if (row.dataset.config === "escola") {
         montarFormEscola(document.getElementById("cfg-escola-form"), {});
       }
@@ -3373,6 +3390,169 @@ async function conectarFormNavegador() {
       btn.disabled = false;
     }
   });
+}
+
+async function conectarFormGoogleConta() {
+  const email = document.getElementById("cfg-gconta-email");
+  const selNav = document.getElementById("cfg-gconta-nav");
+  const selPerfil = document.getElementById("cfg-gconta-perfil");
+  const caixaPerfil = document.getElementById("cfg-gconta-perfil-caixa");
+  const abrir = document.getElementById("cfg-gconta-abrir");
+  const status = document.getElementById("cfg-gconta-status");
+  const btnSalvar = document.getElementById("cfg-gconta-salvar");
+  const btnTestar = document.getElementById("cfg-gconta-testar");
+  if (!email || !selNav || !selPerfil || !abrir || !status || !btnSalvar || !btnTestar) return;
+  let estado = null;
+
+  const opcoesPerfil = () => {
+    const escolhido = selPerfil.value || estado.perfil || "";   // refazer a lista (e-mail/navegador mudou) não pode apagar a escolha
+    const nav = selNav.value;
+    const lista = (estado.perfis || {})[nav] || [];
+    const daConta = (estado.perfil_da_conta || {})[nav] || "";
+    caixaPerfil.style.display = (nav === "chrome" || nav === "edge" || nav === "") ? "" : "none";
+    const auto = (email.value.trim() ? "Automático — o perfil logado em " + email.value.trim() : "Automático / perfil padrão");
+    const base = [`<option value="">${escaparHtml(auto)}</option>`];
+    lista.forEach((p) => {
+      const rotulo = p.nome + (p.email ? " — " + p.email : "") + " (" + p.pasta + ")";
+      base.push(`<option value="${escaparHtml(p.pasta)}">${escaparHtml(rotulo)}</option>`);
+    });
+    selPerfil.innerHTML = base.join("");
+    if (escolhido && lista.some((p) => p.pasta === escolhido)) selPerfil.value = escolhido;
+  };
+  const desenhar = (d) => {
+    estado = d;
+    email.value = d.conta || "";
+    const ops = [`<option value="">Navegador padrão do computador</option>`];
+    (d.navegadores || []).forEach((n) => ops.push(`<option value="${escaparHtml(n.id)}">${escaparHtml(n.rotulo)}</option>`));
+    if (d.navegador && !(d.navegadores || []).some((n) => n.id === d.navegador)) {
+      ops.push(`<option value="${escaparHtml(d.navegador)}">${escaparHtml(d.navegador)}</option>`);
+    }
+    selNav.innerHTML = ops.join("");
+    selNav.value = d.navegador || "";
+    abrir.checked = d.abrir !== false;
+    opcoesPerfil();
+  };
+  const corpo = () => ({ conta: email.value.trim(), navegador: selNav.value, perfil: selPerfil.value, abrir: abrir.checked });
+  const marcarStatus = (texto, ok) => {
+    status.innerHTML = '<span style="color:var(--' + (ok ? "lime" : "amber") + ')">' + (ok ? "✓ " : "") + escaparHtml(texto) + "</span>";
+  };
+
+  try {
+    desenhar(await apiGet("/configuracoes/google-conta"));
+    status.textContent = "";
+  } catch (e) {
+    status.textContent = "Não foi possível ler a configuração atual.";
+    return;
+  }
+  selNav.addEventListener("change", opcoesPerfil);
+  email.addEventListener("change", () => { estado.conta = email.value.trim(); opcoesPerfil(); });
+  btnSalvar.addEventListener("click", async () => {
+    btnSalvar.disabled = true;
+    try {
+      const r = await apiPost("/configuracoes/google-conta", corpo());
+      desenhar(r);
+      marcarStatus(r.mensagem || "Salvo", true);
+      toast(r.mensagem || "Salvo");
+    } catch (e) {
+      marcarStatus(e.message, false);
+      toast(e.message);
+    } finally {
+      btnSalvar.disabled = false;
+    }
+  });
+  btnTestar.addEventListener("click", async () => {
+    btnTestar.disabled = true;
+    try {
+      const r = await apiPost("/configuracoes/google-conta/testar", corpo());
+      marcarStatus(r.mensagem || "Aberto", true);
+    } catch (e) {
+      marcarStatus(e.message, false);
+    } finally {
+      btnTestar.disabled = false;
+    }
+  });
+}
+
+/* ---------- Autorização do Google: janela com o link para COPIAR ---------- */
+
+let _gAutUrlMostrada = null;   // link da tentativa cuja janela já foi aberta (não reabre se o usuário fechar)
+let _gAutFechar = null;
+
+async function copiarTexto(texto, campo) {
+  try {
+    await navigator.clipboard.writeText(texto);
+    return true;
+  } catch (e) {
+    try {                                   // contexto sem Clipboard API: seleciona e copia
+      campo.focus(); campo.select();
+      return document.execCommand("copy");
+    } catch (e2) {
+      return false;
+    }
+  }
+}
+
+function abrirJanelaAutorizacaoGoogle(aut) {
+  _gAutUrlMostrada = aut.url;
+  _gAutFechar = null;
+  abrirModal("Autorizar acesso ao Google", (corpo, fechar) => {
+    _gAutFechar = fechar;
+    const conta = aut.conta ? `Entre com a conta <b>${escaparHtml(aut.conta)}</b>.` : "Entre com a conta Google que é dona das planilhas.";
+    const aberto = aut.aberto
+      ? `O link foi aberto em <b>${escaparHtml(aut.aberto_com || "seu navegador")}</b>.`
+      : "O link <b>não foi aberto sozinho</b>: copie e cole no navegador da conta certa (ou use o botão abaixo).";
+    corpo.innerHTML = `
+      <p style="font-size:.85rem; margin-bottom:10px;">${conta} ${aberto} Depois clique em <b>Permitir</b>; esta janela fecha sozinha.</p>
+      <div class="field"><label>Link de autorização</label><input type="text" id="mdl-gaut-link" readonly></div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
+        <button class="btn-primary" id="mdl-gaut-copiar">Copiar link</button>
+        <button class="btn-sm" id="mdl-gaut-abrir" style="padding:9px 16px;font-size:.78rem">Abrir no navegador configurado</button>
+      </div>
+      <details style="margin-bottom:14px;">
+        <summary style="cursor:pointer; font-size:.8rem; color:var(--txt3);">Autorizei em outro computador ou o navegador mostrou erro</summary>
+        <p style="font-size:.78rem; color:var(--txt3); margin:8px 0;">Depois do <b>Permitir</b>, se a página não carregar (endereço <code>http://localhost…</code>), copie o endereço completo da barra do navegador e cole aqui.</p>
+        <div class="field"><input type="text" id="mdl-gaut-colar" placeholder="http://localhost:…/?state=…&code=…"></div>
+        <button class="btn-sm" id="mdl-gaut-concluir" style="padding:9px 16px;font-size:.78rem">Concluir com este endereço</button>
+      </details>
+      <div style="font-family:var(--mono); font-size:.7rem; color:var(--txt3); margin-bottom:10px;">Aguardando você autorizar… (a tentativa vale por alguns minutos). Para mudar conta, navegador ou perfil: Configurações → Conta Google da autorização.</div>
+      <div class="modal-acoes"><button class="btn-sm" id="mdl-gaut-fechar" style="padding:9px 16px;font-size:.78rem">Fechar</button></div>`;
+    const campo = corpo.querySelector("#mdl-gaut-link");
+    campo.value = aut.url;
+    campo.addEventListener("focus", () => campo.select());
+    corpo.querySelector("#mdl-gaut-copiar").addEventListener("click", async () => {
+      toast((await copiarTexto(aut.url, campo)) ? "Link copiado — cole no navegador da conta certa" : "Não deu para copiar: selecione o link e use Ctrl+C");
+    });
+    corpo.querySelector("#mdl-gaut-abrir").addEventListener("click", async () => {
+      try { toast((await apiPost("/google/autorizacao/abrir")).mensagem || "Aberto"); } catch (e) { toast(e.message); }
+    });
+    corpo.querySelector("#mdl-gaut-concluir").addEventListener("click", async () => {
+      const endereco = corpo.querySelector("#mdl-gaut-colar").value.trim();
+      if (!endereco) { toast("Cole o endereço completo da página"); return; }
+      try { toast((await apiPost("/google/autorizacao/colar", { endereco })).mensagem || "Enviado"); } catch (e) { toast(e.message); }
+    });
+    corpo.querySelector("#mdl-gaut-fechar").addEventListener("click", fechar);
+  }, () => { _gAutFechar = null; });
+}
+
+async function verificarAutorizacaoGoogle() {
+  if (document.hidden) return;
+  try {
+    const aut = await apiGet("/google/autorizacao");
+    if (aut.pendente) {
+      if (aut.url !== _gAutUrlMostrada) abrirJanelaAutorizacaoGoogle(aut);
+    } else if (_gAutUrlMostrada) {
+      const estavaAberta = !!_gAutFechar;
+      if (_gAutFechar) _gAutFechar();
+      _gAutUrlMostrada = null;
+      if (estavaAberta) toast("Autorização do Google concluída");
+    }
+  } catch (e) {
+    // servidor ocupado ou fora do ar: tenta de novo no próximo ciclo
+  }
+}
+
+function iniciarMonitorAutorizacaoGoogle() {
+  setInterval(verificarAutorizacaoGoogle, 2500);
 }
 
 async function conectarFormDataCorte() {
@@ -4840,4 +5020,5 @@ document.addEventListener("DOMContentLoaded", () => {
   carregarPainel();
   iniciarContextoAno();
   abrirAssistenteSeNecessario();
+  iniciarMonitorAutorizacaoGoogle();
 });

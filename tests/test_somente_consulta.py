@@ -112,6 +112,7 @@ PERMITIDAS = [
     re.compile(r"^/web/api/automacoes/[^/]+/(previa|cancelar)$"),
     re.compile(r"^/web/api/whatsapp/webhook$"),
     re.compile(r"^/web/api/planilhas(/[^/]+)?$"),      # cadastro de planilhas do Drive: atravessa os anos, não é dado de um ano
+    re.compile(r"^/web/api/google/autorizacao/(abrir|colar)$"),      # login do Google em andamento: não grava dado do ano
 ]
 
 
@@ -418,3 +419,12 @@ def test_navegador_troca_recusada_com_automacao_rodando_mostra_o_motivo(normal, 
         assert paths.ano_atual() == "2026"
     finally:
         srv.shutdown()
+
+
+def test_rotas_da_autorizacao_do_google_em_consulta(web):
+    """Abrir/colar o link do Google mexem só na tentativa em andamento (liberadas); salvar a conta e testar escrevem config (barradas)."""
+    for caminho in ("/web/api/google/autorizacao/abrir", "/web/api/google/autorizacao/colar"):
+        assert not _barrada(web.post(caminho, json={})), caminho
+    for caminho in ("/web/api/configuracoes/google-conta", "/web/api/configuracoes/google-conta/testar"):
+        assert _barrada(web.post(caminho, json={})), caminho
+    assert web.get("/web/api/google/autorizacao").status_code == 200          # leitura sempre liberada

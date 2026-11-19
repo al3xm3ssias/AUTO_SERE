@@ -1919,6 +1919,81 @@ def configuracao_navegador_salvar():
     return jsonify(resposta)
 
 
+# ── Autorização do Google: link para copiar e conta/navegador/perfil em que ele abre ────────────────────────────────
+
+def _estado_google_conta() -> dict:
+    """O que a tela de Configurações mostra: escolha atual, navegadores instalados e, no Chrome/Edge, os perfis (nome + e-mail)."""
+    from src.comum import google_navegador as _gn
+    prefs = _config.google_oauth_preferencias()
+    instalados = _gn.navegadores_instalados()
+    perfis = {n: _gn.listar_perfis(n) for n in ("chrome", "edge") if n in instalados}
+    perfil_da_conta = {n: _gn.perfil_da_conta(n, prefs["conta"]) for n in perfis} if prefs["conta"] else {}
+    return {**prefs,
+            "navegadores": [{"id": n, "rotulo": _gn.ROTULOS[n]} for n in instalados],
+            "perfis": perfis, "perfil_da_conta": perfil_da_conta}
+
+
+@api_bp.route("/configuracoes/google-conta", methods=["GET"])
+def configuracao_google_conta_obter():
+    return jsonify(_estado_google_conta())
+
+
+@api_bp.route("/configuracoes/google-conta", methods=["POST"])
+def configuracao_google_conta_salvar():
+    """payload: {"conta": e-mail|"", "navegador": ""|"chrome"|"edge"|"firefox"|caminho, "perfil": pasta|"", "abrir": bool}."""
+    payload = request.get_json(silent=True) or {}
+    try:
+        _config.definir_google_oauth(conta=payload.get("conta"), navegador=payload.get("navegador"),
+                                     perfil=payload.get("perfil"), abrir=payload.get("abrir", True))
+    except ValueError as exc:
+        return jsonify({"erro": str(exc)}), 400
+    resposta = _estado_google_conta()
+    resposta.update({"status": "ok", "mensagem": "Salvo — vale a partir da próxima autorização do Google."})
+    return jsonify(resposta)
+
+
+@api_bp.route("/configuracoes/google-conta/testar", methods=["POST"])
+def configuracao_google_conta_testar():
+    """Abre a página da conta Google no navegador/perfil escolhidos (valores do formulário, ainda sem salvar) para conferir."""
+    from src.comum import google_navegador as _gn
+    payload = request.get_json(silent=True) or {}
+    abriu, descricao = _gn.abrir_url("https://myaccount.google.com/", navegador=str(payload.get("navegador") or ""),
+                                     perfil=str(payload.get("perfil") or ""), conta=str(payload.get("conta") or ""))
+    if not abriu:
+        return jsonify({"erro": "Não consegui abrir o navegador. Escolha outro ou use o botão Copiar link na hora de autorizar."}), 400
+    return jsonify({"status": "ok", "mensagem": f"Aberto em: {descricao}. Confira se é a conta certa."})
+
+
+@api_bp.route("/google/autorizacao", methods=["GET"])
+def google_autorizacao_estado():
+    """A tela consulta isto a cada poucos segundos: se há autorização do Google esperando, devolve o link para copiar."""
+    from src.comum import google_auth as _ga
+    pendente = _ga.autorizacao_pendente()
+    return jsonify({"pendente": bool(pendente), **(pendente or {})})
+
+
+@api_bp.route("/google/autorizacao/abrir", methods=["POST"])
+def google_autorizacao_abrir():
+    """Abre o link pendente no navegador/perfil configurados. Não recebe endereço do cliente: só abre o da tentativa atual."""
+    from src.comum import google_auth as _ga
+    abriu, descricao = _ga.abrir_pendente()
+    if not abriu:
+        return jsonify({"erro": descricao if "Não há" in descricao else "Não consegui abrir o navegador. Use o botão Copiar link."}), 400
+    return jsonify({"status": "ok", "mensagem": f"Aberto em: {descricao}."})
+
+
+@api_bp.route("/google/autorizacao/colar", methods=["POST"])
+def google_autorizacao_colar():
+    """payload: {"endereco": "http://localhost:<porta>/?state=...&code=..."} — para quem autorizou em outro computador."""
+    from src.comum import google_auth as _ga
+    payload = request.get_json(silent=True) or {}
+    try:
+        _ga.concluir_colando(str(payload.get("endereco") or ""))
+    except _ga.GoogleErro as exc:
+        return jsonify({"erro": str(exc)}), 400
+    return jsonify({"status": "ok", "mensagem": "Código enviado. Concluindo a autorização…"})
+
+
 @api_bp.route("/automacoes/<string:chave>/configuracao")
 def automacoes_configuracao(chave):
     """

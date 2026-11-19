@@ -43,6 +43,8 @@ Uso:
 from __future__ import annotations
 
 import json
+import os
+import re
 import unicodedata
 from datetime import date
 from pathlib import Path
@@ -65,6 +67,7 @@ _PADRAO: dict[str, Any] = {
     "navegador_padrao": None,             # None = automático (cada script usa o seu); "chromium" (Chrome) ou "firefox" — ver comum/navegador.py
     "navegador_scripts": {},              # {chave_do_script: {"mostrar_janela": True/False}}; sem a chave = o padrão do script
     "google_sheets": None,                # {"mapa_abas"} (ver google_sheets_config); as planilhas ficam em planilhas_gerenciador
+    "google_oauth": None,                 # {"conta","navegador","perfil","abrir"} — com qual conta/navegador/perfil abrir a autorização do Google (ver google_oauth_preferencias)
 }
 
 
@@ -526,3 +529,49 @@ def definir_mostrar_janela_script(chave: str, mostrar: bool | None) -> None:
         todos[chave] = {"mostrar_janela": bool(mostrar)}
     configuracao["navegador_scripts"] = todos
     _salvar_configuracao(configuracao)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Autorização do Google: conta, navegador e perfil em que o link abre
+# ─────────────────────────────────────────────────────────────────────────
+
+def google_oauth_preferencias() -> dict[str, Any]:
+    """
+    {"conta": e-mail ou "", "navegador": ""|"chrome"|"edge"|"firefox"|caminho, "perfil": pasta do perfil ou "",
+    "abrir": True/False (abrir o navegador sozinho)}. As variáveis GOOGLE_OAUTH_CONTA / _NAVEGADOR / _PERFIL /
+    _ABRIR_NAVEGADOR (credenciais/.env) têm prioridade sobre o que foi salvo na tela.
+    """
+    salvo = carregar_configuracao().get("google_oauth")
+    salvo = salvo if isinstance(salvo, dict) else {}
+
+    def _texto(env: str, chave: str) -> str:
+        return (os.getenv(env) or "").strip() or str(salvo.get(chave) or "").strip()
+
+    abrir_env = (os.getenv("GOOGLE_OAUTH_ABRIR_NAVEGADOR") or "").strip().lower()
+    if abrir_env:
+        abrir = abrir_env not in ("0", "false", "nao", "não")
+    else:
+        abrir = salvo.get("abrir") if isinstance(salvo.get("abrir"), bool) else True
+    return {"conta": _texto("GOOGLE_OAUTH_CONTA", "conta"), "navegador": _texto("GOOGLE_OAUTH_NAVEGADOR", "navegador"),
+            "perfil": _texto("GOOGLE_OAUTH_PERFIL", "perfil"), "abrir": abrir}
+
+
+def definir_google_oauth(conta: str = "", navegador: str = "", perfil: str = "", abrir: bool = True) -> dict[str, Any]:
+    """Grava a escolha da tela. ValueError (mensagem pronta) se o e-mail ou o navegador forem inválidos."""
+    conta = str(conta or "").strip()
+    if conta and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", conta):
+        raise ValueError("Informe o e-mail completo da conta Google (ex.: nome@gmail.com) ou deixe em branco.")
+    navegador = str(navegador or "").strip()
+    if navegador.lower() in ("", "padrao", "padrão", "automatico", "automático"):
+        navegador = ""
+    elif navegador.lower() in ("chrome", "edge", "firefox"):
+        navegador = navegador.lower()
+    elif not Path(navegador).expanduser().is_file():
+        raise ValueError("Navegador inválido: escolha um da lista ou informe o caminho completo do programa (.exe).")
+    perfil = str(perfil or "").strip()
+    if len(perfil) > 80 or any(c in perfil for c in '\\/"\n\r'):
+        raise ValueError("Nome de perfil inválido.")
+    configuracao = carregar_configuracao()
+    configuracao["google_oauth"] = {"conta": conta, "navegador": navegador, "perfil": perfil, "abrir": bool(abrir)}
+    _salvar_configuracao(configuracao)
+    return google_oauth_preferencias()
