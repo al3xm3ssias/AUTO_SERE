@@ -62,6 +62,14 @@ MUDANÇAS EM RELAÇÃO AO ORIGINAL:
    registro (o nº da chamada é o validador secundário), descarta apenas
    leitura repetida e marca o matriculado posterior com "Retorno": True.
 
+6. ID POR MATRÍCULA (18/11/2026) — src.comum.matriculas guarda em
+   dados/<ano>/turmas_relacional.json um ID para cada PERÍODO do aluno na
+   escola (entra, sai, volta, sai: dois IDs ligados pelo CGM). O SERE mostra
+   uma só data por linha (para Transferido é a da saída), então a data de
+   entrada se perderia; a ponte a lembra. As linhas do turmas.json ganham
+   "ID_MATRICULA", "Data Entrada" e "Data Transferência"; "Data Matricula"
+   continua exatamente como o SERE entrega (vários módulos dependem disso).
+
 Toda a lógica de scraping em si (seletores, extração de colunas, retry de
 3 tentativas por turma, filtro de turmas "sem seriação") é idêntica ao
 original — nenhuma regra de negócio foi alterada.
@@ -286,6 +294,13 @@ async def coletar_turmas_e_alunos(page, output_file: Path = TURMAS_JSON) -> dict
         nome, alunos = await get_alunos_da_turma(page, turma)
         resultado[nome] = alunos
         log.info(f"Turma '{nome}' finalizada → {len(alunos)} aluno(s).")
+
+    # Ponte de IDs de matrícula (dados/<ano>/turmas_relacional.json): lembra, a cada coleta, quando cada
+    # período começou e terminou (o SERE só mostra UMA data; ao transferir, a de entrada some) e acrescenta
+    # ID_MATRICULA / Data Entrada / Data Transferência às linhas. "Data Matricula" NÃO muda.
+    # Nunca levanta exceção: se falhar, o turmas.json sai como sempre saiu.
+    from src.comum.matriculas import registrar_matriculas_sem_falhar
+    registrar_matriculas_sem_falhar(resultado, dados_dir=output_file.parent)
 
     log.info(f"Todas as turmas coletadas. Salvando JSON em '{output_file}'...")
     try:

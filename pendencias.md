@@ -109,6 +109,25 @@ Adaptação do script antigo `consulta_transferidos_ano_anterior.py`: automaçã
 
 ## 2b. Arquitetura: banco de dados local (IDEIA do usuário, 2026-11-18: só registrar, NÃO implementar agora)
 
+> **Atualização 2026-11-18 — decisão do usuário: NÃO usar banco de dados (as desvantagens pesam demais).** O problema de fundo (identidade de cada período do aluno) foi resolvido com uma **ponte em JSON**, ver "2b-1" logo abaixo. O texto a seguir fica como registro da ideia do banco, caso algum dia volte a valer a pena.
+
+### 2b-1. ID por matrícula: `turmas_relacional.json` (IMPLEMENTADO em 2026-11-18, falta validar no SERE real)
+
+- **O que é.** `dados/<ano>/turmas_relacional.json` dá um ID (`2026-0007`) a cada **período** do aluno na escola. Entra, sai, volta e sai de novo = dois IDs, ligados pelo CGM. Código: `src/comum/matriculas.py`. Testes: `tests/test_matriculas.py`.
+- **Por que existe.** A listagem do SERE tem **uma só coluna de data**: para Matriculado é a data da matrícula; para Transferido vira a **data da saída**. Ao transferir, a data de entrada some do `turmas.json` (reescrito inteiro a cada coleta). A ponte só recebe dados e lembra das duas datas.
+- **Como roda sozinho.** `turmas.py` chama `registrar_matriculas_sem_falhar` a cada coleta (também na rotina diária), antes de gravar o `turmas.json`. Nunca derruba a coleta.
+- **Campos novos nas linhas do `turmas.json`:** `ID_MATRICULA`, `Data Entrada`, `Data Transferência`. **`Data Matricula` não mudou** (12 arquivos do `src` e 22 de testes a leem como data da movimentação).
+- **Regras de casamento** (por CGM, em ordem de data; o **nome nunca é usado**): matrícula casa por CGM + data; saída fecha o período em aberto cuja entrada é anterior; qualquer dúvida vira `status: "verificar"` com o motivo (data da matrícula ou da saída corrigida no SERE, transferência desfeita, duas matrículas em aberto, situação não prevista).
+- **Segurança do arquivo:** gravação atômica + cópia `.antes` + trava entre processos; arquivo ilegível **não** é tratado como vazio (regeneraria os IDs); só grava quando algo mudou; entra no backup junto com os demais `.json` do ano.
+- **Comandos:** `python -m src.comum.matriculas` (reaplica o `turmas.json` atual), `--semear` (reaplica os `turmas.json` dos backups do ano, recuperando a entrada de quem já saiu; **só funciona ANTES da primeira coleta**, com a ponte vazia, senão recusa), `--verificar` (lista o que conferir), `--conferido ID --nota "..."`.
+- **Pendente:**
+  - [ ] **Validar no SERE real:** o aluno que volta recebe mesmo uma nova `Data Matricula`? Transferidos continuam aparecendo no `turmas.json`? Antes da 1ª coleta com o código novo, rodar `python -m src.comum.matriculas --semear` e ver quantos ficam `verificar`.
+  - [ ] Quem já estava Transferido quando a ponte nasceu fica com `data_matricula: null` (o SERE não informa); `--semear` recupera o que os backups ainda tiverem.
+  - [ ] Passar Transferidos (PDFs, `ciclos_anteriores`, pareceres) e a Base ABC a usar o ID, e só então avaliar trocar o significado de `Data Matricula` por um auxiliar `data_movimentacao()`.
+  - [ ] Aluno da pré-matrícula (só CPF): hoje a ponte ignora linhas sem CGM; ligar quando ganhar CGM.
+  - [ ] Opcional: registrar a conferência como automação na tela (hoje é por linha de comando).
+  - [ ] Duas execuções do `turmas.py` ao mesmo tempo já são protegidas na ponte; o item 11q (trava geral por processo) continua aberto.
+
 **Problema.** O sistema cresceu e hoje guarda a mesma pessoa em vários JSONs (`turmas.json`, `alunos*.json`, `pre_matricula.json`, `previsao_alunos_<ano>.json`, `transferidos.json`, `fila_transferidos.json`, `buscas_base.json`, `rematriculas_sucesso.json`), ligados por **CGM, CPF ou nome + nascimento + nº da chamada**. Isso gerou remendos:
 - 2ª saída do mesmo aluno (`ciclos_anteriores` e PDFs renomeados à mão);
 - correções manuais que precisam ser reaplicadas a cada coleta (`correcoes_manuais`);
@@ -165,6 +184,7 @@ Adaptação do script antigo `consulta_transferidos_ano_anterior.py`: automaçã
 - [x] **Calendário por ano letivo** (2026-11-02): `dados/<ano>/calendario.json`; voltando o ano aparece o calendário daquele ano (só consulta); o arquivo único antigo é dividido por ano na primeira abertura e guardado, sem apagar nada
 - [x] **Pareceres digitalizados do Fundamental** (2026-11-02): lê o QR novo (`AUTOSERE|PF|ano|CGM`), arquiva na turma, envia ao SERE e por e-mail ao responsável (e-mail: não enviar / só teste / enviar). A leitura do QR já existia; o que faltava era usá-la com o QR novo
 - [x] **10h**: a tela Alunos une `alunos.json` e `alunos_completo.json` numa ficha única, com todos os campos sempre visíveis e "—" onde falta dado (2026-11-02). O HTML fica todo em `alunos_completo_cards.html` (não apagar); `alunos_cards.html` só o inclui
+- [x] **Sem banco de dados** (2026-11-18): decidido não implementar (ver 2b); a identidade de cada período do aluno fica em `dados/<ano>/turmas_relacional.json` (ID por matrícula, ligado pelo CGM), alimentado a cada coleta de turmas
 - [x] **Funcionários completo salva aos poucos** (2026-11-02): grava a cada 5 cadastros, não encolhe o arquivo no meio da coleta e, se parar (cancelada, erro ou queda), avisa no log e na tela de Funcionários
 
 ---

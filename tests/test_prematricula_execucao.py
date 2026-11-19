@@ -29,7 +29,8 @@ def planos(monkeypatch):
 def test_componentes_expoem_modo_analise_e_pular_pendentes(c):
     r = c.get(f"/web/api/automacoes/{CHAVE}/componentes").get_json()
     assert r["registrado"] and r["recursos"] == ["debug"] and not r["confirmar"]
-    assert [e["nome"] for e in r["extras"]] == ["pular_pendentes"] and r["ajuda_debug"]
+    assert [e["nome"] for e in r["extras"]] == ["pular_pendentes", "enviar_google_contatos", "simular_google_contatos"]
+    assert r["ajuda_debug"]
 
 
 def test_executar_sem_opcoes_roda_o_processo_completo(c, planos):

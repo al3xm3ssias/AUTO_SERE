@@ -93,6 +93,8 @@ AUTOMACOES: dict[str, dict] = {
         "antes": ["Salvar o login do SERE em Configurações.", "Preencher os dados da escola."],
         "resultado": ["Grava `turmas.json` do ano letivo em uso.",
                       "Refaz sozinha a fila de transferidos (`fila_transferidos.json`) a cada coleta.",
+                      "Dá um ID a cada período do aluno na escola e guarda a data de entrada e a de saída em `turmas_relacional.json` "
+                      "(as linhas do `turmas.json` ganham `ID_MATRICULA`, `Data Entrada` e `Data Transferência`).",
                       "Ao terminar, cria um backup automático dos dados."],
         "cuidados": ["Não roda ao mesmo tempo que outra coleta de Turmas: o sistema recusa a segunda."],
         "veja_tambem": [R("tela", "turmas"), R("automacao", "alunos"), R("automacao", "gerar_pastas"), R("automacao", "transferidos_fila")],
@@ -176,6 +178,8 @@ AUTOMACOES: dict[str, dict] = {
         "resultado": ["Grava/atualiza `pre_matricula.json` sem apagar o histórico.",
                       "No cadastro (etapa 2) guarda também a data de nascimento e, quando o portal mostrar, o nome da mãe, que a Consulta na Base ABC usa na busca.",
                       "A coleta do próximo ano letivo grava `previsao_alunos_<ano>.json`, usado na tela Previsão.",
+                      "Com **Enviar os contatos ao Google Contatos** marcado, cada responsável vira um contato no Google (além do CSV): criado na 1ª vez e **atualizado** nas seguintes, sem duplicar. "
+                      "Ano vigente: rótulo do ano (ex.: 2026). Só próximo ano: dois rótulos, \"Pré-matrícula <ano>\" e \"Aluno <ano>\". Contatos enviados ficam registrados em `dados/google_contatos.json`.",
                       "Ao terminar, o sistema pode avisar os responsáveis pelo WhatsApp (cadastro recebido / matrícula aprovada); cada aviso vai uma vez por aluno, e no modo simulado nada sai."],
         "cuidados": ["Só lê o site; não altera cadastros no portal. Pode levar vários minutos.",
                      "**Cadastro refeito (Escolas Escolhidas do último cadastro):** se a nossa escola é a **Opção 1**, o fluxo é o normal. "
@@ -184,7 +188,10 @@ AUTOMACOES: dict[str, dict] = {
                      "Se é a Opção 2 ou 3 e **todas as anteriores já têm situação** (texto livre das outras escolas, por exemplo \"A escola não dispõe de vaga no momento\"), "
                      "o aluno vai para a **fila de análise**: a escola decide se matricula ou confirma antes com a Central de Matrícula. "
                      "Ele aparece na aba **Fila de análise** da tela Pré-matrícula (a marca fica em `pre_matricula.json`: `fila_analise`, `encaminhado_de`) e sai de lá quando a nossa opção ganha uma situação.",
-                     "A regra vale nas etapas **2 (Cadastro)** e **4 (Pendentes)**."],
+                     "A regra vale nas etapas **2 (Cadastro)** e **4 (Pendentes)**.",
+                     "**Google Contatos:** exige a People API ativada no Google Cloud e a conta Google que será dona dos contatos (credencial OAuth, não conta de serviço). "
+                     "Na 1ª vez abre o navegador para autorizar. Se falhar, o CSV sai normalmente e o processo não para. Quem sai dos dados (aluno cancelado) **não** é apagado do Google. "
+                     "**Simulação do Google Contatos** só mostra quantos seriam criados e atualizados, sem falar com o Google."],
         "veja_tambem": [R("tela", "prematricula"), R("tela", "previsao"), R("tela", "whatsapp"), R("configuracao", "senha_prematricula")],
     },
     "rematricula": {

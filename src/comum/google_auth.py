@@ -44,6 +44,7 @@ log = logging.getLogger(__name__)
 
 ESCOPO_SHEETS = "https://www.googleapis.com/auth/spreadsheets"
 ESCOPO_DRIVE_LEITURA = "https://www.googleapis.com/auth/drive.readonly"   # exigido pela exportação de planilha em PDF
+ESCOPO_CONTATOS = "https://www.googleapis.com/auth/contacts"              # criar/atualizar contatos (People API)
 ESCOPOS_PADRAO = [ESCOPO_SHEETS]
 
 MODO_OAUTH = "oauth"
@@ -89,6 +90,16 @@ def caminho_token_drive() -> Path:
     """
     base = caminho_token()
     return base.with_name(f"{base.stem}_drive{base.suffix}")
+
+
+def caminho_token_contatos() -> Path:
+    """
+    Token do OAuth do Google Contatos (People API). Arquivo à parte (google_token_contatos.json) pelo mesmo motivo do
+    Drive: o token guarda os escopos de quando foi autorizado, então misturar faria o programa achar que já tem a
+    permissão de contatos sem ter, e a autorização de contatos não invalida a das planilhas.
+    """
+    base = caminho_token()
+    return base.with_name(f"{base.stem}_contatos{base.suffix}")
 
 
 def credenciais_configuradas() -> bool:

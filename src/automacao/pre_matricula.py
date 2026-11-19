@@ -228,6 +228,12 @@ def caminho_contatos() -> Path:
     return pasta_base() / f"TEMPLATE_PREENCHIDO_{data}.csv"
 
 
+def caminho_mapa_contatos_google() -> Path:
+    """Contatos já enviados ao Google. Um arquivo só, fora da pasta do ano: na virada de ano o contato criado como
+    "Pré-matrícula 2027" continua sendo reconhecido (e não duplicado) quando 2027 passa a ser o ano atual."""
+    return Path(paths.DADOS_DIR) / "google_contatos.json"
+
+
 def pasta_screenshots() -> Path:
     return pasta_base() / "screenshots"
 
@@ -1829,7 +1835,12 @@ def extrair_cep(endereco):
     return f"{a}-{b}"
 
 
-def processar_contatos(dados_alunos, dados_prematricula):
+def agrupar_contatos(dados_alunos, dados_prematricula):
+    """
+    Agrupa os alunos por responsável (telefone; sem telefone, o nome do responsável). Devolve
+    [{"chave", "registros": [{"cpf", "turma", "nome_aluno", "nome_responsavel", "telefone", "email", "endereco"}]}].
+    Base única do CSV (processar_contatos) e do envio ao Google Contatos (contatos_para_google).
+    """
     # Aceita lista, {cpf: aluno} ou um único registro (dict com "cpf" direto).
     if isinstance(dados_alunos, list):
         alunos_list = dados_alunos
@@ -1855,6 +1866,7 @@ def processar_contatos(dados_alunos, dados_prematricula):
 
         agrupados[chave].append(
             {
+                "cpf": cpf,
                 "turma": turma,
                 "nome_aluno": nome_aluno,
                 "nome_responsavel": nome_responsavel,
@@ -1864,14 +1876,23 @@ def processar_contatos(dados_alunos, dados_prematricula):
             }
         )
 
+    return [{"chave": chave, "registros": registros} for chave, registros in agrupados.items()]
+
+
+def _nome_do_contato(registros, ano):
+    turmas = sorted(set(r["turma"] for r in registros))
+    alunos = [r["nome_aluno"] for r in registros]
+    return f"{' E '.join(turmas)} - {ano} - RESPONSAVEL DO {' E DO '.join(alunos)}"
+
+
+def processar_contatos(dados_alunos, dados_prematricula):
     ano = _ano()
     contatos = []
-    for _chave, registros in agrupados.items():
-        turmas = sorted(set(r["turma"] for r in registros))
-        alunos = [r["nome_aluno"] for r in registros]
+    for grupo in agrupar_contatos(dados_alunos, dados_prematricula):
+        registros = grupo["registros"]
         primeiro = registros[0]
 
-        nome_prefix = f"{' E '.join(turmas)} - {ano} - RESPONSAVEL DO {' E DO '.join(alunos)}"
+        nome_prefix = _nome_do_contato(registros, ano)
 
         contatos.append(
             {
@@ -1890,6 +1911,31 @@ def processar_contatos(dados_alunos, dados_prematricula):
             }
         )
 
+    return contatos
+
+
+def contatos_para_google(dados_alunos, dados_prematricula):
+    """
+    Os mesmos contatos do CSV (mesmo agrupamento, mesmo nome), em campos simples para o Google Contatos, com a chave de
+    agrupamento e os CPFs dos alunos (para reconhecer o mesmo contato numa rodada seguinte).
+    """
+    ano = _ano()
+    contatos = []
+    for grupo in agrupar_contatos(dados_alunos, dados_prematricula):
+        registros = grupo["registros"]
+        primeiro = registros[0]
+        contatos.append(
+            {
+                "chave": grupo["chave"],
+                "cpfs": sorted({r["cpf"] for r in registros if r["cpf"]}),
+                "nome": _nome_do_contato(registros, ano),
+                "email": primeiro["email"],
+                "telefone": primeiro["telefone"],
+                "cep": extrair_cep(primeiro["endereco"]),
+                "responsavel": primeiro["nome_responsavel"],
+                "endereco": primeiro["endereco"],
+            }
+        )
     return contatos
 
 
@@ -1953,6 +1999,37 @@ def etapa_contatos(dados_processados, dados_prematricula):
     return exportar_csv(contatos)
 
 
+def etapa_contatos_google(dados_processados, dados_prematricula, simulacao=False):
+    """
+    Envia os contatos direto ao Google Contatos (rótulos: ano vigente, ou "Pré-matrícula <ano>" + "Aluno <ano>" no
+    alvo "proximo"). NUNCA derruba o processo: o CSV já foi gerado antes e qualquer falha aqui só é avisada.
+    Devolve o resumo de contatos_google.sincronizar, {"erro": mensagem} se falhou, ou None se não havia contatos.
+    """
+    print("\n" + "=" * 60)
+    print(f"GOOGLE CONTATOS - {_ano()} (alvo: {alvo_atual()})" + (" - SIMULAÇÃO" if simulacao else ""))
+    print("=" * 60)
+
+    contatos = contatos_para_google(dados_processados, dados_prematricula)
+    if not contatos:
+        print("Nenhum contato para enviar.")
+        return None
+
+    from src.automacao import contatos_google
+    from src.comum.arquivos_json import ArquivoJsonCorrompidoError
+    from src.comum.google_auth import GoogleErro
+
+    try:
+        return contatos_google.sincronizar(
+            contatos, alvo=alvo_atual(), ano=_ano(), caminho_mapa=caminho_mapa_contatos_google(), simulacao=simulacao
+        )
+    except (GoogleErro, ArquivoJsonCorrompidoError) as e:
+        print(f"⚠️ Google Contatos não atualizado: {e}")
+    except Exception as e:  # noqa: BLE001 - nunca quebra o processo
+        print(f"⚠️ Google Contatos não atualizado ({type(e).__name__}): {e}")
+    print("   O CSV de contatos foi gerado normalmente; nada do processo foi perdido.")
+    return {"erro": True}
+
+
 # ==========================================================
 # PONTOS DE ENTRADA (sessão de navegador + login)
 # ==========================================================
@@ -1997,7 +2074,7 @@ class _Sessao:
         return False
 
 
-async def _executar_alvo(page, alvo, analise, pular_pendentes):
+async def _executar_alvo(page, alvo, analise, pular_pendentes, enviar_google_contatos=False, simular_google_contatos=False):
     """Etapas 1 -> 2 -> 4 -> 3 para UM alvo, na sessão já logada."""
     token = definir_alvo(alvo)
     try:
@@ -2008,10 +2085,10 @@ async def _executar_alvo(page, alvo, analise, pular_pendentes):
         dados_prematricula = await etapa_coleta(page, analise=analise)
         if dados_prematricula is None:
             print("❌ Etapa 1 falhou. Abortando este alvo.")
-            return {"ok": False, "sem_periodo": False, "resumo_pendentes": None, "arquivo_contatos": None}
+            return {"ok": False, "sem_periodo": False, "resumo_pendentes": None, "arquivo_contatos": None, "contatos_google": None}
 
         if dados_prematricula.get("sem_periodo"):
-            return {"ok": True, "sem_periodo": True, "resumo_pendentes": None, "arquivo_contatos": None}
+            return {"ok": True, "sem_periodo": True, "resumo_pendentes": None, "arquivo_contatos": None, "contatos_google": None}
 
         dados_processados = await etapa_cadastro(page, dados_prematricula, analise=analise)
 
@@ -2022,11 +2099,18 @@ async def _executar_alvo(page, alvo, analise, pular_pendentes):
             print("\n(Etapa 4 pulada)")
 
         arquivo_contatos = etapa_contatos(dados_processados, dados_prematricula)
+
+        contatos_google = None
+        if enviar_google_contatos or simular_google_contatos:
+            contatos_google = etapa_contatos_google(
+                dados_processados, dados_prematricula, simulacao=simular_google_contatos
+            )
         return {
             "ok": True,
             "sem_periodo": False,
             "resumo_pendentes": resumo_pendentes,
             "arquivo_contatos": arquivo_contatos,
+            "contatos_google": contatos_google,
         }
     finally:
         _ALVO.reset(token)
@@ -2041,6 +2125,8 @@ async def processo_completo_via_login(
     headless=True,
     avisar_whatsapp=True,
     alvo="ambos",
+    enviar_google_contatos=False,
+    simular_google_contatos=False,
 ):
     """
     Etapas 1 -> 2 -> 4 -> 3 numa única sessão, para o(s) alvo(s) pedido(s):
@@ -2048,6 +2134,8 @@ async def processo_completo_via_login(
     ano primeiro). Cada alvo tem o seu pre_matricula*.json e o seu CSV de contatos.
 
     `analise=True` salva screenshot de cada etapa; `pular_pendentes=True` pula a Etapa 4.
+    `enviar_google_contatos=True` manda os contatos também direto ao Google Contatos (além do CSV);
+    `simular_google_contatos=True` só mostra o que seria criado/atualizado, sem falar com o Google.
 
     Devolve {"ok", "resumo_pendentes", "arquivo_contatos", "resultados"}:
       - "resultados": {alvo: {"ok", "sem_periodo", "resumo_pendentes", "arquivo_contatos"}}
@@ -2070,7 +2158,9 @@ async def processo_completo_via_login(
             return {"ok": False, "resumo_pendentes": None, "arquivo_contatos": None, "resultados": {}}
 
         for a in alvos:
-            resultados[a] = await _executar_alvo(sessao.page, a, analise, pular_pendentes)
+            resultados[a] = await _executar_alvo(
+                sessao.page, a, analise, pular_pendentes, enviar_google_contatos, simular_google_contatos
+            )
 
     # Comunicado de matrícula por WhatsApp (provedor simulado por padrão; nunca quebra o processo).
     avisar_apos_pre_matricula(avisar_whatsapp)

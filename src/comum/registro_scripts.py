@@ -203,8 +203,12 @@ def _plano_gerar_chaves(o, p, tj, ctx) -> Plano:
 
 def _plano_prematricula(o, p, tj, ctx) -> Plano:
     from src.automacao.pre_matricula import processo_completo_via_login
-    return Plano("coroutine", processo_completo_via_login, {
-        "analise": o.debug, "pular_pendentes": bool(p.get("pular_pendentes", False))})
+    kwargs = {"analise": o.debug, "pular_pendentes": bool(p.get("pular_pendentes", False))}
+    if p.get("enviar_google_contatos"):
+        kwargs["enviar_google_contatos"] = True
+    if p.get("simular_google_contatos"):
+        kwargs["simular_google_contatos"] = True
+    return Plano("coroutine", processo_completo_via_login, kwargs)
 
 
 # ── Transferidos: fila, geração de guia/histórico, envio ao SERE e pareceres ──────────────────────────
@@ -1140,7 +1144,17 @@ registrar(Script("prematricula_completa", (_D,), _plano_prematricula,
                              "para descobrir o que mudou no site se algo falhar.",
                  extras=lambda: [{"tipo": "caixa", "id": "campo-pular", "nome": "pular_pendentes",
                                   "label": "Pular a verificação de pendentes (Etapa 4)",
-                                  "descricao": "Mais rápido; não consulta de novo quem ainda está pendente."}]))
+                                  "descricao": "Mais rápido; não consulta de novo quem ainda está pendente."},
+                                 {"tipo": "caixa", "id": "campo-google-contatos", "nome": "enviar_google_contatos",
+                                  "label": "Enviar os contatos ao Google Contatos",
+                                  "padrao": False,
+                                  "descricao": "Além do CSV, cria/atualiza um contato por responsável (sem duplicar). "
+                                               "Ano vigente: rótulo do ano; só próximo ano: \"Pré-matrícula <ano>\" e "
+                                               "\"Aluno <ano>\". Na 1ª vez abre o navegador para autorizar."},
+                                 {"tipo": "caixa", "id": "campo-google-contatos-simulacao", "nome": "simular_google_contatos",
+                                  "label": "Simulação do Google Contatos (não envia nada)",
+                                  "padrao": False,
+                                  "descricao": "Só mostra quantos contatos seriam criados e atualizados; não fala com o Google."}]))
 
 registrar(Script("transferidos_fila", (), _plano_transferidos_fila, validar_extras=_validar_data_corte,
                  extras=lambda: [_extra_data_corte(),
