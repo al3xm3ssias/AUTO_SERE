@@ -31,9 +31,33 @@ O programa descobre o tipo pelo conteúdo do JSON; não há chave para trocar.
    O token fica em `credenciais/google_token.json` e se renova sozinho.
 
 Variáveis (veja `.env.example`): `GOOGLE_API_CREDENTIALS`, `GOOGLE_TOKEN_FILE`, `GOOGLE_OAUTH_ABRIR_NAVEGADOR` (0 = só mostra o endereço; WSL/servidor).
+Para escolher a conta e o navegador da autorização, veja a seção abaixo.
 Para reaproveitar o `token.json` do antigo sheets_sync: `GOOGLE_TOKEN_FILE=<caminho do token.json>` e `GOOGLE_CREDENTIALS_FILE=<caminho do credentials.json>` (também aceita).
 
 Segurança: `credenciais/google_*.json` e `credenciais/*token*.json` estão no `.gitignore`; `credenciais/` não entra no backup; nenhum token, chave ou segredo vai para log.
+
+### Conta e navegador certos na autorização
+
+A autorização vale para **uma conta Google** (a dona da planilha ou dos contatos), mas o navegador padrão do computador
+costuma estar com outra conta ou outro perfil. Há três formas de resolver, todas no `credenciais/.env` (modelo em `.env.example`):
+
+1. **Copiar o link e colar no navegador certo (já vem ligado).** Ao pedir a autorização o programa **copia o endereço para a
+   área de transferência** e mostra a mensagem "Endereço de autorização COPIADO". Se o navegador abrir na conta errada, feche a
+   aba, abra o navegador/perfil da conta certa e cole (Ctrl+V) na barra de endereço. O endereço também aparece escrito no log
+   ("Endereço de autorização: ..."). Para **não abrir navegador nenhum** e só copiar: `GOOGLE_OAUTH_ABRIR_NAVEGADOR=0`.
+   Para não mexer na área de transferência: `GOOGLE_OAUTH_COPIAR_LINK=0`.
+2. **Abrir direto no navegador e perfil da conta certa.** `GOOGLE_OAUTH_NAVEGADOR=chrome` (ou `edge`, `firefox`, `brave`, ou o
+   caminho do `.exe`) e `GOOGLE_OAUTH_PERFIL=Profile 2`. O perfil é o **nome da pasta**, não o nome que aparece no Chrome:
+   abra `chrome://version` (no Edge, `edge://version`) **dentro do perfil da conta certa** e veja o último trecho de "Caminho do
+   perfil" (`Default`, `Profile 1`, `Profile 2`...). Só o perfil, sem navegador, assume o Chrome. Argumentos extras:
+   `GOOGLE_OAUTH_NAVEGADOR_ARGS`.
+3. **Sugerir a conta ao Google.** `GOOGLE_OAUTH_CONTA=escola@gmail.com` faz o Google selecionar/preencher essa conta na tela de
+   login. Isso **não troca de perfil**: se o navegador aberto não estiver conectado a essa conta, o Google pede o login dela.
+   `GOOGLE_OAUTH_ESCOLHER_CONTA=1` mostra sempre a lista de contas (e pede a permissão de novo).
+
+O mais seguro é combinar 2 e 3. O endereço de autorização termina em `http://localhost:<porta>`, então o navegador usado
+**precisa estar no mesmo computador** em que o AUTO SERE está rodando. Em servidor ou WSL sem tela, use
+`GOOGLE_OAUTH_ABRIR_NAVEGADOR=0` e abra o endereço copiado no computador onde a tela está.
 
 ## 3. Usar
 

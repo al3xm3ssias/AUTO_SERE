@@ -181,15 +181,22 @@ def _oauth(caminho_cred: Path, escopos: list[str], interativo: bool, arquivo_tok
             "(Primeira execução → Google API, ou Automações → Planilha no Google Sheets) e repita.")
 
     from google_auth_oauthlib.flow import InstalledAppFlow
+    from . import google_oauth_navegador as navegador
     fluxo = InstalledAppFlow.from_client_secrets_file(str(caminho_cred), escopos)
     abrir = _abrir_navegador()
+    conta = navegador.parametros_da_conta()
     print("Autorização do Google: " + ("o navegador vai abrir; entre na sua conta e clique em Permitir."
                                         if abrir else "abra o endereço mostrado abaixo no navegador e clique em Permitir."))
+    if conta.get("login_hint"):
+        print(f"   Conta esperada: {conta['login_hint']}")
     try:
-        creds = fluxo.run_local_server(
-            port=0, open_browser=abrir, timeout_seconds=TEMPO_MAXIMO_AUTORIZACAO_S,
-            authorization_prompt_message="Endereço de autorização: {url}",
-            success_message="Autorização concluída. Pode fechar esta aba e voltar ao AUTO SERE.")
+        # A biblioteca sempre "abre o navegador" que lhe damos (open_browser=True): quem decide se abre mesmo, em qual
+        # navegador/perfil e se copia o endereço é o NavegadorAutorizacao (google_oauth_navegador.py), conforme o .env.
+        with navegador.navegador_de_autorizacao(abrir):
+            creds = fluxo.run_local_server(
+                port=0, open_browser=True, browser=navegador.NOME_REGISTRADO, timeout_seconds=TEMPO_MAXIMO_AUTORIZACAO_S,
+                authorization_prompt_message="Endereço de autorização: {url}",
+                success_message="Autorização concluída. Pode fechar esta aba e voltar ao AUTO SERE.", **conta)
     except Exception as exc:                                              # noqa: BLE001 — a mensagem do Google pode ter detalhes
         raise CredenciaisGoogleErro(f"A autorização do Google não foi concluída ({type(exc).__name__}). Tente de novo.") from None
     if not creds:
