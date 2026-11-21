@@ -358,10 +358,16 @@ async def _selecionar_periodo(page, periodo, analise=False) -> bool:
 CHAVE_VINCULO = "vinculo_base_abc"      # gravada por consulta_base_abc.py; recoletar um aluno não pode apagá-la
 
 
+CHAVE_ID_MATRICULA = "id_matricula"     # gravada por src.comum.matriculas.ligar_pre_matricula (liga o aluno à matrícula pelo CGM)
+
+
 def _herdar_vinculo(antigo, novo) -> None:
-    """Leva o vínculo da Base ABC do registro antigo para o novo (a coleta troca o registro inteiro)."""
-    if isinstance(antigo, dict) and isinstance(novo, dict) and antigo.get(CHAVE_VINCULO) and CHAVE_VINCULO not in novo:
-        novo[CHAVE_VINCULO] = antigo[CHAVE_VINCULO]
+    """Leva o vínculo da Base ABC e a ligação com a matrícula do registro antigo para o novo (a coleta troca o registro inteiro)."""
+    if not (isinstance(antigo, dict) and isinstance(novo, dict)):
+        return
+    for chave in (CHAVE_VINCULO, CHAVE_ID_MATRICULA):
+        if antigo.get(chave) and chave not in novo:
+            novo[chave] = antigo[chave]
 
 
 def _base_vazia() -> dict:

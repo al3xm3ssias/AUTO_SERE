@@ -46,6 +46,14 @@ SEGURANÇA
     - Só grava quando algo mudou.
 
 Funções puras (aplicar_coleta) não dependem de Playwright nem de credenciais.
+
+QUEM USA O ID (2026-11-20)
+    Transferidos: cada registro de transferidos.json (e cada item de ciclos_anteriores) guarda o `id_matricula` do período
+    da saída; o ID, e não mais a data, decide se a saída é a mesma (data corrigida no SERE) ou outra (volta e nova saída).
+    Base ABC: a consulta de um transferido leva o ID e só grava o vínculo no registro se ele ainda for o da MESMA saída.
+    Pré-matrícula: o aluno da pré-matrícula só tem CPF; quando a Consulta na Base ABC lhe dá um CGM e ele aparece
+    matriculado em turmas.json, `ligar_pre_matricula` grava `id_matricula` no cadastro dele (nunca o CPF na ponte). Assim
+    a pessoa fica ligada do cadastro à matrícula e, depois, à transferência, sempre pelo mesmo ID.
 """
 
 from __future__ import annotations
@@ -487,6 +495,127 @@ def registrar_matriculas_sem_falhar(turmas: dict, dados_dir, ano=None, enriquece
     return None
 
 
+# ─────────────────────────── ligação com a pré-matrícula (por CGM) ───────────────────────────
+
+CAMPO_PRE_MATRICULA = "id_matricula"          # gravado no cadastro/item da pré-matrícula
+CAMPO_ORIGEM = "pre_matricula"                # gravado no período da ponte: {"arquivo", "ligado_em"} (sem CPF)
+
+
+def _arquivos_pre_matricula(ano: str) -> list[str]:
+    from src.comum import previsao as _previsao
+    nomes = ["pre_matricula.json"]
+    try:
+        nomes.append(_previsao.nome_arquivo(int(ano)))
+    except (TypeError, ValueError):
+        pass
+    return nomes
+
+
+def _itens_pre_matricula(dados: dict) -> Iterator[dict]:
+    """Cadastros (por CPF) e itens da fila de turmas_intencao do pre_matricula.json / previsao_alunos_<ano>.json."""
+    cadastros = dados.get("cadastros")
+    for c in (cadastros.values() if isinstance(cadastros, dict) else []):
+        if isinstance(c, dict):
+            yield c
+    turmas = dados.get("turmas_intencao")
+    for lista in (turmas.values() if isinstance(turmas, dict) else []):
+        for item in lista if isinstance(lista, list) else []:
+            if isinstance(item, dict) and not item.get("substituido_por_nova_tentativa"):
+                yield item
+
+
+def _cgm_do_vinculo(item: dict) -> str:
+    """CGM que a Consulta na Base ABC achou para o aluno. Só vale com vínculo "ok": o duvidoso nunca liga ninguém."""
+    v = item.get("vinculo_base_abc")
+    if not isinstance(v, dict) or v.get("status") != "ok":
+        return ""
+    cgm = str(v.get("cgm") or "").strip()
+    return cgm if cgm.isdigit() else ""
+
+
+def _mais_antiga(periodos: list[dict]) -> dict:
+    return min(periodos, key=lambda m: parse_data(m.get("data_matricula") or m.get("data_saida") or "") or date.max)
+
+
+def ligar_pre_matricula(dados_dir, ano=None) -> dict:
+    """
+    Liga o aluno da pré-matrícula (que só tinha CPF) à matrícula dele na escola, agora que ganhou CGM.
+
+    Para cada cadastro/item de pre_matricula.json e previsao_alunos_<ano>.json com vínculo da Base ABC "ok" e CGM, procura
+    os períodos desse CGM na ponte. Achando, grava `id_matricula` no cadastro (e `pre_matricula: {arquivo, ligado_em}` no
+    período, sem CPF). Regras: nunca decide no escuro (vínculo duvidoso não liga); ligação existente e ainda válida nunca é
+    trocada; se o CGM tem mais de um período (saiu e voltou), liga o MAIS ANTIGO (a matrícula que a pré-matrícula gerou) e
+    conta em `mais_de_um_periodo`; só o campo `id_matricula` é tocado nos arquivos da pré-matrícula, e só se algo mudou.
+    Sem ponte, não faz nada. Devolve {ligados, reparados, ja_ligados, sem_matricula, mais_de_um_periodo, ilegiveis}.
+    """
+    r = Counter()
+    if not caminho(dados_dir).exists():
+        return dict(r)
+    pasta = Path(dados_dir)
+    with _trava(dados_dir):
+        estado = carregar(dados_dir, ano)
+        por_cgm: dict[str, list[dict]] = defaultdict(list)
+        for m in estado["matriculas"]:
+            if m.get("cgm"):
+                por_cgm[m["cgm"]].append(m)
+        ids_validos = {m["id"] for m in estado["matriculas"]}
+        agora, marcou_ponte = _agora(), False
+        for nome_arq in _arquivos_pre_matricula(estado["ano"]):
+            arquivo = pasta / nome_arq
+            if not arquivo.exists():
+                continue
+            try:
+                dados = carregar_json(arquivo, dict, dict)
+            except ArquivoJsonCorrompidoError:
+                r["ilegiveis"] += 1                         # nunca sobrescreve um arquivo que não leu
+                continue
+            mudou = False
+            for item in _itens_pre_matricula(dados):
+                cgm = _cgm_do_vinculo(item)
+                if not cgm:
+                    continue
+                atual = str(item.get(CAMPO_PRE_MATRICULA) or "")
+                if atual and atual in ids_validos:
+                    r["ja_ligados"] += 1
+                    continue
+                periodos = por_cgm.get(cgm)
+                if not periodos:
+                    r["sem_matricula"] += 1
+                    continue
+                if len(periodos) > 1:
+                    r["mais_de_um_periodo"] += 1
+                alvo = _mais_antiga(periodos)
+                item[CAMPO_PRE_MATRICULA] = alvo["id"]
+                r["reparados" if atual else "ligados"] += 1
+                mudou = True
+                if not isinstance(alvo.get(CAMPO_ORIGEM), dict):
+                    alvo[CAMPO_ORIGEM] = {"arquivo": nome_arq, "ligado_em": agora}
+                    alvo["atualizado_em"] = agora
+                    marcou_ponte = True
+            if mudou:
+                salvar_json_atomico(arquivo, dados, indent=2)
+        if marcou_ponte:
+            _salvar(dados_dir, estado)
+    return dict(r)
+
+
+def ligar_pre_matricula_sem_falhar(dados_dir, ano=None) -> Optional[dict]:
+    """Gancho (depois da coleta de turmas e da Consulta na Base ABC). NUNCA levanta exceção."""
+    try:
+        r = ligar_pre_matricula(dados_dir, ano)
+        if r.get("ligados") or r.get("reparados"):
+            logger.info("Pré-matrícula ligada à matrícula pelo CGM: %s", r)
+        if r.get("mais_de_um_periodo"):
+            logger.warning("%s aluno(s) da pré-matrícula têm mais de um período na escola: ligado o mais antigo.",
+                           r["mais_de_um_periodo"])
+        return r
+    except MatriculasCorrompidasError as e:
+        logger.error("Ponte de matrículas ilegível, pré-matrícula não ligada: %s", e)
+    except Exception as e:  # noqa: BLE001 — não derruba a coleta nem a consulta
+        logger.error("Falha ao ligar a pré-matrícula às matrículas (nada foi perdido): %s", e)
+    return None
+
+
 # ─────────────────────────────── conferência manual ───────────────────────────────
 
 def a_conferir(dados_dir) -> list[dict]:
@@ -548,6 +677,8 @@ def _cli(argv=None) -> int:
     ap.add_argument("--ano", help="ano letivo (padrão: o ano em uso)")
     ap.add_argument("--semear", action="store_true", help="reaplica os turmas.json dos backups do ano; só ANTES da primeira coleta (ponte vazia)")
     ap.add_argument("--verificar", action="store_true", help="lista só as matrículas a conferir")
+    ap.add_argument("--ligar-pre-matricula", action="store_true",
+                    help="liga ao ID da matrícula (pelo CGM) os alunos da pré-matrícula que já ganharam CGM")
     ap.add_argument("--conferido", metavar="ID", help="marca uma matrícula como conferida")
     ap.add_argument("--nota", default="", help="nota ao marcar como conferida")
     args = ap.parse_args(argv)
@@ -559,6 +690,10 @@ def _cli(argv=None) -> int:
         ok = conferir(dados_dir, args.conferido, args.nota)
         print("Conferido." if ok else f"ID {args.conferido} não encontrado.")
         return 0 if ok else 1
+
+    if args.ligar_pre_matricula:
+        print("Pré-matrícula ligada:", ligar_pre_matricula(dados_dir, ano) or "nada a ligar (sem ponte ou sem CGM)")
+        return 0
 
     if not args.verificar:
         if args.semear:

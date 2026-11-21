@@ -1,0 +1,1498 @@
+diff -u -r -x __pycache__ -x .pytest_cache -x logs -x node_modules -x package.json -x package-lock.json -x dados.json /tmp/orig/AUTO_SERE/src/automacao/avisos.py ./src/automacao/avisos.py
+--- /tmp/orig/AUTO_SERE/src/automacao/avisos.py	2026-11-16 07:58:36.000000000 +0000
++++ ./src/automacao/avisos.py	2026-11-21 17:16:06.312108520 +0000
+@@ -15,6 +15,11 @@
+                 da Base ABC gravado em pre_matricula.json / previsao_alunos_<ano+1>.json). Só entra quem tem vínculo "ok"
+                 com CGM e escola, cuja escola está na lista e tem e-mail (vai o primeiro). O resto fica numa lista de
+                 "não recebem" (sem vínculo, a verificar, origem fora da lista, já na nossa escola, escola sem e-mail).
++  destino   escola de DESTINO dos alunos transferidos (2026-11-19): um e-mail por aluno que SAIU, para a escola para onde ele foi
++            (vínculo da Base ABC gravado em transferidos.json, ou o destino preenchido à mão na tela de Transferidos),
++            avisando que histórico, guia e parecer estão na pasta do aluno e seguem em ANEXO neste e-mail. Só entra quem tem
++            os três arquivos da saída atual, a escola na lista de e-mails e o aviso "automático" (quem foi marcado como
++            "encaminhado por e-mail à parte" ou "não avisar automaticamente" fica de fora). Veja destino_transferidos.py.
+   pais      responsáveis dos alunos novos, um e-mail por e-mail distinto: quem tem mais de um filho recebe UMA mensagem.
+             Quem entra: matriculados (padrão), aguardando vaga ou ambos; nunca cancelados nem tentativas antigas
+             substituídas (BUG-PRE-002).
+@@ -38,6 +43,7 @@
+ MARCADORES na mensagem e no assunto ($MARCADOR; um desconhecido é recusado antes de qualquer envio):
+   todos     $ESCOLA (nome da nossa escola)  $ANO  $DATA
+   escolas   $ESCOLA_DESTINO (escola que recebe)  $ALUNO  $CGM  $SERIE (série na escola de origem)  $TURMA (turma pretendida aqui)
++  destino   $ESCOLA_DESTINO (escola para onde o aluno foi)  $ALUNO  $CGM  $TURMA (turma dele aqui)  $DATA_SAIDA (data da transferência)
+   pais      $RESPONSAVEL  $ALUNO (nomes unidos por " e ")  $TURMA (turmas unidas por " e ")
+ 
+ Os modelos de mensagem (tipo de mensagem na tela) ficam em src/comum/modelos_avisos.py.
+@@ -56,13 +62,15 @@
+ from typing import Optional
+ 
+ from src.comum import credenciais, escola, paths, previsao
++from src.comum import destino_transferidos as destino_tf
+ from src.comum.arquivos_json import ArquivoJsonCorrompidoError, carregar_json, salvar_json_atomico
+ from src.comum.execucao_gui import verificar_cancelamento
+ from src.comum.logger import get_logger
+ 
+ log = get_logger(__file__)
+ 
+-PUBLICOS = {"escolas": "Escolas e CMEIs de Ponta Grossa", "pais": "Pais de alunos novos (pré-matrícula)"}
++PUBLICOS = {"escolas": "Escolas e CMEIs de Ponta Grossa", "pais": "Pais de alunos novos (pré-matrícula)",
++            "destino": "Escola de destino dos alunos transferidos"}
+ CANAIS = {"email": "E-mail"}
+ MODOS = {"simular": "Simular (não envia nada)", "teste": "Teste (envia só para o e-mail de teste)",
+          "enviar": "Enviar de verdade (para os destinatários reais)"}
+@@ -76,11 +84,13 @@
+     # ALUNO/CGM/SERIE/TURMA: usados num texto para a escola de ORIGEM do aluno que chega (um e-mail por aluno)
+     "escolas": ("ESCOLA_DESTINO", "ALUNO", "CGM", "SERIE", "TURMA"),
+     "pais": ("RESPONSAVEL", "ALUNO", "TURMA"),
++    # um e-mail por aluno transferido, para a escola para onde ele foi; os documentos seguem em anexo
++    "destino": ("ESCOLA_DESTINO", "ALUNO", "CGM", "TURMA", "DATA_SAIDA"),
+ }
+ # Escola FICTÍCIA usada no modo teste do público "escolas" (pedido do usuário, 20/10/2026): o e-mail de teste
+ # chega a esta caixa de verdade, com o texto montado como uma escola real o receberia.
+ ESCOLA_TESTE = {"nome": "ESCOLA MUNICIPAL TESTE DA SILVA", "email": "claudioalex16@gmail.com"}
+-MARCADORES_DE_ALUNO = ("ALUNO", "CGM", "SERIE", "TURMA")      # no público escolas, quem usa vira "um e-mail por aluno"
++MARCADORES_DE_ALUNO = ("ALUNO", "CGM", "SERIE", "TURMA", "DATA_SAIDA")      # no público escolas, quem usa vira "um e-mail por aluno"
+ LIMITE_ASSUNTO = 200
+ LIMITE_MENSAGEM = 20000
+ LINHAS_LISTADAS = 60
+@@ -358,10 +368,16 @@
+     return origem, serie, False
+ 
+ 
++def posicao_do_aluno(aluno: dict) -> Optional[int]:
++    """Posição do aluno na lista da turma (coluna "pos" que a coleta da pré-matrícula guarda: "3", "3º"...). None se não vier."""
++    m = re.search(r"\d+", str(aluno.get("pos") or ""))
++    return int(m.group()) if m else None
++
++
+ def listar_alunos_novos(situacao: str = "matriculados", fonte: str = "ano") -> list[dict]:
+     """
+-    Os alunos novos para a tela escolher: [{id, nome, turma, serie, fonte, estado, cgm, escola_origem, na_nossa_escola, motivo}],
+-    por nome. `escola_origem`/`serie` são as de quem receberia o pedido (a escola anterior, se o aluno já entrou aqui).
++    Os alunos novos para a tela escolher: [{id, nome, turma, pos, serie, fonte, estado, cgm, escola_origem, na_nossa_escola, motivo}],
++    por nome. `pos` é a posição na lista da turma (int ou None): a tela usa para marcar uma faixa, ex.: do 1º ao 5º da turma. `escola_origem`/`serie` são as de quem receberia o pedido (a escola anterior, se o aluno já entrou aqui).
+     `estado`: "ok" (vínculo da Base ABC com CGM e escola), "verificar" (vínculo incompleto) ou "sem_vinculo" (a Consulta na
+     Base ABC ainda não achou/gravou o aluno). Mostra quem já está pronto para um texto com $CGM e $SERIE.
+     """
+@@ -376,7 +392,7 @@
+             turma_limpa = _uma_linha(str(turma).replace(" do Ensino Fundamental", ""))
+             origem, serie, ja_aqui = _origem_e_serie(v, propria, turma_limpa)
+             saida.append({"id": id_do_aluno(a), "nome": _uma_linha(a.get("nome") or cad.get("nome_aluno")),
+-                          "turma": turma_limpa, "serie": serie, "fonte": rotulo, "estado": estado, "cgm": cgm,
++                          "turma": turma_limpa, "pos": posicao_do_aluno(a), "serie": serie, "fonte": rotulo, "estado": estado, "cgm": cgm,
+                           "escola_origem": origem, "na_nossa_escola": bool(v) and ja_aqui, "motivo": _uma_linha(v.get("motivo"))})
+     return sorted(saida, key=lambda x: _sem_acento(x["nome"]))
+ 
+@@ -484,12 +500,156 @@
+     return r
+ 
+ 
++# ───────────── público: escola de DESTINO dos transferidos (um e-mail por aluno, com os documentos em anexo) ─────────────
++
++def _documentos_do_aviso(reg: dict) -> dict:
++    return destino_tf.documentos_do_aluno(reg, paths.dados_ano_atual())
++
++
++def arquivo_transferidos() -> Path:
++    return paths.dados_ano_atual() / destino_tf.NOME_ARQUIVO
++
++
++def _carregar_transferidos() -> dict:
++    """transferidos.json ({CGM: registro}). ValueError com mensagem pronta se não existe ou está ilegível."""
++    caminho = arquivo_transferidos()
++    if not caminho.exists():
++        raise ValueError(f"Ainda não existe {caminho.name}: rode a coleta de turmas (ela monta a fila de transferidos).")
++    try:
++        return carregar_json(caminho, dict, dict)
++    except ArquivoJsonCorrompidoError as exc:
++        raise ValueError(str(exc)) from exc
++
++
++def _quem_saiu(cgm: str, reg: dict) -> str:
++    return f"{_uma_linha(reg.get('nome')) or 'CGM ' + cgm} ({_uma_linha(reg.get('turma')) or 'sem turma'})"
++
++
++def listar_transferidos_para_aviso() -> list[dict]:
++    """
++    Os transferidos que ainda estão fora da escola, com o destino resolvido, para a tela e a prévia:
++    [{id (CGM), nome, turma, escola_destino, fonte, status_aviso, consulta, documentos_faltando}], por nome.
++    """
++    saida = []
++    for cgm, reg in _carregar_transferidos().items():
++        if not isinstance(reg, dict) or reg.get("retorno"):
++            continue
++        d = destino_tf.resolver_destino(reg)
++        faltando = _documentos_do_aviso(reg)["faltando"]
++        estado, selo = _estado_do_transferido(d, faltando)
++        saida.append({"id": str(cgm), "nome": _uma_linha(reg.get("nome")), "turma": _uma_linha(reg.get("turma")),
++                      "escola_destino": d["escola"], "fonte": d["fonte"], "status_aviso": d["status_aviso"],
++                      "consulta": d["consulta"], "documentos_faltando": faltando, "estado": estado, "selo": selo})
++    return sorted(saida, key=lambda x: _sem_acento(x["nome"]))
++
++
++def _estado_do_transferido(d: dict, faltando: list[str]) -> tuple[str, str]:
++    """("ok" | "verificar" | "sem_vinculo" | "dispensado", texto do selo) de um transferido, para o seletor da tela."""
++    if d["status_aviso"] == "encaminhado":
++        return "dispensado", "encaminhado por e-mail à parte (não recebe pelo sistema)"
++    if d["status_aviso"] == "nao_avisar":
++        return "dispensado", "marcado para não avisar automaticamente"
++    if not d["escola"]:
++        if d["consulta"] == "verificar":
++            return "verificar", "vínculo da Base ABC a verificar" + (f": {d['motivo']}" if d["motivo"] else "")
++        return "sem_vinculo", "sem escola de destino (rode a Consulta na Base ABC ou preencha na tela de Transferidos)"
++    origem = "preenchido à mão" if d["fonte"] == "manual" else "Base ABC"
++    if faltando:
++        return "verificar", f"{d['escola']} ({origem}) · faltam documentos: " + "; ".join(faltando)
++    return "ok", f"{d['escola']} ({origem}) · guia, histórico e parecer prontos"
++
++
++def avisos_ja_enviados_ao_destino() -> dict:
++    """
++    Do que já saiu de verdade para escolas de destino: {(CGM, data da saída): {...}} e, quando o envio guardou o ID da
++    matrícula, também {("id", ID): {...}} (o ID resiste a uma data corrigida no SERE). {} se o registro estiver ilegível.
++    """
++    try:
++        enviados = carregar_enviados()
++    except ValueError:
++        return {}
++    saida = {}
++    for e in enviados.values():
++        if isinstance(e, dict) and e.get("cgm"):
++            dados = {"enviado_em": e.get("enviado_em"), "para": e.get("para"), "nome": e.get("nome")}
++            saida[(str(e["cgm"]), str(e.get("data_saida") or ""))] = dados
++            if e.get("id_matricula"):
++                saida[("id", str(e["id_matricula"]))] = dados
++    return saida
++
++
++def destinatarios_destino_transferidos(tipo: str = "todas", filtro_nome: str = "", unidades=None, alunos=None) -> dict:
++    """
++    Um destinatário POR ALUNO transferido: a escola de destino dele, com o e-mail da lista coletada (o primeiro, se a escola
++    tem mais de um) e os 3 documentos da saída atual em `anexos`.
++
++    Devolve {"destinatarios", "sem_email", "alunos", "sem_destino", "a_verificar", "destino_fora_da_lista", "encaminhados",
++    "nao_avisar", "sem_documentos", "fora_da_selecao"}. Só recebe quem fecha TUDO; o resto vai numa dessas listas e NÃO recebe
++    e-mail, para ninguém avisar a escola errada nem mandar a saída errada. Quem voltou à escola nem entra na contagem.
++    `alunos` = CGMs marcados (nenhum = todos); `unidades`/`tipo`/`filtro_nome` filtram pela escola de DESTINO.
++    """
++    escolhidas = normalizar_unidades(unidades)
++    marcados = set(_itens_unidades(alunos)) or None
++    filtro = _sem_acento(filtro_nome).strip()
++    propria = escola.nome()
++    lista = [{"nome": _uma_linha(e.get("nome")), "eh_cmei": _eh_cmei(e), "emails": extrair_emails(e.get("email"))}
++             for e in carregar_escolas() if _uma_linha(e.get("nome"))]
++    r = {"destinatarios": [], "sem_email": [], "alunos": 0, "sem_destino": [], "a_verificar": [], "destino_fora_da_lista": [],
++         "encaminhados": [], "nao_avisar": [], "sem_documentos": [], "fora_da_selecao": 0}
++    for cgm, reg in sorted(_carregar_transferidos().items(), key=lambda kv: _sem_acento(str((kv[1] or {}).get("nome") if isinstance(kv[1], dict) else ""))):
++        if not isinstance(reg, dict) or reg.get("retorno"):
++            continue
++        cgm = str(cgm)
++        if marcados and cgm not in marcados:
++            continue
++        r["alunos"] += 1
++        quem = _quem_saiu(cgm, reg)
++        d = destino_tf.resolver_destino(reg)
++        if d["status_aviso"] == "encaminhado":
++            r["encaminhados"].append(quem)
++            continue
++        if d["status_aviso"] == "nao_avisar":
++            r["nao_avisar"].append(quem)
++            continue
++        if not d["escola"]:
++            if d["consulta"] == "verificar":
++                r["a_verificar"].append(f"{quem} — {d['motivo'] or 'vínculo incompleto'}")
++            else:
++                r["sem_destino"].append(quem)
++            continue
++        if propria and _e_a_propria_escola(d["escola"], propria):       # o vínculo aponta para a NOSSA escola: não é destino
++            r["a_verificar"].append(f"{quem} — o vínculo aponta para a nossa própria escola ({d['escola']}); preencha o destino à mão")
++            continue
++        un = _achar_unidade(d["escola"], lista)
++        if un is None:
++            r["destino_fora_da_lista"].append(f"{quem} — {d['escola']}")
++            continue
++        if ((tipo == "cmeis" and not un["eh_cmei"]) or (tipo == "escolas" and un["eh_cmei"])
++                or (filtro and filtro not in _sem_acento(un["nome"]))
++                or not _unidade_escolhida(un["nome"], un["eh_cmei"], escolhidas)):
++            r["fora_da_selecao"] += 1
++            continue
++        if not un["emails"]:
++            r["sem_email"].append(f"{un['nome']} (aluno {_uma_linha(reg.get('nome'))})")
++            continue
++        docs = _documentos_do_aviso(reg)
++        if docs["faltando"]:
++            r["sem_documentos"].append(f"{quem} — " + "; ".join(docs["faltando"]))
++            continue
++        r["destinatarios"].append({
++            "nome": un["nome"], "email": un["emails"][0], "cgm": cgm, "id_matricula": str(reg.get("id_matricula") or ""),
++            "anexos": [str(docs["guia"]), str(docs["historico"]), str(docs["parecer"])],
++            "contexto": {"ESCOLA_DESTINO": un["nome"], "ALUNO": _uma_linha(reg.get("nome")), "CGM": cgm,
++                         "TURMA": _uma_linha(reg.get("turma")), "DATA_SAIDA": _uma_linha(reg.get("data_transferencia"))}})
++    return r
++
++
+ # ───────────────────────────── texto: marcadores ─────────────────────────────
+ 
+ def marcadores_validos(publico: str) -> tuple[str, ...]:
+     """Marcadores que valem para o público. Público em branco (modelo para qualquer público) = os dos dois."""
+     if not publico:
+-        return tuple(dict.fromkeys(MARCADORES["comuns"] + MARCADORES["escolas"] + MARCADORES["pais"]))
++        return tuple(dict.fromkeys(MARCADORES["comuns"] + MARCADORES["escolas"] + MARCADORES["pais"] + MARCADORES["destino"]))
+     return MARCADORES["comuns"] + MARCADORES[publico]
+ 
+ 
+@@ -537,7 +697,7 @@
+     """Confere TUDO antes de qualquer envio. ValueError com mensagem pronta; devolve os parâmetros já normalizados."""
+     publico, canal, modo = str(publico or ""), str(canal or "email"), str(modo or "simular")
+     if publico not in PUBLICOS:
+-        raise ValueError("Escolha para quem é o comunicado (escolas ou pais).")
++        raise ValueError("Escolha para quem é o comunicado (escolas, pais ou escola de destino dos transferidos).")
+     if canal not in CANAIS:
+         raise ValueError(f"Canal '{canal}' ainda não existe. Por enquanto só: " + ", ".join(CANAIS) + ".")
+     if modo not in MODOS:
+@@ -555,7 +715,7 @@
+         raise ValueError(f"A mensagem passa de {LIMITE_MENSAGEM} caracteres.")
+     conferir_marcadores(assunto, publico, "Assunto")
+     conferir_marcadores(mensagem, publico, "Mensagem")
+-    if publico == "escolas" and str(tipo_escola or "todas") not in TIPOS_ESCOLA:
++    if publico in ("escolas", "destino") and str(tipo_escola or "todas") not in TIPOS_ESCOLA:
+         raise ValueError("Tipo de escola inválido: use todas, escolas ou cmeis.")
+     if str(situacao_pais or "matriculados") not in SITUACOES_PAIS:
+         raise ValueError("Situação inválida: use matriculados, aguardando ou ambos.")
+@@ -564,7 +724,7 @@
+     normalizar_unidades(unidades)                   # recusa grupo desconhecido
+     if "ESCOLA" in set(_RE_MARCADOR.findall(assunto)) | set(_RE_MARCADOR.findall(mensagem)) and not escola.nome():
+         raise ValueError("O texto usa $ESCOLA, mas o nome da escola ainda não foi informado (Configurações → Dados da escola).")
+-    por_aluno = publico == "escolas" and bool(_marcadores_de_aluno(assunto + " " + mensagem))
++    por_aluno = publico == "destino" or (publico == "escolas" and bool(_marcadores_de_aluno(assunto + " " + mensagem)))
+     intervalo = _inteiro_entre(intervalo_s, INTERVALO_MIN_S, INTERVALO_MAX_S, INTERVALO_PADRAO_S, "Intervalo entre e-mails (segundos)")
+     lote = _inteiro_entre(limite_lote, LOTE_MIN, LOTE_MAX, LOTE_PADRAO, "Máximo de e-mails por execução")
+     email_teste = str(email_teste or "").strip().lower()
+@@ -572,7 +732,7 @@
+         raise ValueError(("Para o modo teste" if modo == "teste" else "Para enviar")
+                          + ", salve o e-mail e a senha de app do Gmail em Configurações → Senha do Gmail.")
+     if modo == "teste":
+-        padrao = ESCOLA_TESTE["email"] if publico == "escolas" else str(credenciais.EMAIL_REMETENTE).strip()
++        padrao = ESCOLA_TESTE["email"] if publico in ("escolas", "destino") else str(credenciais.EMAIL_REMETENTE).strip()
+         email_teste = email_teste or padrao.lower()
+         if not email_valido(email_teste):
+             raise ValueError("O e-mail de teste não parece um endereço válido.")
+@@ -586,7 +746,7 @@
+ 
+ def teste_com_escola_ficticia(publico: str, modo: str) -> bool:
+     """No modo teste das escolas o e-mail vai para a escola fictícia; a lista real é opcional."""
+-    return modo == "teste" and publico == "escolas"
++    return modo == "teste" and publico in ("escolas", "destino")
+ 
+ 
+ def _por_que_nao_ha_alunos(r: dict) -> str:
+@@ -607,8 +767,30 @@
+     return motivo
+ 
+ 
++def _por_que_nao_ha_transferidos(r: dict) -> str:
++    partes = []
++    for chave, texto in (("sem_destino", "sem escola de destino (rode a 'Consulta na Base ABC' com os transferidos ou preencha o destino na tela de Transferidos)"),
++                         ("a_verificar", "com o vínculo da Base ABC a verificar"),
++                         ("destino_fora_da_lista", "com destino fora da lista de escolas (marque como encaminhado à parte, se for o caso)"),
++                         ("encaminhados", "marcados como encaminhados por e-mail à parte"),
++                         ("nao_avisar", "marcados para não avisar automaticamente"),
++                         ("sem_email", "cuja escola de destino está sem e-mail"),
++                         ("sem_documentos", "sem os três documentos (guia, histórico e parecer) desta saída")):
++        if r.get(chave):
++            partes.append(f"{len(r[chave])} {texto}")
++    if r.get("fora_da_selecao"):
++        partes.append(f"{r['fora_da_selecao']} fora das unidades escolhidas")
++    return ("Nenhum transferido com escola de destino, e-mail e documentos para este pedido"
++            + (f" ({r['alunos']} transferido(s) lido(s)" + (": " + "; ".join(partes) if partes else "") + ")" if r.get("alunos") else "") + ".")
++
++
+ def reunir_destinatarios(publico: str, tipo_escola="todas", filtro_nome="", situacao_pais="matriculados",
+                          unidades=None, fonte="ano", por_aluno=False, alunos=None) -> dict:
++    if publico == "destino":
++        r = destinatarios_destino_transferidos(tipo_escola, filtro_nome, unidades, alunos)
++        if not r["destinatarios"]:
++            raise ValueError(_por_que_nao_ha_transferidos(r))
++        return r
+     if publico == "escolas" and por_aluno:
+         r = destinatarios_alunos_origem(situacao_pais, fonte, tipo_escola, filtro_nome, unidades, alunos)
+         if not r["destinatarios"]:
+@@ -636,7 +818,7 @@
+     try:
+         conferir_marcadores(assunto, publico, "Assunto")
+         conferir_marcadores(mensagem, publico, "Mensagem")
+-        por_aluno = publico == "escolas" and bool(_marcadores_de_aluno(assunto + " " + mensagem))
++        por_aluno = publico == "destino" or (publico == "escolas" and bool(_marcadores_de_aluno(assunto + " " + mensagem)))
+     except ValueError as exc:
+         return {"aviso": str(exc)}
+     try:
+@@ -647,6 +829,20 @@
+                 "total": len(r["destinatarios"])}
+     except ValueError as exc:
+         aviso = str(exc)
++    if por_aluno and publico == "destino":
++        try:
++            marcados = set(_itens_unidades(alunos))
++            lista = [a for a in listar_transferidos_para_aviso() if not marcados or a["id"] in marcados]
++        except ValueError:
++            lista = []
++        if lista:
++            a = lista[0]
++            contexto = {"ESCOLA_DESTINO": a["escola_destino"] or "(escola de destino)", "ALUNO": a["nome"], "CGM": a["id"],
++                        "TURMA": a["turma"], "DATA_SAIDA": ""}
++            m = montar_mensagens([{"nome": contexto["ESCOLA_DESTINO"], "email": "(sem e-mail)", "contexto": contexto}],
++                                 assunto, mensagem, True)[0]
++            return {"para": "", "nome": m["nome"], "assunto": m["assunto"], "corpo": m["corpo"], "aluno": a["nome"], "total": 0,
++                    "aviso": aviso}
+     if por_aluno:                       # ninguém receberia, mas o texto ainda dá para ver com os dados do primeiro aluno
+         try:
+             marcados = set(_itens_unidades(alunos))
+@@ -680,6 +876,13 @@
+              "chave": _chave_estavel(d, assunto, mensagem)}
+         if por_aluno:
+             m["aluno"] = ctx.get("ALUNO", "")
++        if d.get("anexos"):
++            m["anexos"] = list(d["anexos"])
++        if d.get("cgm"):
++            m["cgm"] = str(d["cgm"])
++            m["data_saida"] = ctx.get("DATA_SAIDA", "")           # CGM + data separam a 1ª da 2ª saída do mesmo aluno
++            if d.get("id_matricula"):
++                m["id_matricula"] = str(d["id_matricula"])        # e o ID da saída, quando a ponte já deu um
+         mensagens.append(m)
+     return mensagens
+ 
+@@ -793,13 +996,23 @@
+         for i, m in enumerate(lote, 1):
+             verificar_cancelamento()
+             tentados.add(m["chave"])
+-            ok, erro = enviar_email(m["para"], m["assunto"], m["corpo"])
++            if m.get("anexos"):
++                ok, erro = enviar_email(m["para"], m["assunto"], m["corpo"], anexos=m["anexos"])
++            else:
++                ok, erro = enviar_email(m["para"], m["assunto"], m["corpo"])
+             if ok:
+                 seguidas = 0
+                 agora = datetime.now().isoformat(timespec="seconds")
+                 novo = {"para": m["para"], "nome": m["nome"], "assunto": m["assunto"], "enviado_em": agora}
+                 if m.get("aluno"):
+                     novo["aluno"] = m["aluno"]
++                if m.get("cgm"):
++                    novo["cgm"] = m["cgm"]
++                    novo["data_saida"] = m.get("data_saida", "")
++                    if m.get("id_matricula"):
++                        novo["id_matricula"] = m["id_matricula"]
++                if m.get("anexos"):
++                    novo["anexos"] = [Path(a).name for a in m["anexos"]]
+                 enviados_antes[m["chave"]] = novo
+                 salvar_json_atomico(_arquivo_enviados(), {"envios": enviados_antes}, indent=2)    # grava ANTES de seguir
+                 enviados.append(novo)
+@@ -863,7 +1076,9 @@
+     titulo_modo = {"simular": "SIMULAÇÃO — nada será enviado", "teste": "TESTE — só o e-mail de teste recebe",
+                    "enviar": "ENVIO REAL — os destinatários recebem de verdade"}[p["modo"]]
+     print(f"Comunicado oficial por e-mail | Público: {PUBLICOS[p['publico']]} | Modo: {titulo_modo}")
+-    print(f"{total} destinatário(s)" + (" (um e-mail por aluno que chega, para a escola de origem)" if p["por_aluno"] else "") + ":")
++    print(f"{total} destinatário(s)" + ((" (um e-mail por aluno transferido, para a escola de destino, com os documentos em anexo)"
++                                         if p["publico"] == "destino" else " (um e-mail por aluno que chega, para a escola de origem)")
++                                        if p["por_aluno"] else "") + ":")
+     for m in mensagens[:LINHAS_LISTADAS]:
+         print(f"  - {_rotulo_destinatario(m)}")
+     if total > LINHAS_LISTADAS:
+@@ -875,19 +1090,26 @@
+     for chave, texto in (("sem_vinculo", "Sem vínculo da Base ABC (rode a 'Consulta na Base ABC')"),
+                          ("a_verificar", "Vínculo da Base ABC a verificar (não recebem)"),
+                          ("origem_desconhecida", "Escola de origem fora da lista de escolas (não recebem)"),
+-                         ("da_propria_escola", "Já estão na nossa escola (não recebem)")):
++                         ("da_propria_escola", "Já estão na nossa escola (não recebem)"),
++                         ("sem_destino", "Transferidos sem escola de destino (não recebem; rode a Consulta na Base ABC ou preencha na tela de Transferidos)"),
++                         ("destino_fora_da_lista", "Escola de destino fora da lista de escolas (não recebem; marque como encaminhado à parte, se for o caso)"),
++                         ("encaminhados", "Marcados como encaminhados por e-mail à parte (não recebem)"),
++                         ("nao_avisar", "Marcados para não avisar automaticamente (não recebem)"),
++                         ("sem_documentos", "Sem guia, histórico ou parecer desta saída (não recebem)")):
+         if r.get(chave):
+             print(f"{texto} ({len(r[chave])}): " + "; ".join(r[chave][:LINHAS_LISTADAS]))
+     if r.get("fora_da_selecao"):
+         print(f"Fora das unidades escolhidas: {r['fora_da_selecao']} aluno(s).")
+     if aviso_lista:
+         print(f"Aviso: {aviso_lista} (o teste com a escola fictícia segue mesmo assim).")
+-    if p["publico"] == "escolas" and p["modo"] == "simular":
++    if p["publico"] in ("escolas", "destino") and p["modo"] == "simular":
+         print(f"No modo Teste, o e-mail iria para a escola fictícia {ESCOLA_TESTE['nome']} <{ESCOLA_TESTE['email']}>.")
+ 
+     if mensagens:
+         amostra = mensagens[0]
+         print(f"\nPRÉVIA — mensagem 1 de {total} (para {amostra['nome']})\nAssunto: {amostra['assunto']}\n\n{amostra['corpo']}\n")
++        if amostra.get("anexos"):
++            print("Anexos desta mensagem: " + "; ".join(Path(a).name for a in amostra["anexos"]) + "\n")
+ 
+     registro_comum = {
+         "gerado_em": datetime.now().isoformat(timespec="seconds"), "publico": p["publico"], "canal": p["canal"],
+@@ -895,7 +1117,8 @@
+             "tipo_escola": p["tipo_escola"], "filtro_nome": p["filtro_nome"], "situacao_pais": p["situacao_pais"],
+             "unidades": p["unidades"], "fonte": p["fonte"], "por_aluno": p["por_aluno"], "alunos": p["alunos"]},
+         "total": total, "sem_email": r["sem_email"], "excluidas": r.get("excluidas", []),
+-        "mensagens": [{k: v for k, v in m.items() if k != "chave"} for m in mensagens]}
++        "mensagens": [{k: ([Path(a).name for a in v] if k == "anexos" else v) for k, v in m.items() if k != "chave"}
++                      for m in mensagens]}
+ 
+     enviados_teste, erro, escola_teste = 0, None, None
+     if p["modo"] == "teste":
+@@ -909,8 +1132,11 @@
+         else:
+             exemplo = mensagens[0]
+             quem = f"{exemplo['nome']} <{exemplo['para']}>"
++        anexos_reais = (r["destinatarios"][0].get("anexos") if r["destinatarios"] else None) or []
+         faixa = (f"*** TESTE — esta mensagem NÃO foi enviada aos destinatários reais. ***\n"
+                  f"O comunicado iria para {total} destinatário(s) reais. Abaixo, o texto montado para {quem}\n"
++                 + (f"No envio real seguiriam em anexo: {', '.join(Path(a).name for a in anexos_reais)} "
++                    "(os documentos do aluno NÃO são anexados no teste).\n" if anexos_reais else "")
+                  + "-" * 60 + "\n\n")
+         print(f"Enviando o e-mail de teste para {p['email_teste']}...")
+         ok, erro = enviar_email(p["email_teste"], "[TESTE] " + exemplo["assunto"], faixa + exemplo["corpo"])
+diff -u -r -x __pycache__ -x .pytest_cache -x logs -x node_modules -x package.json -x package-lock.json -x dados.json /tmp/orig/AUTO_SERE/src/automacao/consulta_base_abc.py ./src/automacao/consulta_base_abc.py
+--- /tmp/orig/AUTO_SERE/src/automacao/consulta_base_abc.py	2026-11-16 18:59:34.000000000 +0000
++++ ./src/automacao/consulta_base_abc.py	2026-11-21 09:33:25.014782152 +0000
+@@ -146,6 +146,9 @@
+     # Onde gravar o vínculo de volta (só pré-matrícula): (arquivo, "cadastros"|"turmas_intencao", chave, turma, periodo).
+     # Fora do repr/rótulo/comparação: a chave é o CPF, que não pode aparecer em log nem entrar na deduplicação.
+     destinos: tuple = field(default=(), repr=False, compare=False)
++    # ID da matrícula (ponte turmas_relacional.json) do período que originou a consulta; hoje só os transferidos o têm (o ID
++    # da SAÍDA). Vai no vínculo e no registro e protege a gravação: se o registro de origem já é de OUTRA saída, nada é gravado.
++    id_matricula: str = field(default="", repr=False, compare=False)
+ 
+     @property
+     def rotulo(self) -> str:
+@@ -418,7 +421,7 @@
+         except ValueError:
+             nasc = None
+         saida.append(Consulta(nome=re.sub(r"\s+", " ", str(reg.get("nome") or "")).strip(), nascimento=nasc, cgm=str(cgm).strip(),
+-                              origem="transferidos",
++                              origem="transferidos", id_matricula=str(reg.get("id_matricula") or ""),
+                               destinos=((arquivo, "transferidos", str(cgm).strip(), "", PERIODO_ANO_VIGENTE),)))
+     return saida
+ 
+@@ -466,6 +469,11 @@
+             alvo = None
+             if secao == "transferidos":                      # transferidos.json é {CGM: registro}, sem seção
+                 alvo = dados.get(chave)
++                esperado = str(vinculo.get("id_matricula") or "")
++                if isinstance(alvo, dict) and esperado and alvo.get("id_matricula") and str(alvo["id_matricula"]) != esperado:
++                    log("    ⚠️  Vínculo de um transferido não gravado: o registro dele já é de OUTRA saída (o aluno saiu de novo "
++                        "depois que a consulta começou). Consulte de novo.")
++                    alvo = None
+             elif secao == "cadastros":
+                 alvo = (dados.get("cadastros") or {}).get(chave)
+             else:
+@@ -791,6 +799,8 @@
+     vinculo = {"periodo": periodo, "ano_referencia": ano_referencia, "nome": nome, "cgm": cgm, "turma": turma,
+                "escola": escola, "situacao": situacao, "status": "verificar" if motivos else "ok"}
+     vinculo.update(anterior)
++    if consulta.id_matricula:
++        vinculo["id_matricula"] = consulta.id_matricula
+     if motivos:
+         vinculo["motivo"] = "; ".join(motivos)
+     return vinculo
+@@ -817,6 +827,8 @@
+         "pedido": {"nome": consulta.nome, "data_nascimento": formatar_data(consulta.nascimento), "nome_mae": consulta.mae,
+                    "cgm": consulta.cgm, "responsavel": consulta.responsavel, "origem": consulta.origem},
+     }
++    if consulta.id_matricula:
++        registro["id_matricula"] = consulta.id_matricula
+     if encontrado:
+         registro["vinculo"] = montar_vinculo(consulta, nome_final, cgm, historico or [],
+                                              int(ano_referencia or paths.ano_atual()))
+@@ -1107,6 +1119,9 @@
+         try:
+             gravados: set = set()
+             resumo.vinculos_gravados = gravar_vinculos_pre_matricula(resumo.vinculos, ano, log, gravados_out=gravados)
++            if resumo.vinculos_gravados:                     # um CGM novo pode ligar um aluno da pré-matrícula à matrícula dele
++                from src.comum.matriculas import ligar_pre_matricula_sem_falhar
++                ligar_pre_matricula_sem_falhar(_pasta_e_ano(ano)[0])
+             if limpar_vinculados and gravados:
+                 # só sai de buscas_base.json quem teve TODOS os destinos gravados: o vínculo já está no cadastro de origem
+                 saem = [reg for reg, destinos in resumo.com_destino
+diff -u -r -x __pycache__ -x .pytest_cache -x logs -x node_modules -x package.json -x package-lock.json -x dados.json /tmp/orig/AUTO_SERE/src/automacao/fila_transferidos.py ./src/automacao/fila_transferidos.py
+--- /tmp/orig/AUTO_SERE/src/automacao/fila_transferidos.py	2026-11-18 15:12:06.000000000 +0000
++++ ./src/automacao/fila_transferidos.py	2026-11-21 09:33:23.759210826 +0000
+@@ -18,6 +18,13 @@
+   histórico e parecer novos. O registro da 1ª saída vai para `ciclos_anteriores` (nada se perde), os PDFs dela são
+   renomeados "<nome> (saída dd-mm-aaaa).pdf" para o 2º ciclo não sobrescrevê-los, e um registro novo (vazio) é criado.
+ 
++ID DA MATRÍCULA (2026-11-20)
++    Cada saída tem o `id_matricula` do período dela na ponte (src/comum/matriculas.py, turmas_relacional.json), que vem
++    do ID_MATRICULA das linhas do turmas.json. Com ID nos dois lados, ele decide: ID igual = a MESMA saída (mesmo que a
++    data tenha sido corrigida no SERE); ID diferente e data mais nova = OUTRA saída (novo ciclo). Registros antigos, sem
++    ID, seguem a regra por datas e adotam o ID na primeira coleta em que a saída é a mesma. O ciclo anterior guarda o
++    ID dela e o nome dos PDFs renomeados (`arquivos`), para os documentos ficarem ligados à saída e não ao nome do arquivo.
++
+ IDENTIDADE (decisão do usuário, 27/10/2026)
+     • Um REGISTRO (cadastro) é identificado por  nº da chamada (N) + nome + data de nascimento.
+     • Um ALUNO (pessoa) é identificado por  nome + data de nascimento.
+@@ -117,7 +124,8 @@
+             data_txt = str(a.get("Data Matricula", "")).strip()
+             reg = {"turma": turma, "n": _n(a), "cgm": cgm, "nome": nome, "nasc": nasc,
+                    "situacao": situacao, "transf": eh_transferido(situacao),
+-                   "data": parse_data(data_txt), "data_txt": data_txt}
++                   "data": parse_data(data_txt), "data_txt": data_txt,
++                   "id": str(a.get("ID_MATRICULA") or "").strip()}          # ID do período (ponte); "" em turmas.json antigo
+             id_reg = (turma, reg["n"], _norm_nome(nome), nasc, _norm_nome(situacao), data_txt)
+             if id_reg in vistos:
+                 continue
+@@ -148,10 +156,13 @@
+ 
+ 
+ def _registro_novo(nome: str, turma: str, chamada=None, nasc=None, data_transf=None,
+-                   retorno: Optional[dict] = None, anteriores: Optional[list] = None) -> dict:
++                   retorno: Optional[dict] = None, anteriores: Optional[list] = None,
++                   id_matricula: Optional[str] = None) -> dict:
+     reg = _registro_vazio(nome, turma)
+     reg.update({"chamada": chamada, "data_nascimento": nasc,
+                 "data_transferencia": data_transf, "retorno": retorno})
++    if id_matricula:
++        reg["id_matricula"] = str(id_matricula)         # só aparece quando a ponte já deu ID a esta saída
+     if anteriores:
+         reg["transferencias_anteriores"] = anteriores
+     return reg
+@@ -194,12 +205,14 @@
+             if depois:                                               # há registro posterior → voltou
+                 r = depois[0]
+                 retorno = {"chamada": r["n"], "turma": r["turma"], "data": r["data_txt"]}
+-            anteriores = [{"chamada": r["n"], "turma": r["turma"], "data": r["data_txt"]} for r in lista[:-1]]
++            anteriores = [{"chamada": r["n"], "turma": r["turma"], "data": r["data_txt"], **({"id": r["id"]} if r["id"] else {})}
++                          for r in lista[:-1]]
+             if anteriores:
+                 avisos.append(f"{principal['nome']} (CGM {cgm}): {len(lista)} transferências no ano — o registro "
+                               f"usa a mais recente; as anteriores ficam em 'transferencias_anteriores'.")
+             transferidos[cgm] = _registro_novo(principal["nome"], principal["turma"], principal["n"],
+-                                               principal["nasc"], principal["data_txt"], retorno, anteriores)
++                                               principal["nasc"], principal["data_txt"], retorno, anteriores,
++                                               principal["id"] or None)
+         if _ativo(regs):
+             retornaram += 1
+ 
+@@ -257,21 +270,30 @@
+       • Registro antigo (ou pré-corte), sem `data_transferencia`: os documentos dele foram emitidos ANTES da
+         saída atual, logo não podem ser desta saída.
+     Em qualquer caso é preciso existir uma saída anterior (`transferencias_anteriores`).
++
++    COM ID DA MATRÍCULA nos dois lados (registro e fila), o ID manda: igual = mesma saída (a data pode ter sido
++    corrigida no SERE); diferente = outra saída, desde que a data atual seja posterior à do registro (se não for, é a
++    ponte que foi refeita e deu outro ID à MESMA saída: nada se refaz). Aí não se exige a saída anterior na fila.
+     """
+     d_nova = parse_data(aluno_da_fila.get("data_transferencia") or "")
++    id_reg, id_novo = str(reg.get("id_matricula") or ""), str(aluno_da_fila.get("id_matricula") or "")
++    por_id = bool(id_reg and id_novo)
++    if por_id and id_reg == id_novo:
++        return False
+     anteriores = {parse_data(x.get("data") or "") for x in aluno_da_fila.get("transferencias_anteriores") or []} - {None}
+-    if d_nova is None or not anteriores:
++    if d_nova is None or (not anteriores and not por_id):
+         return False
+     d_reg = parse_data(reg.get("data_transferencia") or "")
+     if d_reg is not None:
+-        return d_reg < d_nova and d_reg in anteriores
++        return d_reg < d_nova and (por_id or d_reg in anteriores)
+     emissao = _ultima_emissao(reg)
+     return emissao is not None and emissao < d_nova
+ 
+ 
+-def _guardar_pdfs_do_ciclo(pasta: Path, reg: dict) -> list[str]:
++def _guardar_pdfs_do_ciclo(pasta: Path, reg: dict, mapa: Optional[dict] = None) -> list[str]:
+     """
+     Renomeia os PDFs da saída anterior (histórico e guia) para o novo ciclo não sobrescrevê-los.
++    Com `mapa`, preenche {"historico": nome novo, "guia": nome novo} para o ciclo guardar onde ficaram os documentos.
+     Levanta OSError se algum não puder ser renomeado (ex.: aberto no leitor de PDF): nesse caso o chamador
+     não inicia o novo ciclo, e a próxima execução tenta de novo.
+     """
+@@ -293,9 +315,25 @@
+             n += 1
+         origem.rename(destino)
+         renomeados.append(destino.name)
++        if mapa is not None:
++            mapa["historico" if subpasta == _pastas.HISTORICO else "guia"] = destino.name
+     return renomeados
+ 
+ 
++def _adotar_id(reg: dict, aluno_da_fila: dict) -> bool:
++    """
++    A saída é a mesma (e_nova_saida disse que não): o registro passa a guardar o ID da ponte. Registro antigo, sem ID,
++    adota o atual; se o ID mudou porque a ponte foi refeita, adota o novo e lembra o antigo. True se o registro mudou.
++    """
++    novo, atual = str(aluno_da_fila.get("id_matricula") or ""), str(reg.get("id_matricula") or "")
++    if not novo or novo == atual:
++        return False
++    if atual:
++        reg["id_matricula_anterior"] = atual
++    reg["id_matricula"] = novo
++    return True
++
++
+ def iniciar_novo_ciclo(controle: dict, cgm: str, a: dict, pasta: Path) -> str:
+     """
+     Trata a 2ª (3ª...) saída de quem já tem registro em `controle`. Devolve "atualizado" (o registro antigo
+@@ -307,15 +345,28 @@
+         antigo.update({"nome": a["nome"], "turma": a["turma"], "chamada": a["chamada"],
+                        "data_nascimento": a["data_nascimento"], "data_transferencia": a["data_transferencia"],
+                        "retorno": a["retorno"]})
++        if a.get("id_matricula"):
++            antigo["id_matricula"] = a["id_matricula"]
+         if a.get("transferencias_anteriores"):
+             antigo["transferencias_anteriores"] = a["transferencias_anteriores"]
++        descartados = {k: antigo.pop(k) for k in ("vinculo_base_abc", "destino_manual") if antigo.get(k)}
++        if descartados:                                             # era da saída anterior (sem documentos): guarda, não apaga
++            antigo["destino_anterior"] = {**descartados, "arquivado_em": _agora()}
+         return "atualizado"
+ 
+-    _guardar_pdfs_do_ciclo(pasta, antigo)                       # se falhar, nada abaixo acontece
++    arquivos: dict = {}
++    _guardar_pdfs_do_ciclo(pasta, antigo, arquivos)             # se falhar, nada abaixo acontece
+     ciclo = {k: antigo.get(k) for k in ("chamada", "turma", "data_transferencia", "retorno", "guia", "historico", "parecer")}
++    if antigo.get("id_matricula"):
++        ciclo["id_matricula"] = antigo["id_matricula"]          # a saída que este ciclo documentou
++    if arquivos:
++        ciclo["arquivos"] = arquivos                            # onde ficaram a guia e o histórico dela (já renomeados)
++    for k in ("vinculo_base_abc", "destino_manual"):               # o destino é da saída: a nova saída começa sem ele
++        if antigo.get(k):
++            ciclo[k] = antigo[k]
+     ciclo["arquivado_em"] = _agora()
+     novo = _registro_novo(a["nome"], a["turma"], a["chamada"], a["data_nascimento"], a["data_transferencia"],
+-                          a["retorno"], a.get("transferencias_anteriores"))
++                          a["retorno"], a.get("transferencias_anteriores"), a.get("id_matricula"))
+     novo["ciclos_anteriores"] = list(antigo.get("ciclos_anteriores") or []) + [ciclo]
+     controle[cgm] = novo
+     return "novo_ciclo"
+@@ -353,6 +404,8 @@
+                        "situacao_fila": situacao, "processar": situacao == SITUACAO_PROCESSAR}
+         if reg.get("transferencias_anteriores"):
+             alunos[cgm]["transferencias_anteriores"] = reg["transferencias_anteriores"]
++        if reg.get("id_matricula"):
++            alunos[cgm]["id_matricula"] = reg["id_matricula"]
+ 
+     resumo.update({"transferidos_na_fila": len(alunos),
+                    "a_processar": sum(1 for a in alunos.values() if a["processar"]),
+@@ -402,7 +455,7 @@
+             if cgm not in controle:
+                 controle[cgm] = _registro_novo(a["nome"], a["turma"], a["chamada"], a["data_nascimento"],
+                                                a["data_transferencia"], a["retorno"],
+-                                               a.get("transferencias_anteriores"))
++                                               a.get("transferencias_anteriores"), a.get("id_matricula"))
+                 novos += 1
+             elif e_nova_saida(controle[cgm], a):                       # saiu de novo: precisa de documentos novos
+                 try:
+@@ -416,6 +469,8 @@
+                     ciclos += 1
+                     avisos.append(f"{a['nome']} (CGM {cgm}): saiu de novo em {a['data_transferencia']} — novos "
+                                   f"documentos serão feitos; os da saída anterior ficaram guardados.")
++            elif _adotar_id(controle[cgm], a):                         # mesma saída: só liga o registro ao ID da ponte
++                alterou = True
+         if novos or alterou or not caminho.exists():  # o controle sempre passa a existir (vazio, se ninguém entra)
+             _gravar_json(caminho, controle)
+     imprimir_fila(fila, avisos, simulacao)
+diff -u -r -x __pycache__ -x .pytest_cache -x logs -x node_modules -x package.json -x package-lock.json -x dados.json /tmp/orig/AUTO_SERE/src/automacao/pre_matricula.py ./src/automacao/pre_matricula.py
+--- /tmp/orig/AUTO_SERE/src/automacao/pre_matricula.py	2026-11-18 21:56:10.000000000 +0000
++++ ./src/automacao/pre_matricula.py	2026-11-21 09:33:26.221551952 +0000
+@@ -358,10 +358,16 @@
+ CHAVE_VINCULO = "vinculo_base_abc"      # gravada por consulta_base_abc.py; recoletar um aluno não pode apagá-la
+ 
+ 
++CHAVE_ID_MATRICULA = "id_matricula"     # gravada por src.comum.matriculas.ligar_pre_matricula (liga o aluno à matrícula pelo CGM)
++
++
+ def _herdar_vinculo(antigo, novo) -> None:
+-    """Leva o vínculo da Base ABC do registro antigo para o novo (a coleta troca o registro inteiro)."""
+-    if isinstance(antigo, dict) and isinstance(novo, dict) and antigo.get(CHAVE_VINCULO) and CHAVE_VINCULO not in novo:
+-        novo[CHAVE_VINCULO] = antigo[CHAVE_VINCULO]
++    """Leva o vínculo da Base ABC e a ligação com a matrícula do registro antigo para o novo (a coleta troca o registro inteiro)."""
++    if not (isinstance(antigo, dict) and isinstance(novo, dict)):
++        return
++    for chave in (CHAVE_VINCULO, CHAVE_ID_MATRICULA):
++        if antigo.get(chave) and chave not in novo:
++            novo[chave] = antigo[chave]
+ 
+ 
+ def _base_vazia() -> dict:
+diff -u -r -x __pycache__ -x .pytest_cache -x logs -x node_modules -x package.json -x package-lock.json -x dados.json /tmp/orig/AUTO_SERE/src/automacao/turmas.py ./src/automacao/turmas.py
+--- /tmp/orig/AUTO_SERE/src/automacao/turmas.py	2026-11-18 12:07:00.000000000 +0000
++++ ./src/automacao/turmas.py	2026-11-21 09:30:35.062617651 +0000
+@@ -299,8 +299,9 @@
+     # período começou e terminou (o SERE só mostra UMA data; ao transferir, a de entrada some) e acrescenta
+     # ID_MATRICULA / Data Entrada / Data Transferência às linhas. "Data Matricula" NÃO muda.
+     # Nunca levanta exceção: se falhar, o turmas.json sai como sempre saiu.
+-    from src.comum.matriculas import registrar_matriculas_sem_falhar
++    from src.comum.matriculas import ligar_pre_matricula_sem_falhar, registrar_matriculas_sem_falhar
+     registrar_matriculas_sem_falhar(resultado, dados_dir=output_file.parent)
++    ligar_pre_matricula_sem_falhar(output_file.parent)           # quem da pré-matrícula já ganhou CGM e matrícula
+ 
+     log.info(f"Todas as turmas coletadas. Salvando JSON em '{output_file}'...")
+     try:
+Only in ./src/comum: destino_transferidos.py
+diff -u -r -x __pycache__ -x .pytest_cache -x logs -x node_modules -x package.json -x package-lock.json -x dados.json /tmp/orig/AUTO_SERE/src/comum/matriculas.py ./src/comum/matriculas.py
+--- /tmp/orig/AUTO_SERE/src/comum/matriculas.py	2026-11-18 17:29:34.000000000 +0000
++++ ./src/comum/matriculas.py	2026-11-21 09:33:32.269849027 +0000
+@@ -46,6 +46,14 @@
+     - Só grava quando algo mudou.
+ 
+ Funções puras (aplicar_coleta) não dependem de Playwright nem de credenciais.
++
++QUEM USA O ID (2026-11-20)
++    Transferidos: cada registro de transferidos.json (e cada item de ciclos_anteriores) guarda o `id_matricula` do período
++    da saída; o ID, e não mais a data, decide se a saída é a mesma (data corrigida no SERE) ou outra (volta e nova saída).
++    Base ABC: a consulta de um transferido leva o ID e só grava o vínculo no registro se ele ainda for o da MESMA saída.
++    Pré-matrícula: o aluno da pré-matrícula só tem CPF; quando a Consulta na Base ABC lhe dá um CGM e ele aparece
++    matriculado em turmas.json, `ligar_pre_matricula` grava `id_matricula` no cadastro dele (nunca o CPF na ponte). Assim
++    a pessoa fica ligada do cadastro à matrícula e, depois, à transferência, sempre pelo mesmo ID.
+ """
+ 
+ from __future__ import annotations
+@@ -487,6 +495,127 @@
+     return None
+ 
+ 
++# ─────────────────────────── ligação com a pré-matrícula (por CGM) ───────────────────────────
++
++CAMPO_PRE_MATRICULA = "id_matricula"          # gravado no cadastro/item da pré-matrícula
++CAMPO_ORIGEM = "pre_matricula"                # gravado no período da ponte: {"arquivo", "ligado_em"} (sem CPF)
++
++
++def _arquivos_pre_matricula(ano: str) -> list[str]:
++    from src.comum import previsao as _previsao
++    nomes = ["pre_matricula.json"]
++    try:
++        nomes.append(_previsao.nome_arquivo(int(ano)))
++    except (TypeError, ValueError):
++        pass
++    return nomes
++
++
++def _itens_pre_matricula(dados: dict) -> Iterator[dict]:
++    """Cadastros (por CPF) e itens da fila de turmas_intencao do pre_matricula.json / previsao_alunos_<ano>.json."""
++    cadastros = dados.get("cadastros")
++    for c in (cadastros.values() if isinstance(cadastros, dict) else []):
++        if isinstance(c, dict):
++            yield c
++    turmas = dados.get("turmas_intencao")
++    for lista in (turmas.values() if isinstance(turmas, dict) else []):
++        for item in lista if isinstance(lista, list) else []:
++            if isinstance(item, dict) and not item.get("substituido_por_nova_tentativa"):
++                yield item
++
++
++def _cgm_do_vinculo(item: dict) -> str:
++    """CGM que a Consulta na Base ABC achou para o aluno. Só vale com vínculo "ok": o duvidoso nunca liga ninguém."""
++    v = item.get("vinculo_base_abc")
++    if not isinstance(v, dict) or v.get("status") != "ok":
++        return ""
++    cgm = str(v.get("cgm") or "").strip()
++    return cgm if cgm.isdigit() else ""
++
++
++def _mais_antiga(periodos: list[dict]) -> dict:
++    return min(periodos, key=lambda m: parse_data(m.get("data_matricula") or m.get("data_saida") or "") or date.max)
++
++
++def ligar_pre_matricula(dados_dir, ano=None) -> dict:
++    """
++    Liga o aluno da pré-matrícula (que só tinha CPF) à matrícula dele na escola, agora que ganhou CGM.
++
++    Para cada cadastro/item de pre_matricula.json e previsao_alunos_<ano>.json com vínculo da Base ABC "ok" e CGM, procura
++    os períodos desse CGM na ponte. Achando, grava `id_matricula` no cadastro (e `pre_matricula: {arquivo, ligado_em}` no
++    período, sem CPF). Regras: nunca decide no escuro (vínculo duvidoso não liga); ligação existente e ainda válida nunca é
++    trocada; se o CGM tem mais de um período (saiu e voltou), liga o MAIS ANTIGO (a matrícula que a pré-matrícula gerou) e
++    conta em `mais_de_um_periodo`; só o campo `id_matricula` é tocado nos arquivos da pré-matrícula, e só se algo mudou.
++    Sem ponte, não faz nada. Devolve {ligados, reparados, ja_ligados, sem_matricula, mais_de_um_periodo, ilegiveis}.
++    """
++    r = Counter()
++    if not caminho(dados_dir).exists():
++        return dict(r)
++    pasta = Path(dados_dir)
++    with _trava(dados_dir):
++        estado = carregar(dados_dir, ano)
++        por_cgm: dict[str, list[dict]] = defaultdict(list)
++        for m in estado["matriculas"]:
++            if m.get("cgm"):
++                por_cgm[m["cgm"]].append(m)
++        ids_validos = {m["id"] for m in estado["matriculas"]}
++        agora, marcou_ponte = _agora(), False
++        for nome_arq in _arquivos_pre_matricula(estado["ano"]):
++            arquivo = pasta / nome_arq
++            if not arquivo.exists():
++                continue
++            try:
++                dados = carregar_json(arquivo, dict, dict)
++            except ArquivoJsonCorrompidoError:
++                r["ilegiveis"] += 1                         # nunca sobrescreve um arquivo que não leu
++                continue
++            mudou = False
++            for item in _itens_pre_matricula(dados):
++                cgm = _cgm_do_vinculo(item)
++                if not cgm:
++                    continue
++                atual = str(item.get(CAMPO_PRE_MATRICULA) or "")
++                if atual and atual in ids_validos:
++                    r["ja_ligados"] += 1
++                    continue
++                periodos = por_cgm.get(cgm)
++                if not periodos:
++                    r["sem_matricula"] += 1
++                    continue
++                if len(periodos) > 1:
++                    r["mais_de_um_periodo"] += 1
++                alvo = _mais_antiga(periodos)
++                item[CAMPO_PRE_MATRICULA] = alvo["id"]
++                r["reparados" if atual else "ligados"] += 1
++                mudou = True
++                if not isinstance(alvo.get(CAMPO_ORIGEM), dict):
++                    alvo[CAMPO_ORIGEM] = {"arquivo": nome_arq, "ligado_em": agora}
++                    alvo["atualizado_em"] = agora
++                    marcou_ponte = True
++            if mudou:
++                salvar_json_atomico(arquivo, dados, indent=2)
++        if marcou_ponte:
++            _salvar(dados_dir, estado)
++    return dict(r)
++
++
++def ligar_pre_matricula_sem_falhar(dados_dir, ano=None) -> Optional[dict]:
++    """Gancho (depois da coleta de turmas e da Consulta na Base ABC). NUNCA levanta exceção."""
++    try:
++        r = ligar_pre_matricula(dados_dir, ano)
++        if r.get("ligados") or r.get("reparados"):
++            logger.info("Pré-matrícula ligada à matrícula pelo CGM: %s", r)
++        if r.get("mais_de_um_periodo"):
++            logger.warning("%s aluno(s) da pré-matrícula têm mais de um período na escola: ligado o mais antigo.",
++                           r["mais_de_um_periodo"])
++        return r
++    except MatriculasCorrompidasError as e:
++        logger.error("Ponte de matrículas ilegível, pré-matrícula não ligada: %s", e)
++    except Exception as e:  # noqa: BLE001 — não derruba a coleta nem a consulta
++        logger.error("Falha ao ligar a pré-matrícula às matrículas (nada foi perdido): %s", e)
++    return None
++
++
+ # ─────────────────────────────── conferência manual ───────────────────────────────
+ 
+ def a_conferir(dados_dir) -> list[dict]:
+@@ -548,6 +677,8 @@
+     ap.add_argument("--ano", help="ano letivo (padrão: o ano em uso)")
+     ap.add_argument("--semear", action="store_true", help="reaplica os turmas.json dos backups do ano; só ANTES da primeira coleta (ponte vazia)")
+     ap.add_argument("--verificar", action="store_true", help="lista só as matrículas a conferir")
++    ap.add_argument("--ligar-pre-matricula", action="store_true",
++                    help="liga ao ID da matrícula (pelo CGM) os alunos da pré-matrícula que já ganharam CGM")
+     ap.add_argument("--conferido", metavar="ID", help="marca uma matrícula como conferida")
+     ap.add_argument("--nota", default="", help="nota ao marcar como conferida")
+     args = ap.parse_args(argv)
+@@ -560,6 +691,10 @@
+         print("Conferido." if ok else f"ID {args.conferido} não encontrado.")
+         return 0 if ok else 1
+ 
++    if args.ligar_pre_matricula:
++        print("Pré-matrícula ligada:", ligar_pre_matricula(dados_dir, ano) or "nada a ligar (sem ponte ou sem CGM)")
++        return 0
++
+     if not args.verificar:
+         if args.semear:
+             print("Semeando a partir dos backups:", semear_de_backups(dados_dir, ano))
+diff -u -r -x __pycache__ -x .pytest_cache -x logs -x node_modules -x package.json -x package-lock.json -x dados.json /tmp/orig/AUTO_SERE/src/comum/modelos_avisos.py ./src/comum/modelos_avisos.py
+--- /tmp/orig/AUTO_SERE/src/comum/modelos_avisos.py	2026-11-16 01:47:30.000000000 +0000
++++ ./src/comum/modelos_avisos.py	2026-11-21 17:16:06.312931992 +0000
+@@ -4,8 +4,12 @@
+ Cada modelo é um TIPO de comunicado: nome, para quem é (escolas / pais / qualquer), assunto e mensagem. Ao escolher o
+ tipo na tela, o assunto e a mensagem são preenchidos (e continuam editáveis).
+ 
+-Há dois modelos que já vêm prontos (PADROES):
++Há quatro modelos que já vêm prontos (PADROES):
+   livre          em branco, para escrever na hora;
++  transferencia_destino  avisa a escola de DESTINO de um aluno que SAIU daqui: histórico, guia e parecer na pasta do aluno
++                 e em anexo. Usa $ALUNO, $CGM, $TURMA, $DATA_SAIDA (público "destino").
++  chamada_matricula  chama os PAIS de um aluno novo para efetivar a matrícula (vaga disponível). Usa $RESPONSAVEL, $ALUNO,
++                 $TURMA. Combine com a seleção por turma e faixa de posição ("do 1º ao 5º") da tela de avisos.
+   transferencia  pede à escola de ORIGEM do aluno que chega a liberação da transferência no SERE, o parecer via SME e o
+                  histórico escolar na pasta do aluno. Usa $ALUNO, $CGM e $SERIE (série em que ele está na escola de origem).
+ 
+@@ -25,7 +29,7 @@
+ from src.comum.arquivos_json import ArquivoJsonCorrompidoError, carregar_json, salvar_json_atomico
+ 
+ NOME_ARQUIVO = "modelos_avisos.json"
+-PUBLICOS_DO_MODELO = ("", "escolas", "pais")        # "" = serve para qualquer público
++PUBLICOS_DO_MODELO = ("", "escolas", "pais", "destino")        # "" = serve para qualquer público
+ LIMITE_NOME = 80
+ LIMITE_ASSUNTO = 200
+ LIMITE_MENSAGEM = 20000
+@@ -49,6 +53,33 @@
+             "Atenciosamente,\n$ESCOLA"
+         ),
+     },
++    "transferencia_destino": {
++        "nome": "Aluno transferido (avisar a escola de destino)",
++        "publico": "destino",
++        "assunto": "Transferência do aluno $ALUNO — documentos em anexo",
++        "mensagem": (
++            "Olá, tudo bem?\n\n"
++            "Informamos que o aluno $ALUNO (CGM $CGM), da turma $TURMA, foi transferido da nossa escola em $DATA_SAIDA "
++            "e consta como seu aluno.\n"
++            "O histórico escolar, a guia de transferência e o parecer descritivo já estão na pasta do aluno no SERE e "
++            "seguem também em anexo neste e-mail.\n\n"
++            "Qualquer dúvida, estamos à disposição.\n\n"
++            "Atenciosamente,\n$ESCOLA"
++        ),
++    },
++    "chamada_matricula": {
++        "nome": "Chamada para matrícula (pais de aluno novo)",
++        "publico": "pais",
++        "assunto": "Vaga para $ALUNO — $TURMA ($ANO)",
++        "mensagem": (
++            "Olá, $RESPONSAVEL!\n\n"
++            "Informamos que há vaga para $ALUNO na turma $TURMA da $ESCOLA em $ANO.\n\n"
++            "Para efetivar a matrícula, pedimos que compareça à secretaria da escola, em horário de atendimento, "
++            "com os documentos exigidos.\n\n"
++            "Se não tiver mais interesse na vaga, por favor nos avise, para que ela seja oferecida a outra família.\n\n"
++            "Atenciosamente,\n$ESCOLA"
++        ),
++    },
+ }
+ 
+ 
+diff -u -r -x __pycache__ -x .pytest_cache -x logs -x node_modules -x package.json -x package-lock.json -x dados.json /tmp/orig/AUTO_SERE/src/comum/registro_scripts.py ./src/comum/registro_scripts.py
+--- /tmp/orig/AUTO_SERE/src/comum/registro_scripts.py	2026-11-18 21:56:10.000000000 +0000
++++ ./src/comum/registro_scripts.py	2026-11-19 23:12:07.975772969 +0000
+@@ -962,8 +962,10 @@
+         "escolas": "Marcadores no assunto e na mensagem: " + ", ".join("$" + m for m in av.marcadores_validos("escolas"))
+                    + ". Com $ALUNO, $CGM, $SERIE ou $TURMA o e-mail vai para a escola de ORIGEM de cada aluno que chega.",
+         "pais": "Marcadores no assunto e na mensagem: " + ", ".join("$" + m for m in av.marcadores_validos("pais")),
++        "destino": "Marcadores no assunto e na mensagem: " + ", ".join("$" + m for m in av.marcadores_validos("destino"))
++                   + ". Um e-mail por aluno transferido, para a escola para onde ele foi; a guia, o histórico e o parecer seguem em ANEXO.",
+     }
+-    nomes_publico = {"escolas": "escolas", "pais": "pais", "": "qualquer público"}
++    nomes_publico = {"escolas": "escolas", "pais": "pais", "destino": "escolas de destino dos transferidos", "": "qualquer público"}
+     modelos = [{"valor": m["id"], "texto": html.escape(m["nome"] + (" (ajustado)" if m["padrao"] and m["personalizado"] else "")),
+                 "ajuda": f"Para {nomes_publico[m['publico']]}. O assunto e a mensagem abaixo podem ser editados antes de executar.",
+                 "assunto": m["assunto"], "mensagem": m["mensagem"], "publico": m["publico"],
+@@ -986,8 +988,9 @@
+                        "o mesmo texto e os mesmos destinatários. Quem já recebeu não recebe de novo; dá para cancelar e continuar depois."}]},
+         {"tipo": "unidades", "id": "campo-unidades", "nome": "unidades", "label": "Quais unidades",
+          "grupos": [{"valor": k, "texto": v} for k, v in av.GRUPOS_UNIDADES.items()],
+-         "ajuda": "Pesquise e marque uma ou mais. Nenhuma marcada = todas. No texto de transferência, só as escolas de origem marcadas recebem.",
+-         "visivelSe": so("campo-publico", "escolas")},
++         "ajuda": "Pesquise e marque uma ou mais. Nenhuma marcada = todas. No texto de transferência, só as escolas de origem marcadas recebem; "
++                  "para os transferidos, só as escolas de destino marcadas.",
++         "visivelSe": so("campo-publico", "escolas|destino")},
+         {"tipo": "select", "id": "campo-situacao-pais", "nome": "situacao_pais", "label": "Quais alunos novos",
+          "semVazio": True, "padrao": "matriculados", "opcoes": [{"valor": k, "texto": v} for k, v in av.SITUACOES_PAIS.items()],
+          "visivelSe": so("campo-publico", "pais|escolas")},
+@@ -1000,8 +1003,9 @@
+          "visivelSe": so("campo-publico", "pais|escolas")},
+         {"tipo": "alunos", "id": "campo-alunos", "nome": "alunos", "label": "Quais alunos",
+          "ajuda": "Pesquise e marque os alunos. Nenhum marcado = todos os da lista acima. \"CGM ok\" quer dizer que a Consulta na Base ABC "
+-                  "já ligou o CGM e a escola de origem ao aluno (é isso que preenche $CGM, $SERIE e a escola que recebe).",
+-         "visivelSe": so("campo-publico", "pais|escolas")},
++                  "já ligou o CGM e a escola de origem ao aluno (é isso que preenche $CGM, $SERIE e a escola que recebe). "
++                  "Para os transferidos, a lista mostra a escola de destino e se a guia, o histórico e o parecer estão prontos.",
++         "visivelSe": so("campo-publico", "pais|escolas|destino")},
+         {"tipo": "select", "id": "campo-tipo-mensagem", "nome": "tipo_mensagem", "label": "Tipo de mensagem", "semVazio": True,
+          "padrao": "livre", "opcoes": modelos},
+         {"tipo": "modelo_acoes", "id": "campo-modelo-acoes", "nome": "modelo_acoes", "label": "Salvar e excluir modelos",
+@@ -1019,7 +1023,7 @@
+          "padrao": "10", "opcoes": [{"valor": str(n), "texto": f"{n} segundos"} for n in (5, 10, 20, 30, 60)],
+          "visivelSe": so("campo-modo-aviso", "enviar")},
+         {"tipo": "select", "id": "campo-limite-lote", "nome": "limite_lote", "label": "Máximo de e-mails por execução",
+-         "semVazio": True, "padrao": "50", "opcoes": [{"valor": str(n), "texto": f"{n} e-mails"} for n in (10, 25, 50, 100, 200)],
++         "semVazio": True, "padrao": "50", "opcoes": [{"valor": str(n), "texto": f"{n} e-mail" + ("" if n == 1 else "s")} for n in (1, 5, 10, 25, 50, 100, 200)],
+          "visivelSe": so("campo-modo-aviso", "enviar")},
+     ]
+ 
+@@ -1037,15 +1041,17 @@
+     modo = p.get("modo") or "simular"
+     unidades, fonte = p.get("unidades") or None, p.get("fonte") or "ano"
+     texto_do_pedido = f"{p.get('assunto') or ''} {p.get('mensagem') or ''}"
+-    por_aluno = p["publico"] == "escolas" and bool(av._marcadores_de_aluno(texto_do_pedido))
++    por_aluno = p["publico"] == "destino" or (p["publico"] == "escolas" and bool(av._marcadores_de_aluno(texto_do_pedido)))
+     filtros = (p.get("tipo_escola") or "todas", p.get("filtro_nome") or "", p.get("situacao_pais") or "matriculados", unidades, fonte, por_aluno,
+                p.get("alunos") or None)
+     if av.teste_com_escola_ficticia(p["publico"], modo):
+         email = (p.get("email_teste") or "").strip() or av.ESCOLA_TESTE["email"]
+         texto = f"Teste: 1 e-mail para a escola fictícia {av.ESCOLA_TESTE['nome']} <{email}>"
+         try:
+-            n = len(av.reunir_destinatarios("escolas", *filtros)["destinatarios"])
+-            texto += f" (o comunicado real iria para {n} e-mail(s) " + ("de escolas de origem" if por_aluno else "de escolas e CMEIs") + ")"
++            n = len(av.reunir_destinatarios(p["publico"], *filtros)["destinatarios"])
++            texto += (f" (o comunicado real iria para {n} e-mail(s) "
++                      + ("de escolas de destino, com os documentos em anexo" if p["publico"] == "destino"
++                         else "de escolas de origem" if por_aluno else "de escolas e CMEIs") + ")")
+         except ValueError:
+             pass                                # sem a lista real o teste funciona do mesmo jeito
+         return texto + "."
+@@ -1053,6 +1059,8 @@
+     n = len(r["destinatarios"])
+     if p["publico"] == "pais":
+         texto = f"{n} responsável(is) por e-mail, de {r['alunos']} aluno(s) novo(s)"
++    elif p["publico"] == "destino":
++        texto = f"{n} e-mail(s) para escolas de destino, um por aluno transferido, com guia, histórico e parecer em anexo (de {r['alunos']} transferido(s))"
+     elif por_aluno:
+         texto = f"{n} e-mail(s) para escolas de origem, um por aluno que chega (de {r['alunos']} aluno(s) novo(s))"
+     else:
+@@ -1060,7 +1068,10 @@
+     if r["sem_email"]:
+         texto += f"; sem e-mail ficariam de fora {len(r['sem_email'])}: {_resumo_lista(r['sem_email'])}"
+     for chave, rotulo in (("sem_vinculo", "sem o vínculo da Base ABC (rode a Consulta na Base ABC)"),
+-                          ("a_verificar", "com vínculo a verificar"), ("origem_desconhecida", "com escola de origem fora da lista")):
++                          ("a_verificar", "com vínculo a verificar"), ("origem_desconhecida", "com escola de origem fora da lista"),
++                          ("sem_destino", "sem escola de destino"), ("destino_fora_da_lista", "com destino fora da lista de escolas"),
++                          ("encaminhados", "encaminhados por e-mail à parte"), ("nao_avisar", "marcados para não avisar"),
++                          ("sem_documentos", "sem a guia, o histórico ou o parecer desta saída")):
+         if r.get(chave):
+             texto += f"; {len(r[chave])} aluno(s) {rotulo}: {_resumo_lista(r[chave])}"
+     if modo == "enviar":
+diff -u -r -x __pycache__ -x .pytest_cache -x logs -x node_modules -x package.json -x package-lock.json -x dados.json /tmp/orig/AUTO_SERE/src/web/api/rotas.py ./src/web/api/rotas.py
+--- /tmp/orig/AUTO_SERE/src/web/api/rotas.py	2026-11-19 19:59:32.000000000 +0000
++++ ./src/web/api/rotas.py	2026-11-21 09:31:34.189210465 +0000
+@@ -1097,6 +1097,75 @@
+                        ("historico", ("emitido_em", "assinado_secretario", "assinado_diretor")))
+ 
+ 
++def _destino_para_tela(reg: dict, aviso_enviado) -> dict:
++    """Para onde o aluno foi e o que o aviso à escola de destino fará com ele (coluna \"Destino\" da tela de Transferidos)."""
++    from src.comum import destino_transferidos as _dest
++    d = _dest.resolver_destino(reg)
++    return {**d, "status_texto": _dest.STATUS_AVISO[d["status_aviso"]],
++            "aviso_enviado_em": (aviso_enviado or {}).get("enviado_em"), "aviso_enviado_para": (aviso_enviado or {}).get("para")}
++
++
++def _aviso_do_aluno(avisados: dict, cgm: str, reg: dict):
++    """O aviso já enviado desta SAÍDA: pelo ID da matrícula (resiste a data corrigida) ou, sem ele, por CGM + data."""
++    return (avisados.get(("id", str(reg.get("id_matricula") or ""))) if reg.get("id_matricula") else None) \
++        or avisados.get((cgm, str(reg.get("data_transferencia") or "")))
++
++
++@api_bp.route("/transferidos/destino/<cgm>", methods=["GET"])
++def transferidos_destino(cgm):
++    """O destino do aluno (do vínculo da Base ABC e/ou preenchido à mão) e as escolas da lista, para a janela de edição."""
++    from src.comum import destino_transferidos as _dest
++    from src.comum.arquivos_json import ArquivoJsonCorrompidoError
++    try:
++        dados = _carregar_json_estrito("transferidos.json")
++    except ArquivoJsonCorrompidoError as exc:
++        return jsonify({"erro": str(exc)}), 500
++    reg = (dados or {}).get(str(cgm))
++    if not isinstance(reg, dict):
++        return jsonify({"erro": "Aluno não encontrado em transferidos.json."}), 404
++    try:
++        from src.automacao import avisos as _avisos
++        escolas = [u["nome"] for u in _avisos.listar_unidades()]
++        avisado = _aviso_do_aluno(_avisos.avisos_ja_enviados_ao_destino(), str(cgm), reg)
++    except Exception:                                  # noqa: BLE001
++        escolas, avisado = [], None
++    return jsonify({"cgm": str(cgm), "id_matricula": reg.get("id_matricula") or "", "nome": reg.get("nome"), "turma": reg.get("turma"),
++                    "data_transferencia": reg.get("data_transferencia"), "destino": _destino_para_tela(reg, avisado),
++                    "manual": _dest.ler_manual(reg), "status_opcoes": _dest.STATUS_AVISO, "escolas": escolas})
++
++
++@api_bp.route("/transferidos/destino/<cgm>", methods=["POST"])
++def transferidos_destino_salvar(cgm):
++    """
++    Preenche à mão o destino do aluno (ex.: a escola de destino não usa o SERE e a consulta não achou nada).
++    Corpo: {"escola": "...", "status": "automatico|encaminhado|nao_avisar", "observacao": "..."}. Tudo em branco com
++    status "automatico" limpa o preenchimento. Vale só para a saída atual; uma nova consulta na Base ABC não o apaga.
++    """
++    from src.comum import destino_transferidos as _dest
++    from src.comum.arquivos_json import ArquivoJsonCorrompidoError
++    corpo = request.get_json(silent=True)
++    if not isinstance(corpo, dict):
++        return jsonify({"erro": "Envie {\"escola\": ..., \"status\": ..., \"observacao\": ...}."}), 400
++    rodando = _automacoes_rodando()
++    if rodando:
++        return jsonify({"erro": "Há uma automação em execução (" + ", ".join(rodando) + "). Espere terminar para editar: "
++                                "ela regrava o transferidos.json e o destino podia se perder."}), 409
++    try:
++        d = _dest.salvar_destino(str(cgm), corpo.get("escola"), corpo.get("status"), corpo.get("observacao"), _dados_dir())
++    except _dest.DestinoInvalidoError as exc:
++        return jsonify({"erro": str(exc)}), (404 if "não encontrado" in str(exc) or "não existe" in str(exc) else 400)
++    except ArquivoJsonCorrompidoError as exc:
++        return jsonify({"erro": str(exc)}), 500
++    return jsonify({"ok": True, "destino": {**d, "status_texto": _dest.STATUS_AVISO[d["status_aviso"]]}})
++
++
++def _carregar_json_estrito(nome_arquivo: str):
++    """Como _carregar_json, mas arquivo ilegível levanta ArquivoJsonCorrompidoError (não é tratado como vazio)."""
++    from src.comum.arquivos_json import carregar_json
++    caminho = _dados_dir() / nome_arquivo
++    return carregar_json(caminho, dict, dict) if caminho.exists() else {}
++
++
+ @api_bp.route("/transferidos/lista")
+ def transferidos_lista():
+     """
+@@ -1106,6 +1175,11 @@
+     """
+     bruto = _carregar_json("transferidos.json", {})
+     por_cgm = _turma_situacao_por_cgm()
++    try:
++        from src.automacao import avisos as _avisos
++        avisados = _avisos.avisos_ja_enviados_ao_destino()
++    except Exception:                                  # noqa: BLE001 — o aviso é um extra: a tabela nunca depende dele
++        avisados = {}
+     registros = []
+     for cgm, r in (bruto.items() if isinstance(bruto, dict) else []):
+         if not isinstance(r, dict):
+@@ -1115,7 +1189,9 @@
+         parecer = r.get("parecer") if isinstance(r.get("parecer"), dict) else {}
+         feitos = sum(1 for doc in (guia, hist) for campo in ("emitido_em", "assinado_secretario", "assinado_diretor")
+                      if doc.get(campo))
++        destino = _destino_para_tela(r, _aviso_do_aluno(avisados, str(cgm), r))
+         registros.append({
++            "destino": destino, "id_matricula": r.get("id_matricula") or "",
+             "cgm": str(cgm),
+             "nome": r.get("nome") or (por_cgm.get(str(cgm)) or {}).get("nome") or "—",
+             "turma": r.get("turma") or (por_cgm.get(str(cgm)) or {}).get("turma") or "—",
+@@ -1583,6 +1659,11 @@
+     da Base ABC (ok / verificar / sem_vinculo). Parâmetros: situacao (matriculados|aguardando|ambos) e fonte (ano|proximo|ambas).
+     """
+     from src.automacao import avisos as _avisos
++    if request.args.get("publico") == "destino":       # transferidos (escola de destino), com o estado do destino e dos documentos
++        try:
++            return jsonify({"alunos": _avisos.listar_transferidos_para_aviso()})
++        except ValueError as exc:
++            return jsonify({"alunos": [], "aviso": str(exc)})
+     situacao, fonte = request.args.get("situacao") or "matriculados", request.args.get("fonte") or "ano"
+     if situacao not in _avisos.SITUACOES_PAIS or fonte not in _avisos.FONTES_ALUNOS:
+         return jsonify({"erro": "Situação ou fonte inválida."}), 400
+diff -u -r -x __pycache__ -x .pytest_cache -x logs -x node_modules -x package.json -x package-lock.json -x dados.json /tmp/orig/AUTO_SERE/src/web/static/js/app.js ./src/web/static/js/app.js
+--- /tmp/orig/AUTO_SERE/src/web/static/js/app.js	2026-11-19 19:59:32.000000000 +0000
++++ ./src/web/static/js/app.js	2026-11-21 17:16:53.970954576 +0000
+@@ -1749,6 +1749,68 @@
+     : `<span class="badge bg-muted" style="opacity:.55">${escaparHtml(rotulo)}: —</span>`;
+ }
+ 
++/** Coluna "Destino": a escola para onde o aluno foi, de onde veio a informação e o que o aviso fará com ele. */
++function _celulaDestino(r) {
++  const d = r.destino || {};
++  let selo;
++  if (d.aviso_enviado_em) selo = badge(`Aviso enviado: ${escaparHtml(_fmtDataIso(d.aviso_enviado_em))}`, "bg-lime");
++  else if (d.status_aviso === "encaminhado") selo = badge("Encaminhado à parte", "bg-blue");
++  else if (d.status_aviso === "nao_avisar") selo = badge("Não avisar", "bg-muted");
++  else if (!d.escola) selo = badge(d.consulta === "verificar" ? "Vínculo a verificar" : "Sem destino", "bg-amber");
++  else selo = badge("Avisar por e-mail", "bg-cyan");
++  const escola = d.escola ? `${escaparHtml(d.escola)}<small>${d.fonte === "manual" ? "preenchido à mão" : "Base ABC"}</small>` : "";
++  return `${escola}<div>${selo} <button type="button" class="btn-sm" data-destino="${escaparHtml(r.cgm)}" style="padding:3px 9px;font-size:.7rem">Destino…</button></div>`;
++}
++
++/** Janela para preencher à mão o destino do aluno (a escola não usa o SERE e a consulta não achou nada) ou marcar o aviso. */
++async function abrirDestinoTransferido(cgm) {
++  let info;
++  try {
++    info = await apiGet(`/transferidos/destino/${encodeURIComponent(cgm)}`);
++  } catch (e) {
++    toast("Não foi possível abrir o destino deste aluno");
++    return;
++  }
++  abrirModal("Destino do aluno transferido", (corpo, fechar) => {
++    const d = info.destino || {};
++    const m = info.manual || {};
++    const status = m.status || "automatico";
++    const opcoes = Object.entries(info.status_opcoes || {}).map(([v, t]) =>
++      `<option value="${escaparHtml(v)}"${v === status ? " selected" : ""}>${escaparHtml(t)}</option>`).join("");
++    const lista = (info.escolas || []).map((n) => `<option value="${escaparHtml(n)}"></option>`).join("");
++    const aviso = d.aviso_enviado_em ? `<p class="campo-ajuda" style="color:var(--lime)">O aviso desta saída já foi enviado em ${escaparHtml(_fmtDataIso(d.aviso_enviado_em))} para ${escaparHtml(d.aviso_enviado_para || "a escola")}.</p>` : "";
++    corpo.innerHTML = `
++      <p class="campo-ajuda" style="margin-bottom:10px">${escaparHtml(info.nome || "")} · CGM ${escaparHtml(info.cgm)}${info.id_matricula ? ` · matrícula ${escaparHtml(info.id_matricula)}` : ""} · ${escaparHtml(info.turma || "")}${info.data_transferencia ? ` · saiu em ${escaparHtml(info.data_transferencia)}` : ""}</p>
++      <p class="campo-ajuda" style="margin-bottom:10px">Pela Base ABC: ${d.consulta === "ok" ? `<b>${escaparHtml(d.fonte === "base_abc" ? d.escola : "vínculo ok")}</b>` : d.consulta === "verificar" ? `vínculo a verificar${d.motivo ? ": " + escaparHtml(d.motivo) : ""}` : "nada gravado (a consulta não achou ou ainda não foi feita)"}.
++        O que você preencher aqui vale no lugar dele, só para esta saída, e continua valendo depois de uma nova consulta.</p>
++      ${aviso}
++      <div class="field"><label for="tf-dest-escola">Escola de destino</label>
++        <input type="text" id="tf-dest-escola" list="tf-dest-lista" value="${escaparHtml(m.escola || "")}" placeholder="Em branco = usar a da Base ABC">
++        <datalist id="tf-dest-lista">${lista}</datalist>
++        <div class="campo-ajuda">Escola da lista de e-mails (municipais e CMEIs) para o aviso sair automático. Escola particular ou estadual não está na lista: marque abaixo "Encaminhado por e-mail à parte".</div></div>
++      <div class="field"><label for="tf-dest-status">Aviso à escola</label>
++        <select id="tf-dest-status">${opcoes}</select></div>
++      <div class="field"><label for="tf-dest-obs">Observação</label>
++        <input type="text" id="tf-dest-obs" maxlength="300" value="${escaparHtml(m.observacao || "")}" placeholder="Ex.: escola particular, enviei pelo e-mail da secretaria em 20/11"></div>
++      <div class="campo-ajuda" id="tf-dest-erro" style="color:var(--rose); min-height:1.2em"></div>
++      <div class="modal-acoes">
++        <button class="btn-sm" id="tf-dest-cancelar" style="padding:9px 16px;font-size:.78rem">Cancelar</button>
++        <button class="btn-primary" id="tf-dest-salvar">Salvar</button>
++      </div>`;
++    corpo.querySelector("#tf-dest-cancelar").addEventListener("click", fechar);
++    corpo.querySelector("#tf-dest-salvar").addEventListener("click", async () => {
++      try {
++        await apiPost(`/transferidos/destino/${encodeURIComponent(cgm)}`, {
++          escola: corpo.querySelector("#tf-dest-escola").value, status: corpo.querySelector("#tf-dest-status").value,
++          observacao: corpo.querySelector("#tf-dest-obs").value });
++        fechar();
++        toast("Destino salvo");
++        await carregarTransferidos();
++      } catch (e) { corpo.querySelector("#tf-dest-erro").textContent = e.message; }
++    });
++  });
++}
++
+ function _transfFiltrados() {
+   if (!_transfDados) return [];
+   const q = semAcento(transfState.search.trim());
+@@ -1778,6 +1840,7 @@
+       <td>${_chipDoc("Emitida", g.emitido_em, "cyan")} ${_chipDoc("Secr.", g.assinado_secretario, "blue")} ${_chipDoc("Dir.", g.assinado_diretor, "lime")}</td>
+       <td>${_chipDoc("Emitido", h.emitido_em, "cyan")} ${_chipDoc("Secr.", h.assinado_secretario, "blue")} ${_chipDoc("Dir.", h.assinado_diretor, "lime")}</td>
+       <td>${_chipDoc("Digitalizado", p.digitalizado_em, "blue")} ${_chipDoc("Anexado", p.anexado_em, "lime")}</td>
++      <td>${_celulaDestino(r)}</td>
+       <td>${st}</td>
+     </tr>`;
+   }).join("");
+@@ -1791,12 +1854,15 @@
+     const colunas = [{ chave: "nome", label: "Aluno" }, { chave: "cgm", label: "CGM" }, { chave: "turma", label: "Turma" },
+       { chave: "guia_emitida", label: "Guia emitida" }, { chave: "guia_secretario", label: "Guia assinada (secretário)" }, { chave: "guia_diretor", label: "Guia assinada (diretor)" },
+       { chave: "hist_emitido", label: "Histórico emitido" }, { chave: "hist_secretario", label: "Histórico assinado (secretário)" }, { chave: "hist_diretor", label: "Histórico assinado (diretor)" },
+-      { chave: "parecer_digitalizado", label: "Parecer digitalizado" }, { chave: "parecer_anexado", label: "Parecer anexado" }, { chave: "status", label: "Status" }];
++      { chave: "parecer_digitalizado", label: "Parecer digitalizado" }, { chave: "parecer_anexado", label: "Parecer anexado" },
++      { chave: "destino", label: "Escola de destino" }, { chave: "aviso_destino", label: "Aviso à escola de destino" }, { chave: "status", label: "Status" }];
+     const plano = (r) => ({
+       nome: r.nome, cgm: r.cgm, turma: r.turma,
+       guia_emitida: _fmtDataIso(r.guia.emitido_em), guia_secretario: _fmtDataIso(r.guia.assinado_secretario), guia_diretor: _fmtDataIso(r.guia.assinado_diretor),
+       hist_emitido: _fmtDataIso(r.historico.emitido_em), hist_secretario: _fmtDataIso(r.historico.assinado_secretario), hist_diretor: _fmtDataIso(r.historico.assinado_diretor),
+       parecer_digitalizado: _fmtDataIso(r.parecer.digitalizado_em), parecer_anexado: _fmtDataIso(r.parecer.anexado_em),
++      destino: (r.destino && r.destino.escola) || "",
++      aviso_destino: !r.destino ? "" : r.destino.aviso_enviado_em ? `Enviado em ${_fmtDataIso(r.destino.aviso_enviado_em)}` : r.destino.status_texto,
+       status: r.status === "completo" ? "Completo" : r.status === "pendente" ? "Pendente" : `${r.feitos}/${r.total_passos}`,
+     });
+     _tabelas.transferidos = { colunas, linhas: _transfDados.transferidos.map(plano), extra: _transfDados };
+@@ -1816,6 +1882,10 @@
+     ligarPilulas(sec, "data-tf", transfState, "filter", renderTransfRows);
+     ligarOrdenacao(sec, "data-ts", transfState, renderTransfRows);
+     document.getElementById("transf-q").addEventListener("input", (e) => { transfState.search = e.target.value; renderTransfRows(); });
++    document.getElementById("transf-tbody").addEventListener("click", (e) => {
++      const b = e.target.closest("[data-destino]");
++      if (b) abrirDestinoTransferido(b.dataset.destino);
++    });
+   }
+   renderTransfRows();
+ }
+@@ -1973,6 +2043,13 @@
+           <button type="button" class="btn-sm" id="${campo.id}-marcar-ok">Marcar quem tem CGM ok</button>
+           <button type="button" class="btn-sm" id="${campo.id}-limpar">Limpar</button>
+         </div>
++        <div id="${campo.id}-faixa" style="display:none; gap:8px; margin-top:8px; flex-wrap:wrap; align-items:center;">
++          <span class="campo-ajuda" style="margin:0">Marcar por posição:</span>
++          <select id="${campo.id}-faixa-turma"><option value="">Todas as turmas</option></select>
++          <label class="campo-ajuda" style="margin:0">do <input type="number" min="1" id="${campo.id}-faixa-de" style="width:64px" placeholder="1"></label>
++          <label class="campo-ajuda" style="margin:0">ao <input type="number" min="1" id="${campo.id}-faixa-ate" style="width:64px" placeholder="5"></label>
++          <button type="button" class="btn-sm" id="${campo.id}-marcar-faixa">Marcar faixa</button>
++        </div>
+         <div class="checklist alunos-lista" id="${campo.id}-lista" data-campo="${campo.id}" style="margin-top:8px; max-height:240px; overflow:auto;">Carregando alunos…</div>
+         <input id="${campo.id}" type="text"${nome} value="[]" style="display:none">
+         <div class="campo-ajuda" id="${campo.id}-resumo"></div>
+@@ -2338,6 +2415,7 @@
+   let aviso = "";
+ 
+   const selo = (a) => {
++    if (a.selo) return { texto: a.selo, cor: a.estado === "ok" ? "var(--cyan)" : "var(--amber)" };      // transferidos (escola de destino)
+     if (a.na_nossa_escola) return { texto: `CGM ${a.cgm} · já está na nossa escola, sem escola anterior no vínculo (refaça a consulta)`, cor: "var(--amber)" };
+     if (a.estado === "ok") return { texto: `CGM ${a.cgm} · ${a.escola_origem}`, cor: "var(--cyan)" };
+     if (a.estado === "verificar") return { texto: `vínculo a verificar${a.motivo ? ": " + a.motivo : ""}`, cor: "var(--amber)" };
+@@ -2348,6 +2426,18 @@
+     resumo.textContent = marcados.size ? `${marcados.size} aluno(s) marcado(s).` : `Nenhum marcado: vale para todos (${alunos.length}).`;
+     agendarPrevia();
+   };
++  // "Marcar por posição": só aparece quando a lista traz a posição do aluno na turma (coluna "pos" da pré-matrícula)
++  const faixa = document.getElementById(`${id}-faixa`);
++  const faixaTurma = document.getElementById(`${id}-faixa-turma`);
++  const desenharFaixa = () => {
++    if (!faixa) return;
++    const comPos = alunos.filter((a) => Number.isInteger(a.pos));
++    faixa.style.display = comPos.length ? "flex" : "none";
++    const atual = faixaTurma.value;
++    const turmas = [...new Set(comPos.map((a) => a.turma))].sort();
++    faixaTurma.innerHTML = `<option value="">Todas as turmas</option>` + turmas.map((t) => `<option value="${_escHtml(t)}">${_escHtml(t)}</option>`).join("");
++    if (turmas.includes(atual)) faixaTurma.value = atual;
++  };
+   const desenhar = () => {
+     const termo = _semAcentoJS(busca.value).trim();
+     const visiveis = alunos.filter((a) => !termo || _semAcentoJS(`${a.nome} ${a.turma}`).includes(termo));
+@@ -2357,7 +2447,7 @@
+           return `
+           <label class="checklist-item" style="align-items:flex-start;">
+             <input type="checkbox" value="${_escHtml(a.id)}"${marcados.has(a.id) ? " checked" : ""}>
+-            <span>${_escHtml(a.nome)} <small style="color:var(--txt3)">(${_escHtml(a.turma)})</small><br><small style="color:${s.cor}">${_escHtml(s.texto)}</small></span>
++            <span>${Number.isInteger(a.pos) ? `${a.pos}º · ` : ""}${_escHtml(a.nome)} <small style="color:var(--txt3)">(${_escHtml(a.turma)})</small><br><small style="color:${s.cor}">${_escHtml(s.texto)}</small></span>
+           </label>`;
+         }).join("")
+       : `<div class="campo-ajuda">${_escHtml(aviso || "Nenhum aluno encontrado.")}</div>`;
+@@ -2365,8 +2455,9 @@
+   const carregar = async () => {
+     const situacao = document.getElementById("campo-situacao-pais")?.value || "matriculados";
+     const fonte = document.getElementById("campo-fonte-alunos")?.value || "ano";
++    const publico = document.getElementById("campo-publico")?.value || "";
+     try {
+-      const r = await apiGet(`/avisos/alunos?situacao=${encodeURIComponent(situacao)}&fonte=${encodeURIComponent(fonte)}`);
++      const r = await apiGet(`/avisos/alunos?situacao=${encodeURIComponent(situacao)}&fonte=${encodeURIComponent(fonte)}&publico=${encodeURIComponent(publico)}`);
+       alunos = r.alunos || [];
+       aviso = r.aviso || "";
+     } catch (e) {
+@@ -2375,6 +2466,7 @@
+     }
+     const existentes = new Set(alunos.map((a) => a.id));
+     [...marcados].forEach((i) => { if (!existentes.has(i)) marcados.delete(i); });     // trocou a fonte: some quem não está mais
++    desenharFaixa();
+     desenhar();
+     sincronizar();
+   };
+@@ -2391,7 +2483,19 @@
+     sincronizar();
+   });
+   document.getElementById(`${id}-limpar`)?.addEventListener("click", () => { marcados.clear(); desenhar(); sincronizar(); });
+-  ["campo-situacao-pais", "campo-fonte-alunos"].forEach((c) => document.getElementById(c)?.addEventListener("change", carregar));
++  document.getElementById(`${id}-marcar-faixa`)?.addEventListener("click", () => {
++    const de = parseInt(document.getElementById(`${id}-faixa-de`).value, 10) || 1;
++    const ate = parseInt(document.getElementById(`${id}-faixa-ate`).value, 10) || Infinity;
++    if (ate < de) { toast("A posição final é menor que a inicial."); return; }
++    const turma = faixaTurma.value;
++    const alvo = alunos.filter((a) => Number.isInteger(a.pos) && a.pos >= de && a.pos <= ate && (!turma || a.turma === turma));
++    alvo.forEach((a) => marcados.add(a.id));                 // acrescenta ao que já está marcado ("Limpar" zera)
++    desenhar();
++    sincronizar();
++    toast(alvo.length ? `${alvo.length} aluno(s) marcado(s): ${turma || "todas as turmas"}, posições ${de} a ${ate === Infinity ? "o fim" : ate}.`
++                      : "Nenhum aluno nessa faixa.");
++  });
++  ["campo-publico", "campo-situacao-pais", "campo-fonte-alunos"].forEach((c) => document.getElementById(c)?.addEventListener("change", carregar));
+   await carregar();
+ }
+ 
+diff -u -r -x __pycache__ -x .pytest_cache -x logs -x node_modules -x package.json -x package-lock.json -x dados.json /tmp/orig/AUTO_SERE/src/web/templates/partials/transferidos_cards.html ./src/web/templates/partials/transferidos_cards.html
+--- /tmp/orig/AUTO_SERE/src/web/templates/partials/transferidos_cards.html	2026-11-06 00:41:52.000000000 +0000
++++ ./src/web/templates/partials/transferidos_cards.html	2026-11-19 23:13:36.601535720 +0000
+@@ -26,6 +26,7 @@
+             <th>Guia de Transferência</th>
+             <th>Histórico Escolar</th>
+             <th>Parecer</th>
++            <th>Destino (aviso à escola)</th>
+             <th data-ts="status">Status</th>
+           </tr>
+         </thead>
+diff -u -r -x __pycache__ -x .pytest_cache -x logs -x node_modules -x package.json -x package-lock.json -x dados.json /tmp/orig/AUTO_SERE/tests/js/teste_tela_avisos.js ./tests/js/teste_tela_avisos.js
+--- /tmp/orig/AUTO_SERE/tests/js/teste_tela_avisos.js	2026-11-16 18:59:52.000000000 +0000
++++ ./tests/js/teste_tela_avisos.js	2026-11-21 17:16:27.357268595 +0000
+@@ -25,9 +25,9 @@
+     const f = new URL("http://x" + url).searchParams.get("fonte");
+     if (f === "proximo") return ok({ alunos: [], aviso: "Ainda não existe previsao_alunos_2027.json" });
+     return ok({ alunos: [
+-      { id: "111", nome: "ANA LIMA", turma: "Infantil IV", fonte: "ano", estado: "ok", cgm: "1000000001", escola_origem: "ESCOLA MUNICIPAL ANA NERI", motivo: "" },
+-      { id: "112", nome: "BETO <i>LIMA</i>", turma: "1º Ano", fonte: "ano", estado: "sem_vinculo", cgm: "", escola_origem: "", motivo: "" },
+-      { id: "118", nome: "HUGO MELO", turma: "1º Ano", fonte: "ano", estado: "verificar", cgm: "", escola_origem: "X", motivo: "sem linha de 2026" }] });
++      { id: "111", nome: "ANA LIMA", turma: "Infantil IV", pos: 1, fonte: "ano", estado: "ok", cgm: "1000000001", escola_origem: "ESCOLA MUNICIPAL ANA NERI", motivo: "" },
++      { id: "112", nome: "BETO <i>LIMA</i>", turma: "1º Ano", pos: 2, fonte: "ano", estado: "sem_vinculo", cgm: "", escola_origem: "", motivo: "" },
++      { id: "118", nome: "HUGO MELO", turma: "1º Ano", pos: 1, fonte: "ano", estado: "verificar", cgm: "", escola_origem: "X", motivo: "sem linha de 2026" }] });
+   }
+   if (url.endsWith("/previa")) return ok({ texto: "prévia", aviso: false });
+   if (url.endsWith("/avisos/modelos") && metodo === "POST") { salvou = true; return ok({ modelo: { id: "meu-modelo", nome: "Meu modelo" }, modelos: [] }); }
+@@ -114,14 +114,33 @@
+   chamadas.length = 0; mudar($("campo-fonte-alunos"), "proximo"); await esperar(60);
+   ok(chamadas.some((c) => c[1].includes("/avisos/alunos") && c[1].includes("fonte=proximo") && c[1].includes("situacao=matriculados")), "trocar a fonte recarrega a lista");
+   ok($("campo-alunos-lista").textContent.includes("previsao_alunos_2027.json") && $("campo-alunos").value === "[]", "fonte sem arquivo: mostra o aviso e descarta as marcações que sumiram");
++  ok($("campo-alunos-faixa").style.display === "none", "sem posição na lista: a barra de faixa some");
+   mudar($("campo-fonte-alunos"), "ambas"); await esperar(60);
+   $("campo-alunos-limpar").click();
+   ok($("campo-alunos").value === "[]", "Limpar desmarca tudo");
++  console.log("# marcar por posição (do 1º ao Nº da turma)");
++  ok($("campo-alunos-faixa").style.display === "flex", "a barra de faixa aparece quando a lista traz a posição");
++  ok(alunosLinhas()[0].startsWith("1º · ANA LIMA"), "a posição aparece na lista: " + alunosLinhas()[0]);
++  ok([...$("campo-alunos-faixa-turma").options].map((o) => o.value).join("|") === "|1º Ano|Infantil IV", "turmas da faixa: " + [...$("campo-alunos-faixa-turma").options].map((o) => o.value));
++  const faixa = async (turma, de, ate) => { mudar($("campo-alunos-faixa-turma"), turma); $("campo-alunos-faixa-de").value = de; $("campo-alunos-faixa-ate").value = ate; $("campo-alunos-marcar-faixa").click(); await esperar(); };
++  await faixa("1º Ano", "1", "1");
++  ok($("campo-alunos").value === '["118"]', "1º da turma '1º Ano': " + $("campo-alunos").value);
++  await faixa("1º Ano", "1", "2");
++  ok(JSON.stringify(JSON.parse($("campo-alunos").value).sort()) === '["112","118"]', "do 1º ao 2º acrescenta o que faltava: " + $("campo-alunos").value);
++  $("campo-alunos-limpar").click();
++  await faixa("", "1", "1");
++  ok(JSON.stringify(JSON.parse($("campo-alunos").value).sort()) === '["111","118"]', "todas as turmas, só o 1º de cada: " + $("campo-alunos").value);
++  $("campo-alunos-limpar").click();
++  await faixa("1º Ano", "3", "2");
++  ok($("campo-alunos").value === "[]", "faixa invertida não marca ninguém");
++  await faixa("Infantil IV", "2", "5");
++  ok($("campo-alunos").value === "[]", "faixa sem ninguém não marca ninguém");
++  $("campo-alunos-limpar").click();
+   marcar($("campo-alunos-lista").querySelectorAll("input")[0], true);
+ 
+   console.log("# tipo de mensagem carrega o texto");
+   const tipo = $("campo-tipo-mensagem");
+-  ok([...tipo.options].map((o) => o.value).join() === "livre,transferencia", "opções: " + [...tipo.options].map((o) => o.value));
++  ok([...tipo.options].map((o) => o.value).join() === "livre,transferencia,transferencia_destino,chamada_matricula", "opções: " + [...tipo.options].map((o) => o.value));
+   mudar($("campo-publico"), "pais");
+   mudar(tipo, "transferencia"); await esperar();
+   ok($("campo-assunto").value.includes("$ALUNO"), "assunto carregado: " + $("campo-assunto").value);
+diff -u -r -x __pycache__ -x .pytest_cache -x logs -x node_modules -x package.json -x package-lock.json -x dados.json /tmp/orig/AUTO_SERE/tests/test_avisos.py ./tests/test_avisos.py
+--- /tmp/orig/AUTO_SERE/tests/test_avisos.py	2026-11-16 18:59:22.000000000 +0000
++++ ./tests/test_avisos.py	2026-11-21 17:16:27.357268595 +0000
+@@ -994,11 +994,11 @@
+ 
+ def test_rotas_de_modelos_criar_ajustar_restaurar_excluir(web, amb, modelos):
+     ids = lambda r: [m["id"] for m in r["modelos"]]
+-    assert ids(web.get("/web/api/avisos/modelos").get_json()) == ["livre", "transferencia"]
++    assert ids(web.get("/web/api/avisos/modelos").get_json()) == ["livre", "transferencia", "transferencia_destino", "chamada_matricula"]
+     r = web.post("/web/api/avisos/modelos", json={"nome": "Documentos pendentes", "publico": "pais",
+                                                  "assunto": "Documentos de $ALUNO", "mensagem": "Olá $RESPONSAVEL, faltam documentos de $ALUNO."})
+     assert r.status_code == 200 and r.get_json()["modelo"]["id"] == "documentos-pendentes"
+-    assert ids(r.get_json()) == ["livre", "transferencia", "documentos-pendentes"]
++    assert ids(r.get_json()) == ["livre", "transferencia", "transferencia_destino", "chamada_matricula", "documentos-pendentes"]
+     # ajustar um pronto: a versão ajustada vale no lugar da original
+     r = web.post("/web/api/avisos/modelos", json={"id": "transferencia", "nome": "Transferência de aluno (pedir à escola de origem)",
+                                                  "publico": "escolas", "assunto": "Transferência $ALUNO", "mensagem": "Ajustado: $ALUNO $CGM"})
+@@ -1008,7 +1008,7 @@
+     assert r.get_json()["acao"] == "restaurado" and "SME" in next(m for m in r.get_json()["modelos"] if m["id"] == "transferencia")["mensagem"]
+     assert web.delete("/web/api/avisos/modelos/transferencia").status_code == 400            # pronto sem ajuste: nada a excluir
+     r = web.delete("/web/api/avisos/modelos/documentos-pendentes")
+-    assert r.get_json()["acao"] == "excluido" and ids(r.get_json()) == ["livre", "transferencia"]
++    assert r.get_json()["acao"] == "excluido" and ids(r.get_json()) == ["livre", "transferencia", "transferencia_destino", "chamada_matricula"]
+     assert web.delete("/web/api/avisos/modelos/nao-existe").status_code == 400
+ 
+ 
+@@ -1185,3 +1185,21 @@
+     r = web.post("/web/api/avisos/exemplo", json={"publico": "escolas", "alunos": '["111"]', **{k: TRANSF[k] for k in ("assunto", "mensagem")}})
+     assert r.status_code == 200 and r.get_json()["aluno"] == "ANA LIMA" and "CGM 1000000001" in r.get_json()["corpo"]
+     assert web.post("/web/api/avisos/exemplo", json={}).get_json() == {"vazio": True}
++
++
++# ───────────── chamada para matrícula: posição na turma e modelo pronto ─────────────
++
++@pytest.mark.parametrize("pos,esperado", [("1", 1), ("3º", 3), (" 12 ", 12), (7, 7), ("", None), (None, None), ("—", None)])
++def test_posicao_do_aluno_na_lista_da_turma(pos, esperado):
++    assert av.posicao_do_aluno({"pos": pos}) == esperado
++    assert av.posicao_do_aluno({}) is None
++
++
++def test_modelo_de_chamada_para_matricula_e_para_os_pais_e_so_usa_marcadores_validos():
++    from src.comum import modelos_avisos as ma
++    m = ma.obter("chamada_matricula")
++    assert m["publico"] == "pais" and "vaga" in m["mensagem"] and "$RESPONSAVEL" in m["mensagem"]
++    av.conferir_marcadores(m["assunto"], "pais", "Assunto")
++    av.conferir_marcadores(m["mensagem"], "pais", "Mensagem")
++    corpo = av.renderizar(m["mensagem"], {"RESPONSAVEL": "Maria", "ALUNO": "Ana", "TURMA": "1º Ano", "ESCOLA": "Escola X", "ANO": "2026"})
++    assert "Olá, Maria!" in corpo and "vaga para Ana na turma 1º Ano da Escola X em 2026" in corpo and "$" not in corpo
+Only in ./tests: test_destino_transferidos.py
+diff -u -r -x __pycache__ -x .pytest_cache -x logs -x node_modules -x package.json -x package-lock.json -x dados.json /tmp/orig/AUTO_SERE/tests/test_fluxo_transferidos.py ./tests/test_fluxo_transferidos.py
+--- /tmp/orig/AUTO_SERE/tests/test_fluxo_transferidos.py	2026-11-18 15:12:06.000000000 +0000
++++ ./tests/test_fluxo_transferidos.py	2026-11-19 23:14:43.452884374 +0000
+@@ -534,3 +534,30 @@
+     processo.registrar_pre_corte()                                        # rodar o pré-corte depois não desfaz
+     assert _ler(ambiente / "transferidos.json")["55"]["guia"]["emitido_em"] is None
+     assert [a.cgm for a in processo.carregar_alunos()] == ["55"]
++
++
++def test_segunda_saida_leva_o_destino_da_primeira_para_o_ciclo_e_comeca_sem_destino(ambiente):
++    controle = _processar_a_primeira_saida(ambiente)
++    controle["55"]["vinculo_base_abc"] = {"escola": "ESCOLA MUNICIPAL ANA NERI", "status": "ok", "cgm": "55"}
++    controle["55"]["destino_manual"] = {"escola": "Colégio Particular", "status": "encaminhado", "observacao": "enviei à parte"}
++    _gravar(ambiente / "transferidos.json", controle)
++
++    ft.registrar_fila_transferidos(_saida2(), ambiente, CORTE)
++    reg = _ler(ambiente / "transferidos.json")["55"]
++    assert "vinculo_base_abc" not in reg and "destino_manual" not in reg          # a nova saída pode ir para outra escola
++    antigo = reg["ciclos_anteriores"][0]
++    assert antigo["vinculo_base_abc"]["escola"] == "ESCOLA MUNICIPAL ANA NERI"
++    assert antigo["destino_manual"]["status"] == "encaminhado"
++
++
++def test_registro_sem_documentos_atualizado_guarda_o_destino_antigo_em_vez_de_apagar(ambiente):
++    ft.registrar_fila_transferidos(_saida1(), ambiente, CORTE)
++    controle = _ler(ambiente / "transferidos.json")
++    controle["55"]["destino_manual"] = {"escola": "Escola X", "status": "nao_avisar", "observacao": ""}
++    _gravar(ambiente / "transferidos.json", controle)
++
++    antigo = _ler(ambiente / "transferidos.json")["55"]
++    assert ft.iniciar_novo_ciclo({"55": antigo}, "55", {"nome": "BETO LIMA", "turma": TURMA, "chamada": 40,
++                                                          "data_nascimento": None, "data_transferencia": "10/10/2026",
++                                                          "retorno": None}, ambiente) == "atualizado"
++    assert "destino_manual" not in antigo and antigo["destino_anterior"]["destino_manual"]["escola"] == "Escola X"
+Only in ./tests: test_id_matricula_integracao.py

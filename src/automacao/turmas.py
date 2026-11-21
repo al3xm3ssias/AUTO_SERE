@@ -299,8 +299,9 @@ async def coletar_turmas_e_alunos(page, output_file: Path = TURMAS_JSON) -> dict
     # período começou e terminou (o SERE só mostra UMA data; ao transferir, a de entrada some) e acrescenta
     # ID_MATRICULA / Data Entrada / Data Transferência às linhas. "Data Matricula" NÃO muda.
     # Nunca levanta exceção: se falhar, o turmas.json sai como sempre saiu.
-    from src.comum.matriculas import registrar_matriculas_sem_falhar
+    from src.comum.matriculas import ligar_pre_matricula_sem_falhar, registrar_matriculas_sem_falhar
     registrar_matriculas_sem_falhar(resultado, dados_dir=output_file.parent)
+    ligar_pre_matricula_sem_falhar(output_file.parent)           # quem da pré-matrícula já ganhou CGM e matrícula
 
     log.info(f"Todas as turmas coletadas. Salvando JSON em '{output_file}'...")
     try:

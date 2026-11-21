@@ -994,11 +994,11 @@ def modelos(monkeypatch, tmp_path):
 
 def test_rotas_de_modelos_criar_ajustar_restaurar_excluir(web, amb, modelos):
     ids = lambda r: [m["id"] for m in r["modelos"]]
-    assert ids(web.get("/web/api/avisos/modelos").get_json()) == ["livre", "transferencia"]
+    assert ids(web.get("/web/api/avisos/modelos").get_json()) == ["livre", "transferencia", "transferencia_destino", "chamada_matricula"]
     r = web.post("/web/api/avisos/modelos", json={"nome": "Documentos pendentes", "publico": "pais",
                                                  "assunto": "Documentos de $ALUNO", "mensagem": "Olá $RESPONSAVEL, faltam documentos de $ALUNO."})
     assert r.status_code == 200 and r.get_json()["modelo"]["id"] == "documentos-pendentes"
-    assert ids(r.get_json()) == ["livre", "transferencia", "documentos-pendentes"]
+    assert ids(r.get_json()) == ["livre", "transferencia", "transferencia_destino", "chamada_matricula", "documentos-pendentes"]
     # ajustar um pronto: a versão ajustada vale no lugar da original
     r = web.post("/web/api/avisos/modelos", json={"id": "transferencia", "nome": "Transferência de aluno (pedir à escola de origem)",
                                                  "publico": "escolas", "assunto": "Transferência $ALUNO", "mensagem": "Ajustado: $ALUNO $CGM"})
@@ -1008,7 +1008,7 @@ def test_rotas_de_modelos_criar_ajustar_restaurar_excluir(web, amb, modelos):
     assert r.get_json()["acao"] == "restaurado" and "SME" in next(m for m in r.get_json()["modelos"] if m["id"] == "transferencia")["mensagem"]
     assert web.delete("/web/api/avisos/modelos/transferencia").status_code == 400            # pronto sem ajuste: nada a excluir
     r = web.delete("/web/api/avisos/modelos/documentos-pendentes")
-    assert r.get_json()["acao"] == "excluido" and ids(r.get_json()) == ["livre", "transferencia"]
+    assert r.get_json()["acao"] == "excluido" and ids(r.get_json()) == ["livre", "transferencia", "transferencia_destino", "chamada_matricula"]
     assert web.delete("/web/api/avisos/modelos/nao-existe").status_code == 400
 
 
@@ -1185,3 +1185,21 @@ def test_rota_do_exemplo(web, chegando):
     r = web.post("/web/api/avisos/exemplo", json={"publico": "escolas", "alunos": '["111"]', **{k: TRANSF[k] for k in ("assunto", "mensagem")}})
     assert r.status_code == 200 and r.get_json()["aluno"] == "ANA LIMA" and "CGM 1000000001" in r.get_json()["corpo"]
     assert web.post("/web/api/avisos/exemplo", json={}).get_json() == {"vazio": True}
+
+
+# ───────────── chamada para matrícula: posição na turma e modelo pronto ─────────────
+
+@pytest.mark.parametrize("pos,esperado", [("1", 1), ("3º", 3), (" 12 ", 12), (7, 7), ("", None), (None, None), ("—", None)])
+def test_posicao_do_aluno_na_lista_da_turma(pos, esperado):
+    assert av.posicao_do_aluno({"pos": pos}) == esperado
+    assert av.posicao_do_aluno({}) is None
+
+
+def test_modelo_de_chamada_para_matricula_e_para_os_pais_e_so_usa_marcadores_validos():
+    from src.comum import modelos_avisos as ma
+    m = ma.obter("chamada_matricula")
+    assert m["publico"] == "pais" and "vaga" in m["mensagem"] and "$RESPONSAVEL" in m["mensagem"]
+    av.conferir_marcadores(m["assunto"], "pais", "Assunto")
+    av.conferir_marcadores(m["mensagem"], "pais", "Mensagem")
+    corpo = av.renderizar(m["mensagem"], {"RESPONSAVEL": "Maria", "ALUNO": "Ana", "TURMA": "1º Ano", "ESCOLA": "Escola X", "ANO": "2026"})
+    assert "Olá, Maria!" in corpo and "vaga para Ana na turma 1º Ano da Escola X em 2026" in corpo and "$" not in corpo

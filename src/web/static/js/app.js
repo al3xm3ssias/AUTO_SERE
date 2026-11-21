@@ -1749,6 +1749,68 @@ function _chipDoc(rotulo, iso, cor) {
     : `<span class="badge bg-muted" style="opacity:.55">${escaparHtml(rotulo)}: —</span>`;
 }
 
+/** Coluna "Destino": a escola para onde o aluno foi, de onde veio a informação e o que o aviso fará com ele. */
+function _celulaDestino(r) {
+  const d = r.destino || {};
+  let selo;
+  if (d.aviso_enviado_em) selo = badge(`Aviso enviado: ${escaparHtml(_fmtDataIso(d.aviso_enviado_em))}`, "bg-lime");
+  else if (d.status_aviso === "encaminhado") selo = badge("Encaminhado à parte", "bg-blue");
+  else if (d.status_aviso === "nao_avisar") selo = badge("Não avisar", "bg-muted");
+  else if (!d.escola) selo = badge(d.consulta === "verificar" ? "Vínculo a verificar" : "Sem destino", "bg-amber");
+  else selo = badge("Avisar por e-mail", "bg-cyan");
+  const escola = d.escola ? `${escaparHtml(d.escola)}<small>${d.fonte === "manual" ? "preenchido à mão" : "Base ABC"}</small>` : "";
+  return `${escola}<div>${selo} <button type="button" class="btn-sm" data-destino="${escaparHtml(r.cgm)}" style="padding:3px 9px;font-size:.7rem">Destino…</button></div>`;
+}
+
+/** Janela para preencher à mão o destino do aluno (a escola não usa o SERE e a consulta não achou nada) ou marcar o aviso. */
+async function abrirDestinoTransferido(cgm) {
+  let info;
+  try {
+    info = await apiGet(`/transferidos/destino/${encodeURIComponent(cgm)}`);
+  } catch (e) {
+    toast("Não foi possível abrir o destino deste aluno");
+    return;
+  }
+  abrirModal("Destino do aluno transferido", (corpo, fechar) => {
+    const d = info.destino || {};
+    const m = info.manual || {};
+    const status = m.status || "automatico";
+    const opcoes = Object.entries(info.status_opcoes || {}).map(([v, t]) =>
+      `<option value="${escaparHtml(v)}"${v === status ? " selected" : ""}>${escaparHtml(t)}</option>`).join("");
+    const lista = (info.escolas || []).map((n) => `<option value="${escaparHtml(n)}"></option>`).join("");
+    const aviso = d.aviso_enviado_em ? `<p class="campo-ajuda" style="color:var(--lime)">O aviso desta saída já foi enviado em ${escaparHtml(_fmtDataIso(d.aviso_enviado_em))} para ${escaparHtml(d.aviso_enviado_para || "a escola")}.</p>` : "";
+    corpo.innerHTML = `
+      <p class="campo-ajuda" style="margin-bottom:10px">${escaparHtml(info.nome || "")} · CGM ${escaparHtml(info.cgm)}${info.id_matricula ? ` · matrícula ${escaparHtml(info.id_matricula)}` : ""} · ${escaparHtml(info.turma || "")}${info.data_transferencia ? ` · saiu em ${escaparHtml(info.data_transferencia)}` : ""}</p>
+      <p class="campo-ajuda" style="margin-bottom:10px">Pela Base ABC: ${d.consulta === "ok" ? `<b>${escaparHtml(d.fonte === "base_abc" ? d.escola : "vínculo ok")}</b>` : d.consulta === "verificar" ? `vínculo a verificar${d.motivo ? ": " + escaparHtml(d.motivo) : ""}` : "nada gravado (a consulta não achou ou ainda não foi feita)"}.
+        O que você preencher aqui vale no lugar dele, só para esta saída, e continua valendo depois de uma nova consulta.</p>
+      ${aviso}
+      <div class="field"><label for="tf-dest-escola">Escola de destino</label>
+        <input type="text" id="tf-dest-escola" list="tf-dest-lista" value="${escaparHtml(m.escola || "")}" placeholder="Em branco = usar a da Base ABC">
+        <datalist id="tf-dest-lista">${lista}</datalist>
+        <div class="campo-ajuda">Escola da lista de e-mails (municipais e CMEIs) para o aviso sair automático. Escola particular ou estadual não está na lista: marque abaixo "Encaminhado por e-mail à parte".</div></div>
+      <div class="field"><label for="tf-dest-status">Aviso à escola</label>
+        <select id="tf-dest-status">${opcoes}</select></div>
+      <div class="field"><label for="tf-dest-obs">Observação</label>
+        <input type="text" id="tf-dest-obs" maxlength="300" value="${escaparHtml(m.observacao || "")}" placeholder="Ex.: escola particular, enviei pelo e-mail da secretaria em 20/11"></div>
+      <div class="campo-ajuda" id="tf-dest-erro" style="color:var(--rose); min-height:1.2em"></div>
+      <div class="modal-acoes">
+        <button class="btn-sm" id="tf-dest-cancelar" style="padding:9px 16px;font-size:.78rem">Cancelar</button>
+        <button class="btn-primary" id="tf-dest-salvar">Salvar</button>
+      </div>`;
+    corpo.querySelector("#tf-dest-cancelar").addEventListener("click", fechar);
+    corpo.querySelector("#tf-dest-salvar").addEventListener("click", async () => {
+      try {
+        await apiPost(`/transferidos/destino/${encodeURIComponent(cgm)}`, {
+          escola: corpo.querySelector("#tf-dest-escola").value, status: corpo.querySelector("#tf-dest-status").value,
+          observacao: corpo.querySelector("#tf-dest-obs").value });
+        fechar();
+        toast("Destino salvo");
+        await carregarTransferidos();
+      } catch (e) { corpo.querySelector("#tf-dest-erro").textContent = e.message; }
+    });
+  });
+}
+
 function _transfFiltrados() {
   if (!_transfDados) return [];
   const q = semAcento(transfState.search.trim());
@@ -1778,6 +1840,7 @@ function renderTransfRows() {
       <td>${_chipDoc("Emitida", g.emitido_em, "cyan")} ${_chipDoc("Secr.", g.assinado_secretario, "blue")} ${_chipDoc("Dir.", g.assinado_diretor, "lime")}</td>
       <td>${_chipDoc("Emitido", h.emitido_em, "cyan")} ${_chipDoc("Secr.", h.assinado_secretario, "blue")} ${_chipDoc("Dir.", h.assinado_diretor, "lime")}</td>
       <td>${_chipDoc("Digitalizado", p.digitalizado_em, "blue")} ${_chipDoc("Anexado", p.anexado_em, "lime")}</td>
+      <td>${_celulaDestino(r)}</td>
       <td>${st}</td>
     </tr>`;
   }).join("");
@@ -1791,12 +1854,15 @@ async function carregarTransferidos() {
     const colunas = [{ chave: "nome", label: "Aluno" }, { chave: "cgm", label: "CGM" }, { chave: "turma", label: "Turma" },
       { chave: "guia_emitida", label: "Guia emitida" }, { chave: "guia_secretario", label: "Guia assinada (secretário)" }, { chave: "guia_diretor", label: "Guia assinada (diretor)" },
       { chave: "hist_emitido", label: "Histórico emitido" }, { chave: "hist_secretario", label: "Histórico assinado (secretário)" }, { chave: "hist_diretor", label: "Histórico assinado (diretor)" },
-      { chave: "parecer_digitalizado", label: "Parecer digitalizado" }, { chave: "parecer_anexado", label: "Parecer anexado" }, { chave: "status", label: "Status" }];
+      { chave: "parecer_digitalizado", label: "Parecer digitalizado" }, { chave: "parecer_anexado", label: "Parecer anexado" },
+      { chave: "destino", label: "Escola de destino" }, { chave: "aviso_destino", label: "Aviso à escola de destino" }, { chave: "status", label: "Status" }];
     const plano = (r) => ({
       nome: r.nome, cgm: r.cgm, turma: r.turma,
       guia_emitida: _fmtDataIso(r.guia.emitido_em), guia_secretario: _fmtDataIso(r.guia.assinado_secretario), guia_diretor: _fmtDataIso(r.guia.assinado_diretor),
       hist_emitido: _fmtDataIso(r.historico.emitido_em), hist_secretario: _fmtDataIso(r.historico.assinado_secretario), hist_diretor: _fmtDataIso(r.historico.assinado_diretor),
       parecer_digitalizado: _fmtDataIso(r.parecer.digitalizado_em), parecer_anexado: _fmtDataIso(r.parecer.anexado_em),
+      destino: (r.destino && r.destino.escola) || "",
+      aviso_destino: !r.destino ? "" : r.destino.aviso_enviado_em ? `Enviado em ${_fmtDataIso(r.destino.aviso_enviado_em)}` : r.destino.status_texto,
       status: r.status === "completo" ? "Completo" : r.status === "pendente" ? "Pendente" : `${r.feitos}/${r.total_passos}`,
     });
     _tabelas.transferidos = { colunas, linhas: _transfDados.transferidos.map(plano), extra: _transfDados };
@@ -1816,6 +1882,10 @@ async function carregarTransferidos() {
     ligarPilulas(sec, "data-tf", transfState, "filter", renderTransfRows);
     ligarOrdenacao(sec, "data-ts", transfState, renderTransfRows);
     document.getElementById("transf-q").addEventListener("input", (e) => { transfState.search = e.target.value; renderTransfRows(); });
+    document.getElementById("transf-tbody").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-destino]");
+      if (b) abrirDestinoTransferido(b.dataset.destino);
+    });
   }
   renderTransfRows();
 }
@@ -1972,6 +2042,13 @@ function campoHTML(campo) {
         <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
           <button type="button" class="btn-sm" id="${campo.id}-marcar-ok">Marcar quem tem CGM ok</button>
           <button type="button" class="btn-sm" id="${campo.id}-limpar">Limpar</button>
+        </div>
+        <div id="${campo.id}-faixa" style="display:none; gap:8px; margin-top:8px; flex-wrap:wrap; align-items:center;">
+          <span class="campo-ajuda" style="margin:0">Marcar por posição:</span>
+          <select id="${campo.id}-faixa-turma"><option value="">Todas as turmas</option></select>
+          <label class="campo-ajuda" style="margin:0">do <input type="number" min="1" id="${campo.id}-faixa-de" style="width:64px" placeholder="1"></label>
+          <label class="campo-ajuda" style="margin:0">ao <input type="number" min="1" id="${campo.id}-faixa-ate" style="width:64px" placeholder="5"></label>
+          <button type="button" class="btn-sm" id="${campo.id}-marcar-faixa">Marcar faixa</button>
         </div>
         <div class="checklist alunos-lista" id="${campo.id}-lista" data-campo="${campo.id}" style="margin-top:8px; max-height:240px; overflow:auto;">Carregando alunos…</div>
         <input id="${campo.id}" type="text"${nome} value="[]" style="display:none">
@@ -2338,6 +2415,7 @@ async function inicializarCampoAlunos() {
   let aviso = "";
 
   const selo = (a) => {
+    if (a.selo) return { texto: a.selo, cor: a.estado === "ok" ? "var(--cyan)" : "var(--amber)" };      // transferidos (escola de destino)
     if (a.na_nossa_escola) return { texto: `CGM ${a.cgm} · já está na nossa escola, sem escola anterior no vínculo (refaça a consulta)`, cor: "var(--amber)" };
     if (a.estado === "ok") return { texto: `CGM ${a.cgm} · ${a.escola_origem}`, cor: "var(--cyan)" };
     if (a.estado === "verificar") return { texto: `vínculo a verificar${a.motivo ? ": " + a.motivo : ""}`, cor: "var(--amber)" };
@@ -2348,6 +2426,18 @@ async function inicializarCampoAlunos() {
     resumo.textContent = marcados.size ? `${marcados.size} aluno(s) marcado(s).` : `Nenhum marcado: vale para todos (${alunos.length}).`;
     agendarPrevia();
   };
+  // "Marcar por posição": só aparece quando a lista traz a posição do aluno na turma (coluna "pos" da pré-matrícula)
+  const faixa = document.getElementById(`${id}-faixa`);
+  const faixaTurma = document.getElementById(`${id}-faixa-turma`);
+  const desenharFaixa = () => {
+    if (!faixa) return;
+    const comPos = alunos.filter((a) => Number.isInteger(a.pos));
+    faixa.style.display = comPos.length ? "flex" : "none";
+    const atual = faixaTurma.value;
+    const turmas = [...new Set(comPos.map((a) => a.turma))].sort();
+    faixaTurma.innerHTML = `<option value="">Todas as turmas</option>` + turmas.map((t) => `<option value="${_escHtml(t)}">${_escHtml(t)}</option>`).join("");
+    if (turmas.includes(atual)) faixaTurma.value = atual;
+  };
   const desenhar = () => {
     const termo = _semAcentoJS(busca.value).trim();
     const visiveis = alunos.filter((a) => !termo || _semAcentoJS(`${a.nome} ${a.turma}`).includes(termo));
@@ -2357,7 +2447,7 @@ async function inicializarCampoAlunos() {
           return `
           <label class="checklist-item" style="align-items:flex-start;">
             <input type="checkbox" value="${_escHtml(a.id)}"${marcados.has(a.id) ? " checked" : ""}>
-            <span>${_escHtml(a.nome)} <small style="color:var(--txt3)">(${_escHtml(a.turma)})</small><br><small style="color:${s.cor}">${_escHtml(s.texto)}</small></span>
+            <span>${Number.isInteger(a.pos) ? `${a.pos}º · ` : ""}${_escHtml(a.nome)} <small style="color:var(--txt3)">(${_escHtml(a.turma)})</small><br><small style="color:${s.cor}">${_escHtml(s.texto)}</small></span>
           </label>`;
         }).join("")
       : `<div class="campo-ajuda">${_escHtml(aviso || "Nenhum aluno encontrado.")}</div>`;
@@ -2365,8 +2455,9 @@ async function inicializarCampoAlunos() {
   const carregar = async () => {
     const situacao = document.getElementById("campo-situacao-pais")?.value || "matriculados";
     const fonte = document.getElementById("campo-fonte-alunos")?.value || "ano";
+    const publico = document.getElementById("campo-publico")?.value || "";
     try {
-      const r = await apiGet(`/avisos/alunos?situacao=${encodeURIComponent(situacao)}&fonte=${encodeURIComponent(fonte)}`);
+      const r = await apiGet(`/avisos/alunos?situacao=${encodeURIComponent(situacao)}&fonte=${encodeURIComponent(fonte)}&publico=${encodeURIComponent(publico)}`);
       alunos = r.alunos || [];
       aviso = r.aviso || "";
     } catch (e) {
@@ -2375,6 +2466,7 @@ async function inicializarCampoAlunos() {
     }
     const existentes = new Set(alunos.map((a) => a.id));
     [...marcados].forEach((i) => { if (!existentes.has(i)) marcados.delete(i); });     // trocou a fonte: some quem não está mais
+    desenharFaixa();
     desenhar();
     sincronizar();
   };
@@ -2391,7 +2483,19 @@ async function inicializarCampoAlunos() {
     sincronizar();
   });
   document.getElementById(`${id}-limpar`)?.addEventListener("click", () => { marcados.clear(); desenhar(); sincronizar(); });
-  ["campo-situacao-pais", "campo-fonte-alunos"].forEach((c) => document.getElementById(c)?.addEventListener("change", carregar));
+  document.getElementById(`${id}-marcar-faixa`)?.addEventListener("click", () => {
+    const de = parseInt(document.getElementById(`${id}-faixa-de`).value, 10) || 1;
+    const ate = parseInt(document.getElementById(`${id}-faixa-ate`).value, 10) || Infinity;
+    if (ate < de) { toast("A posição final é menor que a inicial."); return; }
+    const turma = faixaTurma.value;
+    const alvo = alunos.filter((a) => Number.isInteger(a.pos) && a.pos >= de && a.pos <= ate && (!turma || a.turma === turma));
+    alvo.forEach((a) => marcados.add(a.id));                 // acrescenta ao que já está marcado ("Limpar" zera)
+    desenhar();
+    sincronizar();
+    toast(alvo.length ? `${alvo.length} aluno(s) marcado(s): ${turma || "todas as turmas"}, posições ${de} a ${ate === Infinity ? "o fim" : ate}.`
+                      : "Nenhum aluno nessa faixa.");
+  });
+  ["campo-publico", "campo-situacao-pais", "campo-fonte-alunos"].forEach((c) => document.getElementById(c)?.addEventListener("change", carregar));
   await carregar();
 }
 

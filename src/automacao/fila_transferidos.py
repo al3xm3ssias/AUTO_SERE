@@ -18,6 +18,13 @@ Fila de transferidos: quem foi transferido (turmas.json) e já entra no processo
   histórico e parecer novos. O registro da 1ª saída vai para `ciclos_anteriores` (nada se perde), os PDFs dela são
   renomeados "<nome> (saída dd-mm-aaaa).pdf" para o 2º ciclo não sobrescrevê-los, e um registro novo (vazio) é criado.
 
+ID DA MATRÍCULA (2026-11-20)
+    Cada saída tem o `id_matricula` do período dela na ponte (src/comum/matriculas.py, turmas_relacional.json), que vem
+    do ID_MATRICULA das linhas do turmas.json. Com ID nos dois lados, ele decide: ID igual = a MESMA saída (mesmo que a
+    data tenha sido corrigida no SERE); ID diferente e data mais nova = OUTRA saída (novo ciclo). Registros antigos, sem
+    ID, seguem a regra por datas e adotam o ID na primeira coleta em que a saída é a mesma. O ciclo anterior guarda o
+    ID dela e o nome dos PDFs renomeados (`arquivos`), para os documentos ficarem ligados à saída e não ao nome do arquivo.
+
 IDENTIDADE (decisão do usuário, 27/10/2026)
     • Um REGISTRO (cadastro) é identificado por  nº da chamada (N) + nome + data de nascimento.
     • Um ALUNO (pessoa) é identificado por  nome + data de nascimento.
@@ -117,7 +124,8 @@ def _pessoas(turmas: dict) -> dict[tuple, list[dict]]:
             data_txt = str(a.get("Data Matricula", "")).strip()
             reg = {"turma": turma, "n": _n(a), "cgm": cgm, "nome": nome, "nasc": nasc,
                    "situacao": situacao, "transf": eh_transferido(situacao),
-                   "data": parse_data(data_txt), "data_txt": data_txt}
+                   "data": parse_data(data_txt), "data_txt": data_txt,
+                   "id": str(a.get("ID_MATRICULA") or "").strip()}          # ID do período (ponte); "" em turmas.json antigo
             id_reg = (turma, reg["n"], _norm_nome(nome), nasc, _norm_nome(situacao), data_txt)
             if id_reg in vistos:
                 continue
@@ -148,10 +156,13 @@ def _registro_vazio(nome: str, turma: str) -> dict:
 
 
 def _registro_novo(nome: str, turma: str, chamada=None, nasc=None, data_transf=None,
-                   retorno: Optional[dict] = None, anteriores: Optional[list] = None) -> dict:
+                   retorno: Optional[dict] = None, anteriores: Optional[list] = None,
+                   id_matricula: Optional[str] = None) -> dict:
     reg = _registro_vazio(nome, turma)
     reg.update({"chamada": chamada, "data_nascimento": nasc,
                 "data_transferencia": data_transf, "retorno": retorno})
+    if id_matricula:
+        reg["id_matricula"] = str(id_matricula)         # só aparece quando a ponte já deu ID a esta saída
     if anteriores:
         reg["transferencias_anteriores"] = anteriores
     return reg
@@ -194,12 +205,14 @@ def construir_transferidos(turmas: dict) -> tuple[dict, dict, list[str]]:
             if depois:                                               # há registro posterior → voltou
                 r = depois[0]
                 retorno = {"chamada": r["n"], "turma": r["turma"], "data": r["data_txt"]}
-            anteriores = [{"chamada": r["n"], "turma": r["turma"], "data": r["data_txt"]} for r in lista[:-1]]
+            anteriores = [{"chamada": r["n"], "turma": r["turma"], "data": r["data_txt"], **({"id": r["id"]} if r["id"] else {})}
+                          for r in lista[:-1]]
             if anteriores:
                 avisos.append(f"{principal['nome']} (CGM {cgm}): {len(lista)} transferências no ano — o registro "
                               f"usa a mais recente; as anteriores ficam em 'transferencias_anteriores'.")
             transferidos[cgm] = _registro_novo(principal["nome"], principal["turma"], principal["n"],
-                                               principal["nasc"], principal["data_txt"], retorno, anteriores)
+                                               principal["nasc"], principal["data_txt"], retorno, anteriores,
+                                               principal["id"] or None)
         if _ativo(regs):
             retornaram += 1
 
@@ -257,21 +270,30 @@ def e_nova_saida(reg: dict, aluno_da_fila: dict) -> bool:
       • Registro antigo (ou pré-corte), sem `data_transferencia`: os documentos dele foram emitidos ANTES da
         saída atual, logo não podem ser desta saída.
     Em qualquer caso é preciso existir uma saída anterior (`transferencias_anteriores`).
+
+    COM ID DA MATRÍCULA nos dois lados (registro e fila), o ID manda: igual = mesma saída (a data pode ter sido
+    corrigida no SERE); diferente = outra saída, desde que a data atual seja posterior à do registro (se não for, é a
+    ponte que foi refeita e deu outro ID à MESMA saída: nada se refaz). Aí não se exige a saída anterior na fila.
     """
     d_nova = parse_data(aluno_da_fila.get("data_transferencia") or "")
+    id_reg, id_novo = str(reg.get("id_matricula") or ""), str(aluno_da_fila.get("id_matricula") or "")
+    por_id = bool(id_reg and id_novo)
+    if por_id and id_reg == id_novo:
+        return False
     anteriores = {parse_data(x.get("data") or "") for x in aluno_da_fila.get("transferencias_anteriores") or []} - {None}
-    if d_nova is None or not anteriores:
+    if d_nova is None or (not anteriores and not por_id):
         return False
     d_reg = parse_data(reg.get("data_transferencia") or "")
     if d_reg is not None:
-        return d_reg < d_nova and d_reg in anteriores
+        return d_reg < d_nova and (por_id or d_reg in anteriores)
     emissao = _ultima_emissao(reg)
     return emissao is not None and emissao < d_nova
 
 
-def _guardar_pdfs_do_ciclo(pasta: Path, reg: dict) -> list[str]:
+def _guardar_pdfs_do_ciclo(pasta: Path, reg: dict, mapa: Optional[dict] = None) -> list[str]:
     """
     Renomeia os PDFs da saída anterior (histórico e guia) para o novo ciclo não sobrescrevê-los.
+    Com `mapa`, preenche {"historico": nome novo, "guia": nome novo} para o ciclo guardar onde ficaram os documentos.
     Levanta OSError se algum não puder ser renomeado (ex.: aberto no leitor de PDF): nesse caso o chamador
     não inicia o novo ciclo, e a próxima execução tenta de novo.
     """
@@ -293,7 +315,23 @@ def _guardar_pdfs_do_ciclo(pasta: Path, reg: dict) -> list[str]:
             n += 1
         origem.rename(destino)
         renomeados.append(destino.name)
+        if mapa is not None:
+            mapa["historico" if subpasta == _pastas.HISTORICO else "guia"] = destino.name
     return renomeados
+
+
+def _adotar_id(reg: dict, aluno_da_fila: dict) -> bool:
+    """
+    A saída é a mesma (e_nova_saida disse que não): o registro passa a guardar o ID da ponte. Registro antigo, sem ID,
+    adota o atual; se o ID mudou porque a ponte foi refeita, adota o novo e lembra o antigo. True se o registro mudou.
+    """
+    novo, atual = str(aluno_da_fila.get("id_matricula") or ""), str(reg.get("id_matricula") or "")
+    if not novo or novo == atual:
+        return False
+    if atual:
+        reg["id_matricula_anterior"] = atual
+    reg["id_matricula"] = novo
+    return True
 
 
 def iniciar_novo_ciclo(controle: dict, cgm: str, a: dict, pasta: Path) -> str:
@@ -307,15 +345,28 @@ def iniciar_novo_ciclo(controle: dict, cgm: str, a: dict, pasta: Path) -> str:
         antigo.update({"nome": a["nome"], "turma": a["turma"], "chamada": a["chamada"],
                        "data_nascimento": a["data_nascimento"], "data_transferencia": a["data_transferencia"],
                        "retorno": a["retorno"]})
+        if a.get("id_matricula"):
+            antigo["id_matricula"] = a["id_matricula"]
         if a.get("transferencias_anteriores"):
             antigo["transferencias_anteriores"] = a["transferencias_anteriores"]
+        descartados = {k: antigo.pop(k) for k in ("vinculo_base_abc", "destino_manual") if antigo.get(k)}
+        if descartados:                                             # era da saída anterior (sem documentos): guarda, não apaga
+            antigo["destino_anterior"] = {**descartados, "arquivado_em": _agora()}
         return "atualizado"
 
-    _guardar_pdfs_do_ciclo(pasta, antigo)                       # se falhar, nada abaixo acontece
+    arquivos: dict = {}
+    _guardar_pdfs_do_ciclo(pasta, antigo, arquivos)             # se falhar, nada abaixo acontece
     ciclo = {k: antigo.get(k) for k in ("chamada", "turma", "data_transferencia", "retorno", "guia", "historico", "parecer")}
+    if antigo.get("id_matricula"):
+        ciclo["id_matricula"] = antigo["id_matricula"]          # a saída que este ciclo documentou
+    if arquivos:
+        ciclo["arquivos"] = arquivos                            # onde ficaram a guia e o histórico dela (já renomeados)
+    for k in ("vinculo_base_abc", "destino_manual"):               # o destino é da saída: a nova saída começa sem ele
+        if antigo.get(k):
+            ciclo[k] = antigo[k]
     ciclo["arquivado_em"] = _agora()
     novo = _registro_novo(a["nome"], a["turma"], a["chamada"], a["data_nascimento"], a["data_transferencia"],
-                          a["retorno"], a.get("transferencias_anteriores"))
+                          a["retorno"], a.get("transferencias_anteriores"), a.get("id_matricula"))
     novo["ciclos_anteriores"] = list(antigo.get("ciclos_anteriores") or []) + [ciclo]
     controle[cgm] = novo
     return "novo_ciclo"
@@ -353,6 +404,8 @@ def montar_fila(turmas: dict, data_corte: Optional[date] = None) -> tuple[dict, 
                        "situacao_fila": situacao, "processar": situacao == SITUACAO_PROCESSAR}
         if reg.get("transferencias_anteriores"):
             alunos[cgm]["transferencias_anteriores"] = reg["transferencias_anteriores"]
+        if reg.get("id_matricula"):
+            alunos[cgm]["id_matricula"] = reg["id_matricula"]
 
     resumo.update({"transferidos_na_fila": len(alunos),
                    "a_processar": sum(1 for a in alunos.values() if a["processar"]),
@@ -402,7 +455,7 @@ def registrar_fila_transferidos(turmas: dict, dados_dir: Optional[Path] = None,
             if cgm not in controle:
                 controle[cgm] = _registro_novo(a["nome"], a["turma"], a["chamada"], a["data_nascimento"],
                                                a["data_transferencia"], a["retorno"],
-                                               a.get("transferencias_anteriores"))
+                                               a.get("transferencias_anteriores"), a.get("id_matricula"))
                 novos += 1
             elif e_nova_saida(controle[cgm], a):                       # saiu de novo: precisa de documentos novos
                 try:
@@ -416,6 +469,8 @@ def registrar_fila_transferidos(turmas: dict, dados_dir: Optional[Path] = None,
                     ciclos += 1
                     avisos.append(f"{a['nome']} (CGM {cgm}): saiu de novo em {a['data_transferencia']} — novos "
                                   f"documentos serão feitos; os da saída anterior ficaram guardados.")
+            elif _adotar_id(controle[cgm], a):                         # mesma saída: só liga o registro ao ID da ponte
+                alterou = True
         if novos or alterou or not caminho.exists():  # o controle sempre passa a existir (vazio, se ninguém entra)
             _gravar_json(caminho, controle)
     imprimir_fila(fila, avisos, simulacao)

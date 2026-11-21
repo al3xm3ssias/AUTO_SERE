@@ -146,6 +146,9 @@ class Consulta:
     # Onde gravar o vínculo de volta (só pré-matrícula): (arquivo, "cadastros"|"turmas_intencao", chave, turma, periodo).
     # Fora do repr/rótulo/comparação: a chave é o CPF, que não pode aparecer em log nem entrar na deduplicação.
     destinos: tuple = field(default=(), repr=False, compare=False)
+    # ID da matrícula (ponte turmas_relacional.json) do período que originou a consulta; hoje só os transferidos o têm (o ID
+    # da SAÍDA). Vai no vínculo e no registro e protege a gravação: se o registro de origem já é de OUTRA saída, nada é gravado.
+    id_matricula: str = field(default="", repr=False, compare=False)
 
     @property
     def rotulo(self) -> str:
@@ -418,7 +421,7 @@ def consultas_dos_transferidos(dados: dict, arquivo: str = ARQUIVO_TRANSFERIDOS)
         except ValueError:
             nasc = None
         saida.append(Consulta(nome=re.sub(r"\s+", " ", str(reg.get("nome") or "")).strip(), nascimento=nasc, cgm=str(cgm).strip(),
-                              origem="transferidos",
+                              origem="transferidos", id_matricula=str(reg.get("id_matricula") or ""),
                               destinos=((arquivo, "transferidos", str(cgm).strip(), "", PERIODO_ANO_VIGENTE),)))
     return saida
 
@@ -466,6 +469,11 @@ def gravar_vinculos_pre_matricula(vinculos: list, ano: Optional[str] = None,
             alvo = None
             if secao == "transferidos":                      # transferidos.json é {CGM: registro}, sem seção
                 alvo = dados.get(chave)
+                esperado = str(vinculo.get("id_matricula") or "")
+                if isinstance(alvo, dict) and esperado and alvo.get("id_matricula") and str(alvo["id_matricula"]) != esperado:
+                    log("    ⚠️  Vínculo de um transferido não gravado: o registro dele já é de OUTRA saída (o aluno saiu de novo "
+                        "depois que a consulta começou). Consulte de novo.")
+                    alvo = None
             elif secao == "cadastros":
                 alvo = (dados.get("cadastros") or {}).get(chave)
             else:
@@ -791,6 +799,8 @@ def montar_vinculo(consulta: Consulta, nome: str, cgm: str, historico: list[dict
     vinculo = {"periodo": periodo, "ano_referencia": ano_referencia, "nome": nome, "cgm": cgm, "turma": turma,
                "escola": escola, "situacao": situacao, "status": "verificar" if motivos else "ok"}
     vinculo.update(anterior)
+    if consulta.id_matricula:
+        vinculo["id_matricula"] = consulta.id_matricula
     if motivos:
         vinculo["motivo"] = "; ".join(motivos)
     return vinculo
@@ -817,6 +827,8 @@ def montar_registro(consulta: Consulta, resultado: Resultado, historico: Optiona
         "pedido": {"nome": consulta.nome, "data_nascimento": formatar_data(consulta.nascimento), "nome_mae": consulta.mae,
                    "cgm": consulta.cgm, "responsavel": consulta.responsavel, "origem": consulta.origem},
     }
+    if consulta.id_matricula:
+        registro["id_matricula"] = consulta.id_matricula
     if encontrado:
         registro["vinculo"] = montar_vinculo(consulta, nome_final, cgm, historico or [],
                                              int(ano_referencia or paths.ano_atual()))
@@ -1107,6 +1119,9 @@ async def consultar(nav, consultas: list[Consulta], ano: Optional[str] = None,
         try:
             gravados: set = set()
             resumo.vinculos_gravados = gravar_vinculos_pre_matricula(resumo.vinculos, ano, log, gravados_out=gravados)
+            if resumo.vinculos_gravados:                     # um CGM novo pode ligar um aluno da pré-matrícula à matrícula dele
+                from src.comum.matriculas import ligar_pre_matricula_sem_falhar
+                ligar_pre_matricula_sem_falhar(_pasta_e_ano(ano)[0])
             if limpar_vinculados and gravados:
                 # só sai de buscas_base.json quem teve TODOS os destinos gravados: o vínculo já está no cadastro de origem
                 saem = [reg for reg, destinos in resumo.com_destino

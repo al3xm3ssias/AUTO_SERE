@@ -534,3 +534,30 @@ def test_primeira_saida_antes_do_corte_e_segunda_depois_geram_novo_ciclo(process
     processo.registrar_pre_corte()                                        # rodar o pré-corte depois não desfaz
     assert _ler(ambiente / "transferidos.json")["55"]["guia"]["emitido_em"] is None
     assert [a.cgm for a in processo.carregar_alunos()] == ["55"]
+
+
+def test_segunda_saida_leva_o_destino_da_primeira_para_o_ciclo_e_comeca_sem_destino(ambiente):
+    controle = _processar_a_primeira_saida(ambiente)
+    controle["55"]["vinculo_base_abc"] = {"escola": "ESCOLA MUNICIPAL ANA NERI", "status": "ok", "cgm": "55"}
+    controle["55"]["destino_manual"] = {"escola": "Colégio Particular", "status": "encaminhado", "observacao": "enviei à parte"}
+    _gravar(ambiente / "transferidos.json", controle)
+
+    ft.registrar_fila_transferidos(_saida2(), ambiente, CORTE)
+    reg = _ler(ambiente / "transferidos.json")["55"]
+    assert "vinculo_base_abc" not in reg and "destino_manual" not in reg          # a nova saída pode ir para outra escola
+    antigo = reg["ciclos_anteriores"][0]
+    assert antigo["vinculo_base_abc"]["escola"] == "ESCOLA MUNICIPAL ANA NERI"
+    assert antigo["destino_manual"]["status"] == "encaminhado"
+
+
+def test_registro_sem_documentos_atualizado_guarda_o_destino_antigo_em_vez_de_apagar(ambiente):
+    ft.registrar_fila_transferidos(_saida1(), ambiente, CORTE)
+    controle = _ler(ambiente / "transferidos.json")
+    controle["55"]["destino_manual"] = {"escola": "Escola X", "status": "nao_avisar", "observacao": ""}
+    _gravar(ambiente / "transferidos.json", controle)
+
+    antigo = _ler(ambiente / "transferidos.json")["55"]
+    assert ft.iniciar_novo_ciclo({"55": antigo}, "55", {"nome": "BETO LIMA", "turma": TURMA, "chamada": 40,
+                                                          "data_nascimento": None, "data_transferencia": "10/10/2026",
+                                                          "retorno": None}, ambiente) == "atualizado"
+    assert "destino_manual" not in antigo and antigo["destino_anterior"]["destino_manual"]["escola"] == "Escola X"

@@ -1097,6 +1097,75 @@ _DOCS_TRANSFERENCIA = (("guia", ("emitido_em", "assinado_secretario", "assinado_
                        ("historico", ("emitido_em", "assinado_secretario", "assinado_diretor")))
 
 
+def _destino_para_tela(reg: dict, aviso_enviado) -> dict:
+    """Para onde o aluno foi e o que o aviso à escola de destino fará com ele (coluna \"Destino\" da tela de Transferidos)."""
+    from src.comum import destino_transferidos as _dest
+    d = _dest.resolver_destino(reg)
+    return {**d, "status_texto": _dest.STATUS_AVISO[d["status_aviso"]],
+            "aviso_enviado_em": (aviso_enviado or {}).get("enviado_em"), "aviso_enviado_para": (aviso_enviado or {}).get("para")}
+
+
+def _aviso_do_aluno(avisados: dict, cgm: str, reg: dict):
+    """O aviso já enviado desta SAÍDA: pelo ID da matrícula (resiste a data corrigida) ou, sem ele, por CGM + data."""
+    return (avisados.get(("id", str(reg.get("id_matricula") or ""))) if reg.get("id_matricula") else None) \
+        or avisados.get((cgm, str(reg.get("data_transferencia") or "")))
+
+
+@api_bp.route("/transferidos/destino/<cgm>", methods=["GET"])
+def transferidos_destino(cgm):
+    """O destino do aluno (do vínculo da Base ABC e/ou preenchido à mão) e as escolas da lista, para a janela de edição."""
+    from src.comum import destino_transferidos as _dest
+    from src.comum.arquivos_json import ArquivoJsonCorrompidoError
+    try:
+        dados = _carregar_json_estrito("transferidos.json")
+    except ArquivoJsonCorrompidoError as exc:
+        return jsonify({"erro": str(exc)}), 500
+    reg = (dados or {}).get(str(cgm))
+    if not isinstance(reg, dict):
+        return jsonify({"erro": "Aluno não encontrado em transferidos.json."}), 404
+    try:
+        from src.automacao import avisos as _avisos
+        escolas = [u["nome"] for u in _avisos.listar_unidades()]
+        avisado = _aviso_do_aluno(_avisos.avisos_ja_enviados_ao_destino(), str(cgm), reg)
+    except Exception:                                  # noqa: BLE001
+        escolas, avisado = [], None
+    return jsonify({"cgm": str(cgm), "id_matricula": reg.get("id_matricula") or "", "nome": reg.get("nome"), "turma": reg.get("turma"),
+                    "data_transferencia": reg.get("data_transferencia"), "destino": _destino_para_tela(reg, avisado),
+                    "manual": _dest.ler_manual(reg), "status_opcoes": _dest.STATUS_AVISO, "escolas": escolas})
+
+
+@api_bp.route("/transferidos/destino/<cgm>", methods=["POST"])
+def transferidos_destino_salvar(cgm):
+    """
+    Preenche à mão o destino do aluno (ex.: a escola de destino não usa o SERE e a consulta não achou nada).
+    Corpo: {"escola": "...", "status": "automatico|encaminhado|nao_avisar", "observacao": "..."}. Tudo em branco com
+    status "automatico" limpa o preenchimento. Vale só para a saída atual; uma nova consulta na Base ABC não o apaga.
+    """
+    from src.comum import destino_transferidos as _dest
+    from src.comum.arquivos_json import ArquivoJsonCorrompidoError
+    corpo = request.get_json(silent=True)
+    if not isinstance(corpo, dict):
+        return jsonify({"erro": "Envie {\"escola\": ..., \"status\": ..., \"observacao\": ...}."}), 400
+    rodando = _automacoes_rodando()
+    if rodando:
+        return jsonify({"erro": "Há uma automação em execução (" + ", ".join(rodando) + "). Espere terminar para editar: "
+                                "ela regrava o transferidos.json e o destino podia se perder."}), 409
+    try:
+        d = _dest.salvar_destino(str(cgm), corpo.get("escola"), corpo.get("status"), corpo.get("observacao"), _dados_dir())
+    except _dest.DestinoInvalidoError as exc:
+        return jsonify({"erro": str(exc)}), (404 if "não encontrado" in str(exc) or "não existe" in str(exc) else 400)
+    except ArquivoJsonCorrompidoError as exc:
+        return jsonify({"erro": str(exc)}), 500
+    return jsonify({"ok": True, "destino": {**d, "status_texto": _dest.STATUS_AVISO[d["status_aviso"]]}})
+
+
+def _carregar_json_estrito(nome_arquivo: str):
+    """Como _carregar_json, mas arquivo ilegível levanta ArquivoJsonCorrompidoError (não é tratado como vazio)."""
+    from src.comum.arquivos_json import carregar_json
+    caminho = _dados_dir() / nome_arquivo
+    return carregar_json(caminho, dict, dict) if caminho.exists() else {}
+
+
 @api_bp.route("/transferidos/lista")
 def transferidos_lista():
     """
@@ -1106,6 +1175,11 @@ def transferidos_lista():
     """
     bruto = _carregar_json("transferidos.json", {})
     por_cgm = _turma_situacao_por_cgm()
+    try:
+        from src.automacao import avisos as _avisos
+        avisados = _avisos.avisos_ja_enviados_ao_destino()
+    except Exception:                                  # noqa: BLE001 — o aviso é um extra: a tabela nunca depende dele
+        avisados = {}
     registros = []
     for cgm, r in (bruto.items() if isinstance(bruto, dict) else []):
         if not isinstance(r, dict):
@@ -1115,7 +1189,9 @@ def transferidos_lista():
         parecer = r.get("parecer") if isinstance(r.get("parecer"), dict) else {}
         feitos = sum(1 for doc in (guia, hist) for campo in ("emitido_em", "assinado_secretario", "assinado_diretor")
                      if doc.get(campo))
+        destino = _destino_para_tela(r, _aviso_do_aluno(avisados, str(cgm), r))
         registros.append({
+            "destino": destino, "id_matricula": r.get("id_matricula") or "",
             "cgm": str(cgm),
             "nome": r.get("nome") or (por_cgm.get(str(cgm)) or {}).get("nome") or "—",
             "turma": r.get("turma") or (por_cgm.get(str(cgm)) or {}).get("turma") or "—",
@@ -1583,6 +1659,11 @@ def avisos_alunos():
     da Base ABC (ok / verificar / sem_vinculo). Parâmetros: situacao (matriculados|aguardando|ambos) e fonte (ano|proximo|ambas).
     """
     from src.automacao import avisos as _avisos
+    if request.args.get("publico") == "destino":       # transferidos (escola de destino), com o estado do destino e dos documentos
+        try:
+            return jsonify({"alunos": _avisos.listar_transferidos_para_aviso()})
+        except ValueError as exc:
+            return jsonify({"alunos": [], "aviso": str(exc)})
     situacao, fonte = request.args.get("situacao") or "matriculados", request.args.get("fonte") or "ano"
     if situacao not in _avisos.SITUACOES_PAIS or fonte not in _avisos.FONTES_ALUNOS:
         return jsonify({"erro": "Situação ou fonte inválida."}), 400

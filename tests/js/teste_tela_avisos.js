@@ -25,9 +25,9 @@ w.fetch = async (url, op = {}) => {
     const f = new URL("http://x" + url).searchParams.get("fonte");
     if (f === "proximo") return ok({ alunos: [], aviso: "Ainda não existe previsao_alunos_2027.json" });
     return ok({ alunos: [
-      { id: "111", nome: "ANA LIMA", turma: "Infantil IV", fonte: "ano", estado: "ok", cgm: "1000000001", escola_origem: "ESCOLA MUNICIPAL ANA NERI", motivo: "" },
-      { id: "112", nome: "BETO <i>LIMA</i>", turma: "1º Ano", fonte: "ano", estado: "sem_vinculo", cgm: "", escola_origem: "", motivo: "" },
-      { id: "118", nome: "HUGO MELO", turma: "1º Ano", fonte: "ano", estado: "verificar", cgm: "", escola_origem: "X", motivo: "sem linha de 2026" }] });
+      { id: "111", nome: "ANA LIMA", turma: "Infantil IV", pos: 1, fonte: "ano", estado: "ok", cgm: "1000000001", escola_origem: "ESCOLA MUNICIPAL ANA NERI", motivo: "" },
+      { id: "112", nome: "BETO <i>LIMA</i>", turma: "1º Ano", pos: 2, fonte: "ano", estado: "sem_vinculo", cgm: "", escola_origem: "", motivo: "" },
+      { id: "118", nome: "HUGO MELO", turma: "1º Ano", pos: 1, fonte: "ano", estado: "verificar", cgm: "", escola_origem: "X", motivo: "sem linha de 2026" }] });
   }
   if (url.endsWith("/previa")) return ok({ texto: "prévia", aviso: false });
   if (url.endsWith("/avisos/modelos") && metodo === "POST") { salvou = true; return ok({ modelo: { id: "meu-modelo", nome: "Meu modelo" }, modelos: [] }); }
@@ -114,14 +114,33 @@ const marcar = (cx, v) => { cx.checked = v; cx.dispatchEvent(new w.Event("change
   chamadas.length = 0; mudar($("campo-fonte-alunos"), "proximo"); await esperar(60);
   ok(chamadas.some((c) => c[1].includes("/avisos/alunos") && c[1].includes("fonte=proximo") && c[1].includes("situacao=matriculados")), "trocar a fonte recarrega a lista");
   ok($("campo-alunos-lista").textContent.includes("previsao_alunos_2027.json") && $("campo-alunos").value === "[]", "fonte sem arquivo: mostra o aviso e descarta as marcações que sumiram");
+  ok($("campo-alunos-faixa").style.display === "none", "sem posição na lista: a barra de faixa some");
   mudar($("campo-fonte-alunos"), "ambas"); await esperar(60);
   $("campo-alunos-limpar").click();
   ok($("campo-alunos").value === "[]", "Limpar desmarca tudo");
+  console.log("# marcar por posição (do 1º ao Nº da turma)");
+  ok($("campo-alunos-faixa").style.display === "flex", "a barra de faixa aparece quando a lista traz a posição");
+  ok(alunosLinhas()[0].startsWith("1º · ANA LIMA"), "a posição aparece na lista: " + alunosLinhas()[0]);
+  ok([...$("campo-alunos-faixa-turma").options].map((o) => o.value).join("|") === "|1º Ano|Infantil IV", "turmas da faixa: " + [...$("campo-alunos-faixa-turma").options].map((o) => o.value));
+  const faixa = async (turma, de, ate) => { mudar($("campo-alunos-faixa-turma"), turma); $("campo-alunos-faixa-de").value = de; $("campo-alunos-faixa-ate").value = ate; $("campo-alunos-marcar-faixa").click(); await esperar(); };
+  await faixa("1º Ano", "1", "1");
+  ok($("campo-alunos").value === '["118"]', "1º da turma '1º Ano': " + $("campo-alunos").value);
+  await faixa("1º Ano", "1", "2");
+  ok(JSON.stringify(JSON.parse($("campo-alunos").value).sort()) === '["112","118"]', "do 1º ao 2º acrescenta o que faltava: " + $("campo-alunos").value);
+  $("campo-alunos-limpar").click();
+  await faixa("", "1", "1");
+  ok(JSON.stringify(JSON.parse($("campo-alunos").value).sort()) === '["111","118"]', "todas as turmas, só o 1º de cada: " + $("campo-alunos").value);
+  $("campo-alunos-limpar").click();
+  await faixa("1º Ano", "3", "2");
+  ok($("campo-alunos").value === "[]", "faixa invertida não marca ninguém");
+  await faixa("Infantil IV", "2", "5");
+  ok($("campo-alunos").value === "[]", "faixa sem ninguém não marca ninguém");
+  $("campo-alunos-limpar").click();
   marcar($("campo-alunos-lista").querySelectorAll("input")[0], true);
 
   console.log("# tipo de mensagem carrega o texto");
   const tipo = $("campo-tipo-mensagem");
-  ok([...tipo.options].map((o) => o.value).join() === "livre,transferencia", "opções: " + [...tipo.options].map((o) => o.value));
+  ok([...tipo.options].map((o) => o.value).join() === "livre,transferencia,transferencia_destino,chamada_matricula", "opções: " + [...tipo.options].map((o) => o.value));
   mudar($("campo-publico"), "pais");
   mudar(tipo, "transferencia"); await esperar();
   ok($("campo-assunto").value.includes("$ALUNO"), "assunto carregado: " + $("campo-assunto").value);

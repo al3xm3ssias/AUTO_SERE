@@ -4,8 +4,12 @@ modelos_avisos.py — modelos de mensagem da tela "Mandar avisos" (automação `
 Cada modelo é um TIPO de comunicado: nome, para quem é (escolas / pais / qualquer), assunto e mensagem. Ao escolher o
 tipo na tela, o assunto e a mensagem são preenchidos (e continuam editáveis).
 
-Há dois modelos que já vêm prontos (PADROES):
+Há quatro modelos que já vêm prontos (PADROES):
   livre          em branco, para escrever na hora;
+  transferencia_destino  avisa a escola de DESTINO de um aluno que SAIU daqui: histórico, guia e parecer na pasta do aluno
+                 e em anexo. Usa $ALUNO, $CGM, $TURMA, $DATA_SAIDA (público "destino").
+  chamada_matricula  chama os PAIS de um aluno novo para efetivar a matrícula (vaga disponível). Usa $RESPONSAVEL, $ALUNO,
+                 $TURMA. Combine com a seleção por turma e faixa de posição ("do 1º ao 5º") da tela de avisos.
   transferencia  pede à escola de ORIGEM do aluno que chega a liberação da transferência no SERE, o parecer via SME e o
                  histórico escolar na pasta do aluno. Usa $ALUNO, $CGM e $SERIE (série em que ele está na escola de origem).
 
@@ -25,7 +29,7 @@ from src.comum import paths
 from src.comum.arquivos_json import ArquivoJsonCorrompidoError, carregar_json, salvar_json_atomico
 
 NOME_ARQUIVO = "modelos_avisos.json"
-PUBLICOS_DO_MODELO = ("", "escolas", "pais")        # "" = serve para qualquer público
+PUBLICOS_DO_MODELO = ("", "escolas", "pais", "destino")        # "" = serve para qualquer público
 LIMITE_NOME = 80
 LIMITE_ASSUNTO = 200
 LIMITE_MENSAGEM = 20000
@@ -46,6 +50,33 @@ PADROES: dict[str, dict] = {
             "Solicitamos a transferência do aluno $ALUNO, sob o CGM $CGM, da série $SERIE.\n"
             "Por gentileza, liberar a transferência do aluno no SERE, encaminhar o parecer via SME e, se possível, "
             "anexar o histórico escolar na pasta do aluno.\n\n"
+            "Atenciosamente,\n$ESCOLA"
+        ),
+    },
+    "transferencia_destino": {
+        "nome": "Aluno transferido (avisar a escola de destino)",
+        "publico": "destino",
+        "assunto": "Transferência do aluno $ALUNO — documentos em anexo",
+        "mensagem": (
+            "Olá, tudo bem?\n\n"
+            "Informamos que o aluno $ALUNO (CGM $CGM), da turma $TURMA, foi transferido da nossa escola em $DATA_SAIDA "
+            "e consta como seu aluno.\n"
+            "O histórico escolar, a guia de transferência e o parecer descritivo já estão na pasta do aluno no SERE e "
+            "seguem também em anexo neste e-mail.\n\n"
+            "Qualquer dúvida, estamos à disposição.\n\n"
+            "Atenciosamente,\n$ESCOLA"
+        ),
+    },
+    "chamada_matricula": {
+        "nome": "Chamada para matrícula (pais de aluno novo)",
+        "publico": "pais",
+        "assunto": "Vaga para $ALUNO — $TURMA ($ANO)",
+        "mensagem": (
+            "Olá, $RESPONSAVEL!\n\n"
+            "Informamos que há vaga para $ALUNO na turma $TURMA da $ESCOLA em $ANO.\n\n"
+            "Para efetivar a matrícula, pedimos que compareça à secretaria da escola, em horário de atendimento, "
+            "com os documentos exigidos.\n\n"
+            "Se não tiver mais interesse na vaga, por favor nos avise, para que ela seja oferecida a outra família.\n\n"
             "Atenciosamente,\n$ESCOLA"
         ),
     },

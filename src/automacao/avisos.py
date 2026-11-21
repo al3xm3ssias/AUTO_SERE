@@ -15,6 +15,11 @@ PÚBLICOS
                 da Base ABC gravado em pre_matricula.json / previsao_alunos_<ano+1>.json). Só entra quem tem vínculo "ok"
                 com CGM e escola, cuja escola está na lista e tem e-mail (vai o primeiro). O resto fica numa lista de
                 "não recebem" (sem vínculo, a verificar, origem fora da lista, já na nossa escola, escola sem e-mail).
+  destino   escola de DESTINO dos alunos transferidos (2026-11-19): um e-mail por aluno que SAIU, para a escola para onde ele foi
+            (vínculo da Base ABC gravado em transferidos.json, ou o destino preenchido à mão na tela de Transferidos),
+            avisando que histórico, guia e parecer estão na pasta do aluno e seguem em ANEXO neste e-mail. Só entra quem tem
+            os três arquivos da saída atual, a escola na lista de e-mails e o aviso "automático" (quem foi marcado como
+            "encaminhado por e-mail à parte" ou "não avisar automaticamente" fica de fora). Veja destino_transferidos.py.
   pais      responsáveis dos alunos novos, um e-mail por e-mail distinto: quem tem mais de um filho recebe UMA mensagem.
             Quem entra: matriculados (padrão), aguardando vaga ou ambos; nunca cancelados nem tentativas antigas
             substituídas (BUG-PRE-002).
@@ -38,6 +43,7 @@ MODOS
 MARCADORES na mensagem e no assunto ($MARCADOR; um desconhecido é recusado antes de qualquer envio):
   todos     $ESCOLA (nome da nossa escola)  $ANO  $DATA
   escolas   $ESCOLA_DESTINO (escola que recebe)  $ALUNO  $CGM  $SERIE (série na escola de origem)  $TURMA (turma pretendida aqui)
+  destino   $ESCOLA_DESTINO (escola para onde o aluno foi)  $ALUNO  $CGM  $TURMA (turma dele aqui)  $DATA_SAIDA (data da transferência)
   pais      $RESPONSAVEL  $ALUNO (nomes unidos por " e ")  $TURMA (turmas unidas por " e ")
 
 Os modelos de mensagem (tipo de mensagem na tela) ficam em src/comum/modelos_avisos.py.
@@ -56,13 +62,15 @@ from pathlib import Path
 from typing import Optional
 
 from src.comum import credenciais, escola, paths, previsao
+from src.comum import destino_transferidos as destino_tf
 from src.comum.arquivos_json import ArquivoJsonCorrompidoError, carregar_json, salvar_json_atomico
 from src.comum.execucao_gui import verificar_cancelamento
 from src.comum.logger import get_logger
 
 log = get_logger(__file__)
 
-PUBLICOS = {"escolas": "Escolas e CMEIs de Ponta Grossa", "pais": "Pais de alunos novos (pré-matrícula)"}
+PUBLICOS = {"escolas": "Escolas e CMEIs de Ponta Grossa", "pais": "Pais de alunos novos (pré-matrícula)",
+            "destino": "Escola de destino dos alunos transferidos"}
 CANAIS = {"email": "E-mail"}
 MODOS = {"simular": "Simular (não envia nada)", "teste": "Teste (envia só para o e-mail de teste)",
          "enviar": "Enviar de verdade (para os destinatários reais)"}
@@ -76,11 +84,13 @@ MARCADORES = {
     # ALUNO/CGM/SERIE/TURMA: usados num texto para a escola de ORIGEM do aluno que chega (um e-mail por aluno)
     "escolas": ("ESCOLA_DESTINO", "ALUNO", "CGM", "SERIE", "TURMA"),
     "pais": ("RESPONSAVEL", "ALUNO", "TURMA"),
+    # um e-mail por aluno transferido, para a escola para onde ele foi; os documentos seguem em anexo
+    "destino": ("ESCOLA_DESTINO", "ALUNO", "CGM", "TURMA", "DATA_SAIDA"),
 }
 # Escola FICTÍCIA usada no modo teste do público "escolas" (pedido do usuário, 20/10/2026): o e-mail de teste
 # chega a esta caixa de verdade, com o texto montado como uma escola real o receberia.
 ESCOLA_TESTE = {"nome": "ESCOLA MUNICIPAL TESTE DA SILVA", "email": "claudioalex16@gmail.com"}
-MARCADORES_DE_ALUNO = ("ALUNO", "CGM", "SERIE", "TURMA")      # no público escolas, quem usa vira "um e-mail por aluno"
+MARCADORES_DE_ALUNO = ("ALUNO", "CGM", "SERIE", "TURMA", "DATA_SAIDA")      # no público escolas, quem usa vira "um e-mail por aluno"
 LIMITE_ASSUNTO = 200
 LIMITE_MENSAGEM = 20000
 LINHAS_LISTADAS = 60
@@ -358,10 +368,16 @@ def _origem_e_serie(v: dict, propria: str, turma_limpa: str) -> tuple[str, str, 
     return origem, serie, False
 
 
+def posicao_do_aluno(aluno: dict) -> Optional[int]:
+    """Posição do aluno na lista da turma (coluna "pos" que a coleta da pré-matrícula guarda: "3", "3º"...). None se não vier."""
+    m = re.search(r"\d+", str(aluno.get("pos") or ""))
+    return int(m.group()) if m else None
+
+
 def listar_alunos_novos(situacao: str = "matriculados", fonte: str = "ano") -> list[dict]:
     """
-    Os alunos novos para a tela escolher: [{id, nome, turma, serie, fonte, estado, cgm, escola_origem, na_nossa_escola, motivo}],
-    por nome. `escola_origem`/`serie` são as de quem receberia o pedido (a escola anterior, se o aluno já entrou aqui).
+    Os alunos novos para a tela escolher: [{id, nome, turma, pos, serie, fonte, estado, cgm, escola_origem, na_nossa_escola, motivo}],
+    por nome. `pos` é a posição na lista da turma (int ou None): a tela usa para marcar uma faixa, ex.: do 1º ao 5º da turma. `escola_origem`/`serie` são as de quem receberia o pedido (a escola anterior, se o aluno já entrou aqui).
     `estado`: "ok" (vínculo da Base ABC com CGM e escola), "verificar" (vínculo incompleto) ou "sem_vinculo" (a Consulta na
     Base ABC ainda não achou/gravou o aluno). Mostra quem já está pronto para um texto com $CGM e $SERIE.
     """
@@ -376,7 +392,7 @@ def listar_alunos_novos(situacao: str = "matriculados", fonte: str = "ano") -> l
             turma_limpa = _uma_linha(str(turma).replace(" do Ensino Fundamental", ""))
             origem, serie, ja_aqui = _origem_e_serie(v, propria, turma_limpa)
             saida.append({"id": id_do_aluno(a), "nome": _uma_linha(a.get("nome") or cad.get("nome_aluno")),
-                          "turma": turma_limpa, "serie": serie, "fonte": rotulo, "estado": estado, "cgm": cgm,
+                          "turma": turma_limpa, "pos": posicao_do_aluno(a), "serie": serie, "fonte": rotulo, "estado": estado, "cgm": cgm,
                           "escola_origem": origem, "na_nossa_escola": bool(v) and ja_aqui, "motivo": _uma_linha(v.get("motivo"))})
     return sorted(saida, key=lambda x: _sem_acento(x["nome"]))
 
@@ -484,12 +500,156 @@ def destinatarios_alunos_origem(situacao: str = "matriculados", fonte: str = "an
     return r
 
 
+# ───────────── público: escola de DESTINO dos transferidos (um e-mail por aluno, com os documentos em anexo) ─────────────
+
+def _documentos_do_aviso(reg: dict) -> dict:
+    return destino_tf.documentos_do_aluno(reg, paths.dados_ano_atual())
+
+
+def arquivo_transferidos() -> Path:
+    return paths.dados_ano_atual() / destino_tf.NOME_ARQUIVO
+
+
+def _carregar_transferidos() -> dict:
+    """transferidos.json ({CGM: registro}). ValueError com mensagem pronta se não existe ou está ilegível."""
+    caminho = arquivo_transferidos()
+    if not caminho.exists():
+        raise ValueError(f"Ainda não existe {caminho.name}: rode a coleta de turmas (ela monta a fila de transferidos).")
+    try:
+        return carregar_json(caminho, dict, dict)
+    except ArquivoJsonCorrompidoError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def _quem_saiu(cgm: str, reg: dict) -> str:
+    return f"{_uma_linha(reg.get('nome')) or 'CGM ' + cgm} ({_uma_linha(reg.get('turma')) or 'sem turma'})"
+
+
+def listar_transferidos_para_aviso() -> list[dict]:
+    """
+    Os transferidos que ainda estão fora da escola, com o destino resolvido, para a tela e a prévia:
+    [{id (CGM), nome, turma, escola_destino, fonte, status_aviso, consulta, documentos_faltando}], por nome.
+    """
+    saida = []
+    for cgm, reg in _carregar_transferidos().items():
+        if not isinstance(reg, dict) or reg.get("retorno"):
+            continue
+        d = destino_tf.resolver_destino(reg)
+        faltando = _documentos_do_aviso(reg)["faltando"]
+        estado, selo = _estado_do_transferido(d, faltando)
+        saida.append({"id": str(cgm), "nome": _uma_linha(reg.get("nome")), "turma": _uma_linha(reg.get("turma")),
+                      "escola_destino": d["escola"], "fonte": d["fonte"], "status_aviso": d["status_aviso"],
+                      "consulta": d["consulta"], "documentos_faltando": faltando, "estado": estado, "selo": selo})
+    return sorted(saida, key=lambda x: _sem_acento(x["nome"]))
+
+
+def _estado_do_transferido(d: dict, faltando: list[str]) -> tuple[str, str]:
+    """("ok" | "verificar" | "sem_vinculo" | "dispensado", texto do selo) de um transferido, para o seletor da tela."""
+    if d["status_aviso"] == "encaminhado":
+        return "dispensado", "encaminhado por e-mail à parte (não recebe pelo sistema)"
+    if d["status_aviso"] == "nao_avisar":
+        return "dispensado", "marcado para não avisar automaticamente"
+    if not d["escola"]:
+        if d["consulta"] == "verificar":
+            return "verificar", "vínculo da Base ABC a verificar" + (f": {d['motivo']}" if d["motivo"] else "")
+        return "sem_vinculo", "sem escola de destino (rode a Consulta na Base ABC ou preencha na tela de Transferidos)"
+    origem = "preenchido à mão" if d["fonte"] == "manual" else "Base ABC"
+    if faltando:
+        return "verificar", f"{d['escola']} ({origem}) · faltam documentos: " + "; ".join(faltando)
+    return "ok", f"{d['escola']} ({origem}) · guia, histórico e parecer prontos"
+
+
+def avisos_ja_enviados_ao_destino() -> dict:
+    """
+    Do que já saiu de verdade para escolas de destino: {(CGM, data da saída): {...}} e, quando o envio guardou o ID da
+    matrícula, também {("id", ID): {...}} (o ID resiste a uma data corrigida no SERE). {} se o registro estiver ilegível.
+    """
+    try:
+        enviados = carregar_enviados()
+    except ValueError:
+        return {}
+    saida = {}
+    for e in enviados.values():
+        if isinstance(e, dict) and e.get("cgm"):
+            dados = {"enviado_em": e.get("enviado_em"), "para": e.get("para"), "nome": e.get("nome")}
+            saida[(str(e["cgm"]), str(e.get("data_saida") or ""))] = dados
+            if e.get("id_matricula"):
+                saida[("id", str(e["id_matricula"]))] = dados
+    return saida
+
+
+def destinatarios_destino_transferidos(tipo: str = "todas", filtro_nome: str = "", unidades=None, alunos=None) -> dict:
+    """
+    Um destinatário POR ALUNO transferido: a escola de destino dele, com o e-mail da lista coletada (o primeiro, se a escola
+    tem mais de um) e os 3 documentos da saída atual em `anexos`.
+
+    Devolve {"destinatarios", "sem_email", "alunos", "sem_destino", "a_verificar", "destino_fora_da_lista", "encaminhados",
+    "nao_avisar", "sem_documentos", "fora_da_selecao"}. Só recebe quem fecha TUDO; o resto vai numa dessas listas e NÃO recebe
+    e-mail, para ninguém avisar a escola errada nem mandar a saída errada. Quem voltou à escola nem entra na contagem.
+    `alunos` = CGMs marcados (nenhum = todos); `unidades`/`tipo`/`filtro_nome` filtram pela escola de DESTINO.
+    """
+    escolhidas = normalizar_unidades(unidades)
+    marcados = set(_itens_unidades(alunos)) or None
+    filtro = _sem_acento(filtro_nome).strip()
+    propria = escola.nome()
+    lista = [{"nome": _uma_linha(e.get("nome")), "eh_cmei": _eh_cmei(e), "emails": extrair_emails(e.get("email"))}
+             for e in carregar_escolas() if _uma_linha(e.get("nome"))]
+    r = {"destinatarios": [], "sem_email": [], "alunos": 0, "sem_destino": [], "a_verificar": [], "destino_fora_da_lista": [],
+         "encaminhados": [], "nao_avisar": [], "sem_documentos": [], "fora_da_selecao": 0}
+    for cgm, reg in sorted(_carregar_transferidos().items(), key=lambda kv: _sem_acento(str((kv[1] or {}).get("nome") if isinstance(kv[1], dict) else ""))):
+        if not isinstance(reg, dict) or reg.get("retorno"):
+            continue
+        cgm = str(cgm)
+        if marcados and cgm not in marcados:
+            continue
+        r["alunos"] += 1
+        quem = _quem_saiu(cgm, reg)
+        d = destino_tf.resolver_destino(reg)
+        if d["status_aviso"] == "encaminhado":
+            r["encaminhados"].append(quem)
+            continue
+        if d["status_aviso"] == "nao_avisar":
+            r["nao_avisar"].append(quem)
+            continue
+        if not d["escola"]:
+            if d["consulta"] == "verificar":
+                r["a_verificar"].append(f"{quem} — {d['motivo'] or 'vínculo incompleto'}")
+            else:
+                r["sem_destino"].append(quem)
+            continue
+        if propria and _e_a_propria_escola(d["escola"], propria):       # o vínculo aponta para a NOSSA escola: não é destino
+            r["a_verificar"].append(f"{quem} — o vínculo aponta para a nossa própria escola ({d['escola']}); preencha o destino à mão")
+            continue
+        un = _achar_unidade(d["escola"], lista)
+        if un is None:
+            r["destino_fora_da_lista"].append(f"{quem} — {d['escola']}")
+            continue
+        if ((tipo == "cmeis" and not un["eh_cmei"]) or (tipo == "escolas" and un["eh_cmei"])
+                or (filtro and filtro not in _sem_acento(un["nome"]))
+                or not _unidade_escolhida(un["nome"], un["eh_cmei"], escolhidas)):
+            r["fora_da_selecao"] += 1
+            continue
+        if not un["emails"]:
+            r["sem_email"].append(f"{un['nome']} (aluno {_uma_linha(reg.get('nome'))})")
+            continue
+        docs = _documentos_do_aviso(reg)
+        if docs["faltando"]:
+            r["sem_documentos"].append(f"{quem} — " + "; ".join(docs["faltando"]))
+            continue
+        r["destinatarios"].append({
+            "nome": un["nome"], "email": un["emails"][0], "cgm": cgm, "id_matricula": str(reg.get("id_matricula") or ""),
+            "anexos": [str(docs["guia"]), str(docs["historico"]), str(docs["parecer"])],
+            "contexto": {"ESCOLA_DESTINO": un["nome"], "ALUNO": _uma_linha(reg.get("nome")), "CGM": cgm,
+                         "TURMA": _uma_linha(reg.get("turma")), "DATA_SAIDA": _uma_linha(reg.get("data_transferencia"))}})
+    return r
+
+
 # ───────────────────────────── texto: marcadores ─────────────────────────────
 
 def marcadores_validos(publico: str) -> tuple[str, ...]:
     """Marcadores que valem para o público. Público em branco (modelo para qualquer público) = os dos dois."""
     if not publico:
-        return tuple(dict.fromkeys(MARCADORES["comuns"] + MARCADORES["escolas"] + MARCADORES["pais"]))
+        return tuple(dict.fromkeys(MARCADORES["comuns"] + MARCADORES["escolas"] + MARCADORES["pais"] + MARCADORES["destino"]))
     return MARCADORES["comuns"] + MARCADORES[publico]
 
 
@@ -537,7 +697,7 @@ def validar_pedido(publico, canal, modo, assunto, mensagem, tipo_escola="todas",
     """Confere TUDO antes de qualquer envio. ValueError com mensagem pronta; devolve os parâmetros já normalizados."""
     publico, canal, modo = str(publico or ""), str(canal or "email"), str(modo or "simular")
     if publico not in PUBLICOS:
-        raise ValueError("Escolha para quem é o comunicado (escolas ou pais).")
+        raise ValueError("Escolha para quem é o comunicado (escolas, pais ou escola de destino dos transferidos).")
     if canal not in CANAIS:
         raise ValueError(f"Canal '{canal}' ainda não existe. Por enquanto só: " + ", ".join(CANAIS) + ".")
     if modo not in MODOS:
@@ -555,7 +715,7 @@ def validar_pedido(publico, canal, modo, assunto, mensagem, tipo_escola="todas",
         raise ValueError(f"A mensagem passa de {LIMITE_MENSAGEM} caracteres.")
     conferir_marcadores(assunto, publico, "Assunto")
     conferir_marcadores(mensagem, publico, "Mensagem")
-    if publico == "escolas" and str(tipo_escola or "todas") not in TIPOS_ESCOLA:
+    if publico in ("escolas", "destino") and str(tipo_escola or "todas") not in TIPOS_ESCOLA:
         raise ValueError("Tipo de escola inválido: use todas, escolas ou cmeis.")
     if str(situacao_pais or "matriculados") not in SITUACOES_PAIS:
         raise ValueError("Situação inválida: use matriculados, aguardando ou ambos.")
@@ -564,7 +724,7 @@ def validar_pedido(publico, canal, modo, assunto, mensagem, tipo_escola="todas",
     normalizar_unidades(unidades)                   # recusa grupo desconhecido
     if "ESCOLA" in set(_RE_MARCADOR.findall(assunto)) | set(_RE_MARCADOR.findall(mensagem)) and not escola.nome():
         raise ValueError("O texto usa $ESCOLA, mas o nome da escola ainda não foi informado (Configurações → Dados da escola).")
-    por_aluno = publico == "escolas" and bool(_marcadores_de_aluno(assunto + " " + mensagem))
+    por_aluno = publico == "destino" or (publico == "escolas" and bool(_marcadores_de_aluno(assunto + " " + mensagem)))
     intervalo = _inteiro_entre(intervalo_s, INTERVALO_MIN_S, INTERVALO_MAX_S, INTERVALO_PADRAO_S, "Intervalo entre e-mails (segundos)")
     lote = _inteiro_entre(limite_lote, LOTE_MIN, LOTE_MAX, LOTE_PADRAO, "Máximo de e-mails por execução")
     email_teste = str(email_teste or "").strip().lower()
@@ -572,7 +732,7 @@ def validar_pedido(publico, canal, modo, assunto, mensagem, tipo_escola="todas",
         raise ValueError(("Para o modo teste" if modo == "teste" else "Para enviar")
                          + ", salve o e-mail e a senha de app do Gmail em Configurações → Senha do Gmail.")
     if modo == "teste":
-        padrao = ESCOLA_TESTE["email"] if publico == "escolas" else str(credenciais.EMAIL_REMETENTE).strip()
+        padrao = ESCOLA_TESTE["email"] if publico in ("escolas", "destino") else str(credenciais.EMAIL_REMETENTE).strip()
         email_teste = email_teste or padrao.lower()
         if not email_valido(email_teste):
             raise ValueError("O e-mail de teste não parece um endereço válido.")
@@ -586,7 +746,7 @@ def validar_pedido(publico, canal, modo, assunto, mensagem, tipo_escola="todas",
 
 def teste_com_escola_ficticia(publico: str, modo: str) -> bool:
     """No modo teste das escolas o e-mail vai para a escola fictícia; a lista real é opcional."""
-    return modo == "teste" and publico == "escolas"
+    return modo == "teste" and publico in ("escolas", "destino")
 
 
 def _por_que_nao_ha_alunos(r: dict) -> str:
@@ -607,8 +767,30 @@ def _por_que_nao_ha_alunos(r: dict) -> str:
     return motivo
 
 
+def _por_que_nao_ha_transferidos(r: dict) -> str:
+    partes = []
+    for chave, texto in (("sem_destino", "sem escola de destino (rode a 'Consulta na Base ABC' com os transferidos ou preencha o destino na tela de Transferidos)"),
+                         ("a_verificar", "com o vínculo da Base ABC a verificar"),
+                         ("destino_fora_da_lista", "com destino fora da lista de escolas (marque como encaminhado à parte, se for o caso)"),
+                         ("encaminhados", "marcados como encaminhados por e-mail à parte"),
+                         ("nao_avisar", "marcados para não avisar automaticamente"),
+                         ("sem_email", "cuja escola de destino está sem e-mail"),
+                         ("sem_documentos", "sem os três documentos (guia, histórico e parecer) desta saída")):
+        if r.get(chave):
+            partes.append(f"{len(r[chave])} {texto}")
+    if r.get("fora_da_selecao"):
+        partes.append(f"{r['fora_da_selecao']} fora das unidades escolhidas")
+    return ("Nenhum transferido com escola de destino, e-mail e documentos para este pedido"
+            + (f" ({r['alunos']} transferido(s) lido(s)" + (": " + "; ".join(partes) if partes else "") + ")" if r.get("alunos") else "") + ".")
+
+
 def reunir_destinatarios(publico: str, tipo_escola="todas", filtro_nome="", situacao_pais="matriculados",
                          unidades=None, fonte="ano", por_aluno=False, alunos=None) -> dict:
+    if publico == "destino":
+        r = destinatarios_destino_transferidos(tipo_escola, filtro_nome, unidades, alunos)
+        if not r["destinatarios"]:
+            raise ValueError(_por_que_nao_ha_transferidos(r))
+        return r
     if publico == "escolas" and por_aluno:
         r = destinatarios_alunos_origem(situacao_pais, fonte, tipo_escola, filtro_nome, unidades, alunos)
         if not r["destinatarios"]:
@@ -636,7 +818,7 @@ def exemplo_da_mensagem(publico, assunto, mensagem, tipo_escola="todas", filtro_
     try:
         conferir_marcadores(assunto, publico, "Assunto")
         conferir_marcadores(mensagem, publico, "Mensagem")
-        por_aluno = publico == "escolas" and bool(_marcadores_de_aluno(assunto + " " + mensagem))
+        por_aluno = publico == "destino" or (publico == "escolas" and bool(_marcadores_de_aluno(assunto + " " + mensagem)))
     except ValueError as exc:
         return {"aviso": str(exc)}
     try:
@@ -647,6 +829,20 @@ def exemplo_da_mensagem(publico, assunto, mensagem, tipo_escola="todas", filtro_
                 "total": len(r["destinatarios"])}
     except ValueError as exc:
         aviso = str(exc)
+    if por_aluno and publico == "destino":
+        try:
+            marcados = set(_itens_unidades(alunos))
+            lista = [a for a in listar_transferidos_para_aviso() if not marcados or a["id"] in marcados]
+        except ValueError:
+            lista = []
+        if lista:
+            a = lista[0]
+            contexto = {"ESCOLA_DESTINO": a["escola_destino"] or "(escola de destino)", "ALUNO": a["nome"], "CGM": a["id"],
+                        "TURMA": a["turma"], "DATA_SAIDA": ""}
+            m = montar_mensagens([{"nome": contexto["ESCOLA_DESTINO"], "email": "(sem e-mail)", "contexto": contexto}],
+                                 assunto, mensagem, True)[0]
+            return {"para": "", "nome": m["nome"], "assunto": m["assunto"], "corpo": m["corpo"], "aluno": a["nome"], "total": 0,
+                    "aviso": aviso}
     if por_aluno:                       # ninguém receberia, mas o texto ainda dá para ver com os dados do primeiro aluno
         try:
             marcados = set(_itens_unidades(alunos))
@@ -680,6 +876,13 @@ def montar_mensagens(destinatarios: list[dict], assunto: str, mensagem: str, por
              "chave": _chave_estavel(d, assunto, mensagem)}
         if por_aluno:
             m["aluno"] = ctx.get("ALUNO", "")
+        if d.get("anexos"):
+            m["anexos"] = list(d["anexos"])
+        if d.get("cgm"):
+            m["cgm"] = str(d["cgm"])
+            m["data_saida"] = ctx.get("DATA_SAIDA", "")           # CGM + data separam a 1ª da 2ª saída do mesmo aluno
+            if d.get("id_matricula"):
+                m["id_matricula"] = str(d["id_matricula"])        # e o ID da saída, quando a ponte já deu um
         mensagens.append(m)
     return mensagens
 
@@ -793,13 +996,23 @@ def _enviar_real(p: dict, mensagens: list[dict], base_registro: dict) -> dict:
         for i, m in enumerate(lote, 1):
             verificar_cancelamento()
             tentados.add(m["chave"])
-            ok, erro = enviar_email(m["para"], m["assunto"], m["corpo"])
+            if m.get("anexos"):
+                ok, erro = enviar_email(m["para"], m["assunto"], m["corpo"], anexos=m["anexos"])
+            else:
+                ok, erro = enviar_email(m["para"], m["assunto"], m["corpo"])
             if ok:
                 seguidas = 0
                 agora = datetime.now().isoformat(timespec="seconds")
                 novo = {"para": m["para"], "nome": m["nome"], "assunto": m["assunto"], "enviado_em": agora}
                 if m.get("aluno"):
                     novo["aluno"] = m["aluno"]
+                if m.get("cgm"):
+                    novo["cgm"] = m["cgm"]
+                    novo["data_saida"] = m.get("data_saida", "")
+                    if m.get("id_matricula"):
+                        novo["id_matricula"] = m["id_matricula"]
+                if m.get("anexos"):
+                    novo["anexos"] = [Path(a).name for a in m["anexos"]]
                 enviados_antes[m["chave"]] = novo
                 salvar_json_atomico(_arquivo_enviados(), {"envios": enviados_antes}, indent=2)    # grava ANTES de seguir
                 enviados.append(novo)
@@ -863,7 +1076,9 @@ def executar_avisos(publico, canal, modo, assunto, mensagem, tipo_escola="todas"
     titulo_modo = {"simular": "SIMULAÇÃO — nada será enviado", "teste": "TESTE — só o e-mail de teste recebe",
                    "enviar": "ENVIO REAL — os destinatários recebem de verdade"}[p["modo"]]
     print(f"Comunicado oficial por e-mail | Público: {PUBLICOS[p['publico']]} | Modo: {titulo_modo}")
-    print(f"{total} destinatário(s)" + (" (um e-mail por aluno que chega, para a escola de origem)" if p["por_aluno"] else "") + ":")
+    print(f"{total} destinatário(s)" + ((" (um e-mail por aluno transferido, para a escola de destino, com os documentos em anexo)"
+                                         if p["publico"] == "destino" else " (um e-mail por aluno que chega, para a escola de origem)")
+                                        if p["por_aluno"] else "") + ":")
     for m in mensagens[:LINHAS_LISTADAS]:
         print(f"  - {_rotulo_destinatario(m)}")
     if total > LINHAS_LISTADAS:
@@ -875,19 +1090,26 @@ def executar_avisos(publico, canal, modo, assunto, mensagem, tipo_escola="todas"
     for chave, texto in (("sem_vinculo", "Sem vínculo da Base ABC (rode a 'Consulta na Base ABC')"),
                          ("a_verificar", "Vínculo da Base ABC a verificar (não recebem)"),
                          ("origem_desconhecida", "Escola de origem fora da lista de escolas (não recebem)"),
-                         ("da_propria_escola", "Já estão na nossa escola (não recebem)")):
+                         ("da_propria_escola", "Já estão na nossa escola (não recebem)"),
+                         ("sem_destino", "Transferidos sem escola de destino (não recebem; rode a Consulta na Base ABC ou preencha na tela de Transferidos)"),
+                         ("destino_fora_da_lista", "Escola de destino fora da lista de escolas (não recebem; marque como encaminhado à parte, se for o caso)"),
+                         ("encaminhados", "Marcados como encaminhados por e-mail à parte (não recebem)"),
+                         ("nao_avisar", "Marcados para não avisar automaticamente (não recebem)"),
+                         ("sem_documentos", "Sem guia, histórico ou parecer desta saída (não recebem)")):
         if r.get(chave):
             print(f"{texto} ({len(r[chave])}): " + "; ".join(r[chave][:LINHAS_LISTADAS]))
     if r.get("fora_da_selecao"):
         print(f"Fora das unidades escolhidas: {r['fora_da_selecao']} aluno(s).")
     if aviso_lista:
         print(f"Aviso: {aviso_lista} (o teste com a escola fictícia segue mesmo assim).")
-    if p["publico"] == "escolas" and p["modo"] == "simular":
+    if p["publico"] in ("escolas", "destino") and p["modo"] == "simular":
         print(f"No modo Teste, o e-mail iria para a escola fictícia {ESCOLA_TESTE['nome']} <{ESCOLA_TESTE['email']}>.")
 
     if mensagens:
         amostra = mensagens[0]
         print(f"\nPRÉVIA — mensagem 1 de {total} (para {amostra['nome']})\nAssunto: {amostra['assunto']}\n\n{amostra['corpo']}\n")
+        if amostra.get("anexos"):
+            print("Anexos desta mensagem: " + "; ".join(Path(a).name for a in amostra["anexos"]) + "\n")
 
     registro_comum = {
         "gerado_em": datetime.now().isoformat(timespec="seconds"), "publico": p["publico"], "canal": p["canal"],
@@ -895,7 +1117,8 @@ def executar_avisos(publico, canal, modo, assunto, mensagem, tipo_escola="todas"
             "tipo_escola": p["tipo_escola"], "filtro_nome": p["filtro_nome"], "situacao_pais": p["situacao_pais"],
             "unidades": p["unidades"], "fonte": p["fonte"], "por_aluno": p["por_aluno"], "alunos": p["alunos"]},
         "total": total, "sem_email": r["sem_email"], "excluidas": r.get("excluidas", []),
-        "mensagens": [{k: v for k, v in m.items() if k != "chave"} for m in mensagens]}
+        "mensagens": [{k: ([Path(a).name for a in v] if k == "anexos" else v) for k, v in m.items() if k != "chave"}
+                      for m in mensagens]}
 
     enviados_teste, erro, escola_teste = 0, None, None
     if p["modo"] == "teste":
@@ -909,8 +1132,11 @@ def executar_avisos(publico, canal, modo, assunto, mensagem, tipo_escola="todas"
         else:
             exemplo = mensagens[0]
             quem = f"{exemplo['nome']} <{exemplo['para']}>"
+        anexos_reais = (r["destinatarios"][0].get("anexos") if r["destinatarios"] else None) or []
         faixa = (f"*** TESTE — esta mensagem NÃO foi enviada aos destinatários reais. ***\n"
                  f"O comunicado iria para {total} destinatário(s) reais. Abaixo, o texto montado para {quem}\n"
+                 + (f"No envio real seguiriam em anexo: {', '.join(Path(a).name for a in anexos_reais)} "
+                    "(os documentos do aluno NÃO são anexados no teste).\n" if anexos_reais else "")
                  + "-" * 60 + "\n\n")
         print(f"Enviando o e-mail de teste para {p['email_teste']}...")
         ok, erro = enviar_email(p["email_teste"], "[TESTE] " + exemplo["assunto"], faixa + exemplo["corpo"])
