@@ -37,6 +37,7 @@ from typing import Callable, Optional
 from src.comum import compressao
 from src.comum.arquivos_json import salvar_json_atomico
 from src.comum import pastas_transferencias as _pastas
+from src.comum import qr_turmas_nao_reconhecidas as _qr_turmas
 
 EXTENSOES = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".gif", ".pdf"}
 DPIS_PDF = (200, 300, 150, 400)
@@ -388,6 +389,22 @@ def identificar_pelo_texto_do_qr(texto: str, turmas_data: dict, ano: str,
     return identificar_aluno(turmas_data, nome_qr, turma_qr)
 
 
+def turma_antiga_nao_reconhecida(texto_qr: str, turmas_data: dict) -> Optional[str]:
+    """
+    Se o QR é do formato ANTIGO (JSON com nome e turma) e o texto da turma não leva a nenhuma turma do turmas.json
+    (ou leva a mais de uma), devolve esse texto: é o que o usuário cadastra em Configurações → Turmas do QR antigo.
+    Qualquer outro QR (novo, ilegível, turma reconhecida) devolve None.
+    """
+    try:
+        qr = json.loads(texto_qr)
+        turma_qr = str(qr.get("turma", "")).strip()
+    except (ValueError, AttributeError, TypeError):
+        return None
+    if not turma_qr or resolver_turma(turmas_data, turma_qr) is not None:
+        return None
+    return turma_qr
+
+
 def nome_do_arquivo(numero, nome: str, extensao: str) -> str:
     base = f"{str(numero).zfill(2)}-{nome}{extensao}"
     for c in '<>:"/\\|?*':
@@ -512,6 +529,11 @@ def processar_pareceres_da_pasta(simulacao: bool = False, limite_mb: Optional[fl
         if ident is None:
             resumo.erros.append((arq.name, motivo))
             log(f"  ERRO: {motivo}.")
+            turma_qr = turma_antiga_nao_reconhecida(texto, turmas_data)
+            if turma_qr:
+                log(f"  Dica: cadastre \"{turma_qr}\" em Configurações → Turmas do QR antigo e rode de novo.")
+                if not simulacao:                            # a simulação não grava nada, nem esta lista
+                    _qr_turmas.registrar(dados, turma_qr, arq.name)
             continue
         log(f"  Aluno: {ident.nome} (chamada {ident.numero}, CGM {ident.cgm}) — {ident.turma}")
 

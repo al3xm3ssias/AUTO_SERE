@@ -1739,7 +1739,7 @@ async function carregarPreMatricula() {
 
 /* ---------- Transferidos (mesma tela "Transferidos" do index.html, somente leitura) ---------- */
 
-const transfState = { filter: "todos", search: "", sort: { col: "nome", dir: 1 } };
+const transfState = { filter: "todos", search: "", ocultarRetornou: false, sort: { col: "nome", dir: 1 } };
 let _transfDados = null;
 
 const _fmtDataIso = (iso) => (iso ? String(iso).slice(0, 10).split("-").reverse().join("/") : "");
@@ -1811,15 +1811,75 @@ async function abrirDestinoTransferido(cgm) {
   });
 }
 
+const _SITUACAO_COR = { concluido: "lime", em_andamento: "amber", a_processar: "cyan", antes_do_corte: "muted", retornou: "blue", sem_data: "rose" };
+
+/** O que cada situação "fora do processo" quer dizer (aparece no lugar dos selos de guia, histórico e parecer). */
+const _FORA_DO_PROCESSO = {
+  antes_do_corte: "Saída antes da data de corte: já tratada à mão, fora do processo automático.",
+  retornou: "O aluno voltou à escola: o processo não se refaz.",
+  sem_data: "Sem data de transferência válida: confira no SERE.",
+  a_processar: "Entra no processo, mas ainda sem registro no controle: rode a fila de transferidos.",
+};
+
+/** Coluna "Situação no processo": selo colorido + data da saída (e do retorno, se voltou). */
+function _celulaSituacao(r) {
+  const cor = _SITUACAO_COR[r.situacao] || "muted";
+  const saida = r.data_transferencia ? `saída ${escaparHtml(r.data_transferencia)}` : "sem data de saída";
+  const volta = r.retornou && r.retorno_em ? ` · voltou em ${escaparHtml(r.retorno_em)}` : "";
+  return `${badge(escaparHtml(r.situacao_texto || "—"), `bg-${cor}`)}<small style="display:block;margin-top:3px">${saida}${volta}</small>`;
+}
+
+/** Botão sob o nome do aluno que já saiu antes e voltou: abre a janela com os documentos de cada saída anterior. */
+function _seloCiclos(r) {
+  const n = r.n_ciclos || 0;
+  if (!n) return "";
+  return `<div><button type="button" class="btn-sm" data-ciclos="${escaparHtml(r.cgm)}" style="padding:3px 9px;font-size:.7rem"
+    title="Este aluno já saiu antes, voltou e saiu de novo. Veja os documentos de cada saída anterior.">↺ ${n} saída${n > 1 ? "s" : ""} anterior${n > 1 ? "es" : ""}</button></div>`;
+}
+
+/** Janela "Saídas anteriores": uma caixa por ciclo (`ciclos_anteriores`), só leitura. A saída atual é a da linha da tabela. */
+function abrirCiclosTransferido(cgm) {
+  const r = (_transfDados?.transferidos || []).find((x) => x.cgm === String(cgm));
+  if (!r || !r.n_ciclos) { toast("Este aluno não tem saídas anteriores"); return; }
+  abrirModal(`Saídas anteriores · ${r.nome}`, (corpo, fechar) => {
+    const blocos = r.ciclos_anteriores.map((c, i) => {
+      const volta = c.retorno_em ? `voltou à escola em <b>${escaparHtml(c.retorno_em)}</b>` : "não consta o retorno";
+      const arq = [c.arquivos.guia && `guia: ${escaparHtml(c.arquivos.guia)}`, c.arquivos.historico && `histórico: ${escaparHtml(c.arquivos.historico)}`]
+        .filter(Boolean).join(" · ");
+      const dest = c.destino.escola
+        ? `${escaparHtml(c.destino.escola)} <small>(${c.destino.fonte === "manual" ? "preenchido à mão" : "Base ABC"})</small>` : "sem destino registrado";
+      return `<div class="card" style="margin-bottom:10px"><div class="card-body">
+        <div style="margin-bottom:6px"><b>${i + 1}ª saída: ${escaparHtml(c.data_transferencia || "sem data")}</b>
+          <small style="color:var(--txt3)"> · ${escaparHtml(c.turma || "—")}${c.id_matricula ? ` · matrícula ${escaparHtml(c.id_matricula)}` : ""}</small></div>
+        <div class="campo-ajuda" style="margin-bottom:8px">${volta}</div>
+        <div style="margin-bottom:4px">Guia: ${_chipDoc("Emitida", c.guia.emitido_em, "cyan")} ${_chipDoc("Secr.", c.guia.assinado_secretario, "blue")} ${_chipDoc("Dir.", c.guia.assinado_diretor, "lime")}</div>
+        <div style="margin-bottom:4px">Histórico: ${_chipDoc("Emitido", c.historico.emitido_em, "cyan")} ${_chipDoc("Secr.", c.historico.assinado_secretario, "blue")} ${_chipDoc("Dir.", c.historico.assinado_diretor, "lime")}</div>
+        <div style="margin-bottom:8px">Parecer: ${_chipDoc("Digitalizado", c.parecer.digitalizado_em, "blue")} ${_chipDoc("Anexado", c.parecer.anexado_em, "lime")}</div>
+        <div class="campo-ajuda">Destino: ${dest}</div>
+        ${arq ? `<div class="campo-ajuda">PDFs guardados: ${arq}</div>` : ""}
+      </div></div>`;
+    }).join("");
+    corpo.innerHTML = `
+      <p class="campo-ajuda" style="margin-bottom:10px">CGM ${escaparHtml(r.cgm)} · saída atual: <b>${escaparHtml(r.data_transferencia || "sem data")}</b>
+        (é a que aparece na tabela). Abaixo, as saídas anteriores, da mais antiga para a mais recente.</p>
+      ${blocos}
+      <div class="modal-acoes"><button class="btn-primary" id="tf-ciclos-fechar">Fechar</button></div>`;
+    corpo.querySelector("#tf-ciclos-fechar").addEventListener("click", fechar);
+  });
+}
+
 function _transfFiltrados() {
   if (!_transfDados) return [];
   const q = semAcento(transfState.search.trim());
   let dados = _transfDados.transferidos.filter((r) => {
     if (transfState.filter !== "todos" && r.status !== transfState.filter) return false;
-    return !q || semAcento(r.nome).includes(q) || r.cgm.includes(q) || semAcento(r.turma).includes(q);
+    if (transfState.ocultarRetornou && r.retornou) return false;
+    return !q || semAcento(r.nome).includes(q) || r.cgm.includes(q) || semAcento(r.turma).includes(q)
+      || semAcento(r.situacao_texto || "").includes(q);
   });
   const { col, dir } = transfState.sort;
-  return dados.sort((a, b) => (col === "status" ? (a.feitos - b.feitos) * dir
+  const andamento = (r) => (r.no_processo === false ? -1 : r.feitos);       // quem está fora do processo vem antes dos pendentes
+  return dados.sort((a, b) => (col === "status" ? (andamento(a) - andamento(b)) * dir
     : semAcento(a[col]).localeCompare(semAcento(b[col]), "pt-BR") * dir));
 }
 
@@ -1833,14 +1893,20 @@ function renderTransfRows() {
   document.getElementById("transf-empty").style.display = "none";
   document.getElementById("transf-tbody").innerHTML = dados.map((r) => {
     const g = r.guia, h = r.historico, p = r.parecer;
-    const st = r.status === "completo" ? badge("Completo", "bg-lime") : r.status === "pendente" ? badge("Pendente", "bg-rose") : badge(`${r.feitos}/${r.total_passos}`, "bg-amber");
-    return `<tr>
-      <td class="td-name">${escaparHtml(r.nome)}<small>${escaparHtml(r.turma || "—")}</small></td>
-      <td class="td-mono">${escaparHtml(r.cgm)}</td>
-      <td>${_chipDoc("Emitida", g.emitido_em, "cyan")} ${_chipDoc("Secr.", g.assinado_secretario, "blue")} ${_chipDoc("Dir.", g.assinado_diretor, "lime")}</td>
+    const fora = r.no_processo === false;
+    const st = fora ? badge("Fora do processo", "bg-muted")
+      : r.status === "completo" ? badge("Completo", "bg-lime") : r.status === "pendente" ? badge("Pendente", "bg-rose") : badge(`${r.feitos}/${r.total_passos}`, "bg-amber");
+    const docs = fora
+      ? `<td colspan="3" style="color:var(--txt3); font-size:.8rem">${escaparHtml(_FORA_DO_PROCESSO[r.situacao] || "Fora do processo automático.")}</td>`
+      : `<td>${_chipDoc("Emitida", g.emitido_em, "cyan")} ${_chipDoc("Secr.", g.assinado_secretario, "blue")} ${_chipDoc("Dir.", g.assinado_diretor, "lime")}</td>
       <td>${_chipDoc("Emitido", h.emitido_em, "cyan")} ${_chipDoc("Secr.", h.assinado_secretario, "blue")} ${_chipDoc("Dir.", h.assinado_diretor, "lime")}</td>
-      <td>${_chipDoc("Digitalizado", p.digitalizado_em, "blue")} ${_chipDoc("Anexado", p.anexado_em, "lime")}</td>
-      <td>${_celulaDestino(r)}</td>
+      <td>${_chipDoc("Digitalizado", p.digitalizado_em, "blue")} ${_chipDoc("Anexado", p.anexado_em, "lime")}</td>`;
+    return `<tr>
+      <td class="td-name">${escaparHtml(r.nome)}<small>${escaparHtml(r.turma || "—")}</small>${_seloCiclos(r)}</td>
+      <td class="td-mono">${escaparHtml(r.cgm)}</td>
+      <td>${_celulaSituacao(r)}</td>
+      ${docs}
+      <td>${fora ? '<span style="color:var(--txt3)">—</span>' : _celulaDestino(r)}</td>
       <td>${st}</td>
     </tr>`;
   }).join("");
@@ -1852,18 +1918,21 @@ async function carregarTransferidos() {
   try {
     _transfDados = await apiGet("/transferidos/lista");
     const colunas = [{ chave: "nome", label: "Aluno" }, { chave: "cgm", label: "CGM" }, { chave: "turma", label: "Turma" },
+      { chave: "situacao", label: "Situação no processo" }, { chave: "data_saida", label: "Data da saída" },
       { chave: "guia_emitida", label: "Guia emitida" }, { chave: "guia_secretario", label: "Guia assinada (secretário)" }, { chave: "guia_diretor", label: "Guia assinada (diretor)" },
       { chave: "hist_emitido", label: "Histórico emitido" }, { chave: "hist_secretario", label: "Histórico assinado (secretário)" }, { chave: "hist_diretor", label: "Histórico assinado (diretor)" },
       { chave: "parecer_digitalizado", label: "Parecer digitalizado" }, { chave: "parecer_anexado", label: "Parecer anexado" },
-      { chave: "destino", label: "Escola de destino" }, { chave: "aviso_destino", label: "Aviso à escola de destino" }, { chave: "status", label: "Status" }];
+      { chave: "destino", label: "Escola de destino" }, { chave: "aviso_destino", label: "Aviso à escola de destino" },
+      { chave: "saidas_anteriores", label: "Saídas anteriores" }, { chave: "status", label: "Status" }];
     const plano = (r) => ({
-      nome: r.nome, cgm: r.cgm, turma: r.turma,
+      nome: r.nome, cgm: r.cgm, turma: r.turma, situacao: r.situacao_texto || "", data_saida: r.data_transferencia || "",
       guia_emitida: _fmtDataIso(r.guia.emitido_em), guia_secretario: _fmtDataIso(r.guia.assinado_secretario), guia_diretor: _fmtDataIso(r.guia.assinado_diretor),
       hist_emitido: _fmtDataIso(r.historico.emitido_em), hist_secretario: _fmtDataIso(r.historico.assinado_secretario), hist_diretor: _fmtDataIso(r.historico.assinado_diretor),
       parecer_digitalizado: _fmtDataIso(r.parecer.digitalizado_em), parecer_anexado: _fmtDataIso(r.parecer.anexado_em),
       destino: (r.destino && r.destino.escola) || "",
       aviso_destino: !r.destino ? "" : r.destino.aviso_enviado_em ? `Enviado em ${_fmtDataIso(r.destino.aviso_enviado_em)}` : r.destino.status_texto,
-      status: r.status === "completo" ? "Completo" : r.status === "pendente" ? "Pendente" : `${r.feitos}/${r.total_passos}`,
+      saidas_anteriores: (r.ciclos_anteriores || []).map((c) => c.data_transferencia || "sem data").join("; "),
+      status: r.no_processo === false ? "Fora do processo" : r.status === "completo" ? "Completo" : r.status === "pendente" ? "Pendente" : `${r.feitos}/${r.total_passos}`,
     });
     _tabelas.transferidos = { colunas, linhas: _transfDados.transferidos.map(plano), extra: _transfDados };
     _FILTRO_CUSTOM.transferidos = () => _transfFiltrados().map(plano);
@@ -1875,16 +1944,19 @@ async function carregarTransferidos() {
   }
   desenharExtrasTabela("transferidos", _transfDados);
   const n = _transfDados.contagem || {};
-  const rotulos = { todos: `Todos (${_transfDados.total})`, completo: `Completos (${n.completo || 0})`, parcial: `Parciais (${n.parcial || 0})`, pendente: `Pendentes (${n.pendente || 0})` };
+  const rotulos = { todos: `Todos (${_transfDados.total})`, completo: `Completos (${n.completo || 0})`, parcial: `Parciais (${n.parcial || 0})`, pendente: `Pendentes (${n.pendente || 0})`, fora: `Fora do processo (${_transfDados.total_fora || 0})` };
   sec.querySelectorAll("[data-tf]").forEach((b) => { b.textContent = rotulos[b.dataset.tf]; });
   if (sec.dataset.ligada !== "1") {
     sec.dataset.ligada = "1";
     ligarPilulas(sec, "data-tf", transfState, "filter", renderTransfRows);
     ligarOrdenacao(sec, "data-ts", transfState, renderTransfRows);
     document.getElementById("transf-q").addEventListener("input", (e) => { transfState.search = e.target.value; renderTransfRows(); });
+    document.getElementById("transf-oculta-retorno").addEventListener("change", (e) => { transfState.ocultarRetornou = e.target.checked; renderTransfRows(); });
     document.getElementById("transf-tbody").addEventListener("click", (e) => {
       const b = e.target.closest("[data-destino]");
-      if (b) abrirDestinoTransferido(b.dataset.destino);
+      if (b) { abrirDestinoTransferido(b.dataset.destino); return; }
+      const c = e.target.closest("[data-ciclos]");
+      if (c) abrirCiclosTransferido(c.dataset.ciclos);
     });
   }
   renderTransfRows();
@@ -3402,6 +3474,21 @@ const DETALHE_CONFIG = {
       <button class="btn-primary" id="cfg-corte-salvar">Salvar data</button>
       <button class="btn-sm" id="cfg-corte-padrao" style="padding:9px 16px;font-size:.78rem">Usar a data padrão</button>
     </div>`,
+  mapeamento_turmas_qr: `
+    <h4 style="margin-bottom:14px; font-size:.9rem;">Turmas do QR antigo</h4>
+    <p style="color:var(--txt3); font-size:.82rem; margin-bottom:12px;">O QR antigo dos pareceres traz o nome da turma escrito à mão (ex.: <b>INF 4 A</b>), e no sistema ela tem outro nome (ex.: <b>INFANTIL 4 Integral A</b>). Quando a leitura do parecer não acha o aluno por causa da turma, cadastre aqui o par: o texto como está no QR e a turma certa. O QR novo (com o CGM) não precisa disto.</p>
+    <div id="cfg-qr-sugestoes"></div>
+    <div id="cfg-qr-linhas">Carregando…</div>
+    <div style="margin:4px 0 16px;"><button class="btn-sm" id="cfg-qr-add" style="padding:8px 14px;font-size:.78rem">+ Adicionar linha</button></div>
+    <div class="field"><label>Testar um texto de turma</label>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input type="text" id="cfg-qr-teste" placeholder="ex.: INF 4 A" maxlength="80" style="flex:1; min-width:0;">
+        <button class="btn-sm" id="cfg-qr-testar" style="padding:9px 16px;font-size:.78rem">Testar</button>
+      </div>
+      <div id="cfg-qr-resultado" style="font-size:.8rem; margin-top:8px; min-height:1.2em;"></div>
+    </div>
+    <div id="cfg-qr-status" style="font-family:var(--mono); font-size:.72rem; color:var(--txt3); margin-bottom:14px;"></div>
+    <button class="btn-primary" id="cfg-qr-salvar">Salvar turmas</button>`,
   navegador: `
     <h4 style="margin-bottom:14px; font-size:.9rem;">Navegador das automações</h4>
     <p style="color:var(--txt3); font-size:.82rem; margin-bottom:12px;">Vale para todos os scripts que abrem navegador. <b>Automático</b> mantém o navegador para o qual cada script foi feito (nada muda). Escolhendo Chrome ou Firefox, todos passam a usar o escolhido — exceto o script do RCO, que precisa do Chrome. A janela visível ou escondida se escolhe em cada automação, em "Configurações do script".</p>
@@ -3526,6 +3613,9 @@ function initConfiguracoes() {
       if (row.dataset.config === "data_corte_transferidos") {
         conectarFormDataCorte();
       }
+      if (row.dataset.config === "mapeamento_turmas_qr") {
+        conectarFormMapeamentoQr();
+      }
       if (row.dataset.config === "navegador") {
         conectarFormNavegador();
       }
@@ -3537,6 +3627,140 @@ function initConfiguracoes() {
       }
     });
   });
+}
+
+/**
+ * Painel "Turmas do QR antigo": uma linha por par (texto que está no QR → turma real do turmas.json), um testador e o botão
+ * de salvar. As turmas reais vêm da rota (escolha numa lista, para não errar o nome); sem turmas.json, o campo vira texto livre.
+ */
+async function conectarFormMapeamentoQr() {
+  const caixa = document.getElementById("cfg-qr-linhas");
+  const sugestoes = document.getElementById("cfg-qr-sugestoes");
+  const status = document.getElementById("cfg-qr-status");
+  const btnAdd = document.getElementById("cfg-qr-add");
+  const btnSalvar = document.getElementById("cfg-qr-salvar");
+  const entradaTeste = document.getElementById("cfg-qr-teste");
+  const btnTestar = document.getElementById("cfg-qr-testar");
+  const resultado = document.getElementById("cfg-qr-resultado");
+  if (!caixa || !sugestoes || !status || !btnAdd || !btnSalvar || !entradaTeste || !btnTestar || !resultado) return;
+  let turmas = [];
+
+  /** Textos de turma que a leitura dos pareceres não reconheceu: um clique em "Usar" abre a linha para escolher a turma. */
+  const desenharSugestoes = (lista) => {
+    if (!lista || !lista.length) { sugestoes.innerHTML = ""; return; }
+    const data = (iso) => (iso ? iso.slice(0, 10).split("-").reverse().join("/") : "");
+    sugestoes.innerHTML = `
+      <div style="border:1px solid var(--amber); border-radius:8px; padding:10px 12px; margin-bottom:14px;">
+        <div style="font-size:.8rem; margin-bottom:8px; color:var(--amber);"><b>A leitura dos pareceres não reconheceu estas turmas</b> (os arquivos continuam na pasta, esperando):</div>
+        ${lista.map((s) => `
+          <div class="cfg-qr-sugestao" style="display:flex; gap:8px; align-items:center; margin-bottom:6px; font-size:.82rem;">
+            <div style="flex:1; min-width:0;"><b>${escaparHtml(s.texto)}</b>
+              <span style="color:var(--txt3);"> · ${s.quantidade} parecer${s.quantidade === 1 ? "" : "es"}${data(s.ultima_vez) ? ` · ${escaparHtml(data(s.ultima_vez))}` : ""} · ${escaparHtml(s.arquivos.join(", "))}</span></div>
+            <button type="button" class="btn-sm cfg-qr-usar" data-texto="${escaparHtml(s.texto)}" style="padding:5px 12px;">Usar</button>
+            <button type="button" class="btn-sm cfg-qr-ignorar" data-texto="${escaparHtml(s.texto)}" style="padding:5px 12px;" title="Tirar da lista (leitura ruim, QR de teste...)">Ignorar</button>
+          </div>`).join("")}
+      </div>`;
+  };
+
+  const campoTurma = (valor) => {
+    if (!turmas.length) return `<input type="text" class="cfg-qr-turma" value="${escaparHtml(valor)}" placeholder="nome da turma no sistema" style="flex:1; min-width:0;">`;
+    const fora = valor && !turmas.includes(valor);                       // turma do par que não existe mais no turmas.json
+    const opcoes = [`<option value="">— escolha a turma —</option>`]
+      .concat(fora ? [`<option value="${escaparHtml(valor)}" selected>${escaparHtml(valor)} (não existe mais)</option>`] : [])
+      .concat(turmas.map((t) => `<option value="${escaparHtml(t)}"${t === valor ? " selected" : ""}>${escaparHtml(t)}</option>`));
+    return `<select class="cfg-qr-turma" style="flex:1; min-width:0;">${opcoes.join("")}</select>`;
+  };
+  const linhaHtml = (qr = "", turma = "") => `
+    <div class="field cfg-qr-linha" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+      <input type="text" class="cfg-qr-texto" value="${escaparHtml(qr)}" placeholder="como está no QR (ex.: INF 4 A)" maxlength="80" style="flex:1; min-width:0;">
+      <span style="color:var(--txt3);">→</span>
+      ${campoTurma(turma)}
+      <button type="button" class="btn-sm cfg-qr-remover" title="Remover esta linha" style="padding:6px 10px;">✕</button>
+    </div>`;
+  const desenhar = (d) => {
+    turmas = d.turmas || [];
+    caixa.innerHTML = (d.pares || []).map((p) => linhaHtml(p.qr, p.turma)).join("")
+      || `<div style="color:var(--txt3); font-size:.8rem; margin-bottom:8px;">Nenhum par cadastrado: vale só o mapeamento do sistema.</div>`;
+    desenharSugestoes(d.nao_reconhecidos);
+  };
+  const lerLinhas = () => [...caixa.querySelectorAll(".cfg-qr-linha")].map((l) => ({
+    qr: l.querySelector(".cfg-qr-texto").value.trim(), turma: l.querySelector(".cfg-qr-turma").value.trim(),
+  }));
+
+  try {
+    desenhar(await apiGet("/configuracoes/mapeamento-turmas-qr"));
+  } catch (e) {
+    caixa.textContent = "Não foi possível ler a configuração atual.";
+    return;
+  }
+  caixa.addEventListener("click", (e) => {
+    const x = e.target.closest(".cfg-qr-remover");
+    if (!x) return;
+    x.closest(".cfg-qr-linha").remove();
+    status.textContent = "Alterações ainda não salvas.";
+  });
+  caixa.addEventListener("input", () => { status.textContent = "Alterações ainda não salvas."; });
+  sugestoes.addEventListener("click", async (e) => {
+    const usar = e.target.closest(".cfg-qr-usar");
+    const ignorar = e.target.closest(".cfg-qr-ignorar");
+    if (usar) {
+      const texto = usar.dataset.texto;
+      const existente = [...caixa.querySelectorAll(".cfg-qr-texto")].find((i) => i.value.trim().toUpperCase() === texto.toUpperCase());
+      let linha = existente && existente.closest(".cfg-qr-linha");
+      if (!linha) {
+        if (!caixa.querySelector(".cfg-qr-linha")) caixa.innerHTML = "";
+        caixa.insertAdjacentHTML("beforeend", linhaHtml(texto, ""));
+        linha = caixa.querySelector(".cfg-qr-linha:last-child");
+      }
+      linha.querySelector(".cfg-qr-turma").focus();
+      status.textContent = "Escolha a turma e clique em Salvar turmas.";
+    } else if (ignorar) {
+      ignorar.disabled = true;
+      try {
+        desenharSugestoes((await apiPost("/configuracoes/mapeamento-turmas-qr/ignorar", { texto: ignorar.dataset.texto })).nao_reconhecidos);
+      } catch (err) {
+        ignorar.disabled = false;
+        toast(err.message);
+      }
+    }
+  });
+  btnAdd.addEventListener("click", () => {
+    if (!caixa.querySelector(".cfg-qr-linha")) caixa.innerHTML = "";
+    caixa.insertAdjacentHTML("beforeend", linhaHtml());
+    caixa.querySelector(".cfg-qr-linha:last-child .cfg-qr-texto").focus();
+  });
+  btnSalvar.addEventListener("click", async () => {
+    btnSalvar.disabled = true;
+    try {
+      const r = await apiPost("/configuracoes/mapeamento-turmas-qr", { pares: lerLinhas() });
+      desenhar(r);
+      const sumidas = (r.pares || []).filter((p) => !p.existe).length;
+      status.innerHTML = '<span style="color:var(--lime)">✓ ' + escaparHtml(r.mensagem || "Salvo") + "</span>"
+        + (sumidas ? ` <span style="color:var(--amber)">${sumidas} par(es) apontam para turma que não existe mais no sistema.</span>` : "");
+      toast(r.mensagem || "Salvo");
+    } catch (e) {
+      toast(e.message);
+    } finally {
+      btnSalvar.disabled = false;
+    }
+  });
+  const testar = async () => {
+    const texto = entradaTeste.value.trim();
+    if (!texto) { toast("Digite o texto da turma como está no QR"); return; }
+    btnTestar.disabled = true;
+    try {
+      const r = await apiPost("/configuracoes/mapeamento-turmas-qr/testar", { texto, pares: lerLinhas() });
+      resultado.innerHTML = r.turma
+        ? `<span style="color:var(--lime)">✓ “${escaparHtml(r.texto)}” → <b>${escaparHtml(r.turma)}</b></span> <span style="color:var(--txt3)">(${escaparHtml(r.via)})</span>`
+        : `<span style="color:var(--amber)">✗ Nenhuma turma encontrada para “${escaparHtml(r.texto)}” (ou há mais de uma possível). Cadastre uma linha acima e teste de novo.</span>`;
+    } catch (e) {
+      toast(e.message);
+    } finally {
+      btnTestar.disabled = false;
+    }
+  };
+  btnTestar.addEventListener("click", testar);
+  entradaTeste.addEventListener("keydown", (e) => { if (e.key === "Enter") testar(); });
 }
 
 async function conectarFormNavegador() {

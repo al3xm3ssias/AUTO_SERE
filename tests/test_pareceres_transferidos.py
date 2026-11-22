@@ -310,3 +310,44 @@ def test_mapeamento_extra_vem_da_configuracao(ambiente):
 
 def test_mapeamento_embutido_continua_valendo():
     assert pp.resolver_turma({"1º Ano Integral A": []}, "1º ANO A") == "1º Ano Integral A"
+
+
+# ── turma do QR antigo que não foi reconhecida: fica anotada para o painel ──
+
+def test_turma_antiga_nao_reconhecida_so_para_o_qr_antigo():
+    turmas = {TURMA: [], "mapeamento": {}}
+    assert pp.turma_antiga_nao_reconhecida(json.dumps({"nome": "X", "turma": "SALA DO MEIO"}), turmas) == "SALA DO MEIO"
+    assert pp.turma_antiga_nao_reconhecida(json.dumps({"nome": "X", "turma": "1 ano a"}), turmas) is None      # reconhecida
+    assert pp.turma_antiga_nao_reconhecida(json.dumps({"nome": "X"}), turmas) is None                          # sem turma
+    assert pp.turma_antiga_nao_reconhecida("AUTOSERE|PF|2026|123", turmas) is None                              # QR de texto aberto
+    assert pp.turma_antiga_nao_reconhecida("[1, 2]", turmas) is None and pp.turma_antiga_nao_reconhecida("", turmas) is None
+
+
+def test_rotina_anota_a_turma_nao_reconhecida_e_deixa_o_arquivo_esperando(ambiente):
+    from src.comum import qr_turmas_nao_reconhecidas as anotados
+    _pdf_com_qr(_entrada(ambiente) / "scan9.pdf", "SAMUEL NASCIMENTO", turma="SALA DO MEIO")
+    _pdf_com_qr(_entrada(ambiente) / "scan1.pdf", "SAMUEL NASCIMENTO")                                           # este é reconhecido
+    saidas = []
+    r = pp.processar_pareceres_da_pasta(dados_dir=ambiente, log=saidas.append)
+    assert len(r.processados) == 1 and [e[0] for e in r.erros] == ["scan9.pdf"]
+    assert (_entrada(ambiente) / "scan9.pdf").exists()                                                          # continua esperando
+    (item,) = anotados.listar(ambiente)
+    assert item["texto"] == "SALA DO MEIO" and item["quantidade"] == 1 and item["arquivos"] == ["scan9.pdf"]
+    assert any("Turmas do QR antigo" in s for s in saidas)
+    pp.processar_pareceres_da_pasta(dados_dir=ambiente, log=lambda *_: None)                                    # rodar de novo não infla
+    assert anotados.listar(ambiente)[0]["quantidade"] == 1
+
+
+def test_simulacao_nao_anota_a_turma_mas_mostra_a_dica(ambiente):
+    from src.comum import qr_turmas_nao_reconhecidas as anotados
+    _pdf_com_qr(_entrada(ambiente) / "scan9.pdf", "SAMUEL NASCIMENTO", turma="SALA DO MEIO")
+    saidas = []
+    pp.processar_pareceres_da_pasta(simulacao=True, dados_dir=ambiente, log=saidas.append)
+    assert not (ambiente / anotados.ARQUIVO).exists() and any("Turmas do QR antigo" in s for s in saidas)
+
+
+def test_aluno_nao_encontrado_numa_turma_reconhecida_nao_vira_sugestao_de_turma(ambiente):
+    from src.comum import qr_turmas_nao_reconhecidas as anotados
+    _pdf_com_qr(_entrada(ambiente) / "x.pdf", "NINGUEM DA SILVA", turma=TURMA)
+    r = pp.processar_pareceres_da_pasta(dados_dir=ambiente, log=lambda *_: None)
+    assert len(r.erros) == 1 and anotados.listar(ambiente) == []

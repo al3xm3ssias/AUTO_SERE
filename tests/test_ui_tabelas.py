@@ -379,3 +379,47 @@ def test_executar_prematricula_falha_marca_a_etapa_e_cancelar_chama_a_rota(pagin
     srv.fase = "erro"
     pg.wait_for_function("document.querySelector('#pm-exec-status').textContent.includes('erro')", timeout=8000)
     assert "login recusado" in pg.inner_text("#pm-exec-msg") and pg.locator("#pm-etapas .pm-etapa.falha").count() == 1
+
+
+def test_transferidos_fila_situacao_no_processo_e_ciclos_anteriores(pagina, tmp_path, monkeypatch):
+    from datetime import date
+    monkeypatch.setattr(rotas._config, "data_corte_transferidos", lambda: date(2026, 6, 22))
+    d = "2026-08-01T10:00:00"
+    controle = json.loads((tmp_path / "transferidos.json").read_text(encoding="utf-8"))
+    controle["444"] = {"nome": "Ana Duas Saídas", "turma": "2º Ano A", "data_transferencia": "10/10/2026", "guia": {}, "historico": {},
+                       "ciclos_anteriores": [{"turma": "2º Ano A", "data_transferencia": "05/03/2026", "retorno": {"data": "20/04/2026"},
+                                               "guia": {"emitido_em": d}, "historico": {}, "parecer": {}, "id_matricula": "M-9",
+                                               "arquivos": {"guia": "Ana (saída 05-03-2026).pdf"}}]}
+    _gravar(tmp_path, "transferidos.json", controle)
+
+    def f(nome, data, retorno=None):
+        return {"nome": nome, "turma": "4º Ano A", "chamada": 1, "data_transferencia": data, "retornou": retorno is not None, "retorno": retorno}
+    _gravar(tmp_path, "fila_transferidos.json", {"gerado_em": "2026-11-20 10:00:00", "data_corte": "22/06/2026", "alunos": {
+        "555": f("Zeca Antes", "10/03/2026"), "666": f("Caio Voltou", "01/08/2026", {"data": "20/08/2026"})}})
+
+    pg = pagina
+    _abrir(pg, "transferidos")
+    cards = _cards(pg, "transferidos")
+    assert cards["total"] == "6" and cards["fora do processo"] == "2" and cards["completos"] == "1"
+    assert "Fora do processo (2)" in pg.inner_text('#sec-transferidos [data-tf="fora"]')
+    assert pg.locator("#transf-tbody tr").count() == 6
+
+    pg.click('#sec-transferidos [data-tf="fora"]')                                       # só quem não entra no processo
+    texto = pg.inner_text("#transf-tbody")
+    assert pg.locator("#transf-tbody tr").count() == 2 and "Antes do corte" in texto and "voltou em 20/08/2026" in texto
+    assert "tratada à mão" in texto and pg.locator("#transf-tbody [data-destino]").count() == 0   # sem registro: sem botão Destino…
+    pg.click('#sec-transferidos [data-tf="todos"]')
+
+    pg.check("#transf-oculta-retorno")                                                   # esconde quem voltou
+    assert pg.locator("#transf-tbody tr").count() == 5 and "Caio Voltou" not in pg.inner_text("#transf-tbody")
+    pg.uncheck("#transf-oculta-retorno")
+
+    pg.fill("#transf-q", "duas saídas")
+    assert "1 saída anterior" in pg.inner_text("#transf-tbody")
+    pg.click("#transf-tbody [data-ciclos]")
+    pg.wait_for_selector(".modal-card")
+    janela = pg.inner_text(".modal-card")
+    assert "1ª saída: 05/03/2026" in janela and "voltou à escola em 20/04/2026" in janela and "M-9" in janela
+    assert "Ana (saída 05-03-2026).pdf" in janela
+    pg.click("#tf-ciclos-fechar")
+    assert pg.locator(".modal-card").count() == 0

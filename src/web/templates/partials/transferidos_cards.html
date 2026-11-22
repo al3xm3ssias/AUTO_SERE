@@ -8,6 +8,8 @@
       <button class="pill" data-tf="completo">Completos</button>
       <button class="pill" data-tf="parcial">Parciais</button>
       <button class="pill" data-tf="pendente">Pendentes</button>
+      <button class="pill" data-tf="fora">Fora do processo</button>
+      <label class="comp-check" style="margin:0 8px"><input type="checkbox" id="transf-oculta-retorno"> Ocultar quem retornou</label>
       <div class="sbox-wrap">
         <span data-icon="search"></span>
         <input type="text" class="sbox" id="transf-q" placeholder="Buscar por nome, CGM ou turma…">
@@ -23,6 +25,7 @@
           <tr>
             <th data-ts="nome" class="sort-asc">Aluno</th>
             <th data-ts="cgm">CGM</th>
+            <th data-ts="situacao_texto">Situação no processo</th>
             <th>Guia de Transferência</th>
             <th>Histórico Escolar</th>
             <th>Parecer</th>

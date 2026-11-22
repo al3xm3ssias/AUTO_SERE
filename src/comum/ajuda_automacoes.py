@@ -251,8 +251,10 @@ AUTOMACOES: dict[str, dict] = {
         "resultado": ["Arquiva o parecer na pasta PARECERES, comprime (o original fica guardado) e, se marcado, envia ao SERE."],
         "cuidados": ["**Simulação** vem marcada: lê os QR e mostra onde cada arquivo seria salvo e se seria comprimido, sem copiar nem enviar. Desmarque para processar de verdade.",
                      "Desmarque **Enviar ao SERE depois de processar** para só arquivar.",
+                     "Parecer com QR **antigo** cuja turma não é reconhecida (por exemplo, INF 4 A) **fica na pasta, esperando**. O texto da turma é guardado e aparece em "
+                     "Configurações → **Turmas do QR antigo**: clique em **Usar**, escolha a turma certa, salve e rode esta automação de novo. A simulação só mostra a dica, não guarda nada.",
                      "Pede confirmação antes de executar."],
-        "veja_tambem": [R("automacao", "transferidos"), R("automacao", "comprimir")],
+        "veja_tambem": [R("automacao", "transferidos"), R("automacao", "comprimir"), R("configuracao", "mapeamento_turmas_qr")],
     },
 
     # ───── Pareceres ─────

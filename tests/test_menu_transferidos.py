@@ -345,3 +345,131 @@ def test_configuracao_data_corte_recusa_invalida(ctx, corpo):
     r = c.post("/web/api/configuracoes/data-corte", json=corpo)
     assert r.status_code == 400 and "dd/mm/aaaa" in r.get_json()["erro"]
     assert not configuracao.data_corte_transferidos_configurada()
+
+
+# ── Configurações: "Turmas do QR antigo" (mapeamento_turmas_qr) ───────────
+
+def _turmas_json(*nomes):
+    (rotas._dados_dir() / "turmas.json").write_text(
+        json.dumps({n: [] for n in nomes} | {"mapeamento": {}}, ensure_ascii=False), encoding="utf-8")
+
+
+def test_mapeamento_qr_configuracao_grava_normaliza_e_substitui(ctx):
+    assert configuracao.mapeamento_turmas_qr() == {}
+    r = configuracao.definir_mapeamento_turmas_qr([(" inf 4 a ", " INFANTIL 4 Integral A "), ("", ""), ("5 ANO B", "5º Ano Integral B")])
+    assert r == {"INF 4 A": "INFANTIL 4 Integral A", "5 ANO B": "5º Ano Integral B"} == configuracao.mapeamento_turmas_qr()
+    configuracao.definir_mapeamento_turmas_qr({"x": "Y"})                 # substitui tudo, aceita dict
+    assert configuracao.mapeamento_turmas_qr() == {"X": "Y"}
+    configuracao.definir_mapeamento_turmas_qr([])
+    assert configuracao.mapeamento_turmas_qr() == {}
+
+
+@pytest.mark.parametrize("pares, trecho", [
+    ([("INF 4 A", "")], "Linha 1"), ([("", "Turma")], "Linha 1"),
+    ([("INF 4 A", "T1"), ("inf 4 a", "T2")], "mais de uma vez"), ([("x" * 81, "T")], "80 caracteres"),
+])
+def test_mapeamento_qr_configuracao_recusa_e_nao_mexe_no_que_existia(ctx, pares, trecho):
+    configuracao.definir_mapeamento_turmas_qr({"A": "B"})
+    with pytest.raises(ValueError, match=trecho):
+        configuracao.definir_mapeamento_turmas_qr(pares)
+    assert configuracao.mapeamento_turmas_qr() == {"A": "B"}
+
+
+def test_mapeamento_qr_cadastrado_vale_na_leitura_do_parecer(ctx):
+    from src.automacao import pareceres_transferidos as pp
+    chaves = {"Turma Especial 7": []}
+    assert pp.resolver_turma(chaves, "SALA DO MEIO") is None
+    configuracao.definir_mapeamento_turmas_qr([("Sala do Meio", "Turma Especial 7")])
+    assert pp.resolver_turma(chaves, "sala do meio") == "Turma Especial 7"
+
+
+def test_mapeamento_qr_rotas_obter_salvar_e_apontar_turma_que_sumiu(ctx):
+    c, _ = ctx
+    _turmas_json("INFANTIL 4 Integral A", "5º Ano Integral B")
+    r = c.get("/web/api/configuracoes/mapeamento-turmas-qr").get_json()
+    assert r == {"pares": [], "turmas": ["5º Ano Integral B", "INFANTIL 4 Integral A"], "nao_reconhecidos": []}   # só turmas (sem a chave "mapeamento"), em ordem alfabética
+    corpo = {"pares": [{"qr": "INF 4 A", "turma": "INFANTIL 4 Integral A"}, {"qr": "ANTIGA", "turma": "Turma que sumiu"}, {"qr": "", "turma": ""}]}
+    r = c.post("/web/api/configuracoes/mapeamento-turmas-qr", json=corpo)
+    assert r.status_code == 200 and r.get_json()["mensagem"] == "2 par(es) salvo(s)."
+    assert r.get_json()["pares"] == [{"qr": "ANTIGA", "turma": "Turma que sumiu", "existe": False},
+                                     {"qr": "INF 4 A", "turma": "INFANTIL 4 Integral A", "existe": True}]
+    assert configuracao.mapeamento_turmas_qr()["INF 4 A"] == "INFANTIL 4 Integral A"
+    r = c.post("/web/api/configuracoes/mapeamento-turmas-qr", json={"pares": []})
+    assert r.get_json()["pares"] == [] and "só o mapeamento do sistema" in r.get_json()["mensagem"]
+
+
+@pytest.mark.parametrize("corpo", [{}, {"pares": "x"}, {"pares": ["x"]}, {"pares": [{"qr": "A", "turma": ""}]},
+                                   {"pares": [{"qr": "A", "turma": "T"}, {"qr": "a", "turma": "U"}]}])
+def test_mapeamento_qr_rota_recusa_invalido(ctx, corpo):
+    c, _ = ctx
+    r = c.post("/web/api/configuracoes/mapeamento-turmas-qr", json=corpo)
+    assert r.status_code == 400 and r.get_json()["erro"] and configuracao.mapeamento_turmas_qr() == {}
+
+
+def test_mapeamento_qr_rota_testar_diz_a_turma_e_de_onde_veio(ctx):
+    c, _ = ctx
+    _turmas_json("INFANTIL 4 Integral A", "Turma Especial 7", "3º Ano Matutino A", "3º Ano Matutino B")
+    testar = lambda texto, **kw: c.post("/web/api/configuracoes/mapeamento-turmas-qr/testar", json={"texto": texto, **kw}).get_json()
+    assert testar("INF 4 A") == {"texto": "INF 4 A", "turma": "INFANTIL 4 Integral A", "via": "mapeamento do sistema"}
+    assert testar("3 ano a")["via"] == "busca por palavras" and testar("3 ano a")["turma"] == "3º Ano Matutino A"
+    assert testar("SALA DO MEIO") == {"texto": "SALA DO MEIO", "turma": None, "via": ""}
+    assert testar("3º ANO")["turma"] is None                                                   # ambígua: A ou B?
+    pares = [{"qr": "sala do meio", "turma": "Turma Especial 7"}]
+    r = testar("SALA DO MEIO", pares=pares)                                                    # linha da tela, ainda não salva
+    assert r["turma"] == "Turma Especial 7" and "ainda não salva" in r["via"]
+    assert configuracao.mapeamento_turmas_qr() == {}                                           # testar não grava nada
+    c.post("/web/api/configuracoes/mapeamento-turmas-qr", json={"pares": pares})
+    assert testar("SALA DO MEIO")["via"] == "mapeamento cadastrado"
+    assert c.post("/web/api/configuracoes/mapeamento-turmas-qr/testar", json={"texto": " "}).status_code == 400
+
+
+def test_configuracoes_tem_a_linha_e_o_formulario_das_turmas_do_qr():
+    html = (RAIZ / "src/web/templates/configuracoes.html").read_text(encoding="utf-8")
+    js = (RAIZ / "src/web/static/js/app.js").read_text(encoding="utf-8")
+    assert 'data-config="mapeamento_turmas_qr"' in html
+    assert re.search(r"^\s*mapeamento_turmas_qr: `", js, re.M)
+    assert 'row.dataset.config === "mapeamento_turmas_qr"' in js and "async function conectarFormMapeamentoQr" in js
+
+
+def test_mapeamento_qr_lista_os_nao_reconhecidos_e_esconde_os_que_ja_se_resolvem(ctx):
+    from src.comum import qr_turmas_nao_reconhecidas as anotados
+    c, _ = ctx
+    _turmas_json("INFANTIL 4 Integral A", "Turma Especial 7")
+    pasta = rotas._dados_dir()
+    for texto, arquivo in (("SALA DO MEIO", "a.pdf"), ("SALA DO MEIO", "b.pdf"), ("INF 4 A", "c.pdf")):
+        anotados.registrar(pasta, texto, arquivo)
+    r = c.get("/web/api/configuracoes/mapeamento-turmas-qr").get_json()
+    assert [(n["texto"], n["quantidade"], n["arquivos"]) for n in r["nao_reconhecidos"]] == [("SALA DO MEIO", 2, ["a.pdf", "b.pdf"])]   # INF 4 A o sistema já resolve
+
+
+def test_mapeamento_qr_salvar_um_par_tira_o_texto_da_lista(ctx):
+    from src.comum import qr_turmas_nao_reconhecidas as anotados
+    c, _ = ctx
+    _turmas_json("Turma Especial 7")
+    anotados.registrar(rotas._dados_dir(), "SALA DO MEIO", "a.pdf")
+    anotados.registrar(rotas._dados_dir(), "OUTRA", "b.pdf")
+    r = c.post("/web/api/configuracoes/mapeamento-turmas-qr", json={"pares": [{"qr": "sala do meio", "turma": "Turma Especial 7"}]}).get_json()
+    assert [n["texto"] for n in r["nao_reconhecidos"]] == ["OUTRA"]
+    assert [i["texto"] for i in anotados.listar(rotas._dados_dir())] == ["OUTRA"]               # saiu do arquivo, não só da tela
+    c.post("/web/api/configuracoes/mapeamento-turmas-qr", json={"pares": []})                  # apagar o par não traz o texto de volta
+    assert [i["texto"] for i in anotados.listar(rotas._dados_dir())] == ["OUTRA"]
+
+
+def test_mapeamento_qr_ignorar_tira_da_lista_sem_mexer_nos_pares(ctx):
+    from src.comum import qr_turmas_nao_reconhecidas as anotados
+    c, _ = ctx
+    _turmas_json("Turma Especial 7")
+    configuracao.definir_mapeamento_turmas_qr([("A", "Turma Especial 7")])
+    anotados.registrar(rotas._dados_dir(), "LIXO DE LEITURA", "a.pdf")
+    r = c.post("/web/api/configuracoes/mapeamento-turmas-qr/ignorar", json={"texto": " lixo de leitura "}).get_json()
+    assert r["nao_reconhecidos"] == [] and [p["qr"] for p in r["pares"]] == ["A"] and anotados.listar(rotas._dados_dir()) == []
+    assert c.post("/web/api/configuracoes/mapeamento-turmas-qr/ignorar", json={"texto": " "}).status_code == 400
+
+
+def test_mapeamento_qr_sem_turmas_json_lista_todos_os_anotados(ctx):
+    from src.comum import qr_turmas_nao_reconhecidas as anotados
+    c, _ = ctx
+    (rotas._dados_dir() / "turmas.json").unlink()
+    anotados.registrar(rotas._dados_dir(), "INF 4 A", "a.pdf")
+    r = c.get("/web/api/configuracoes/mapeamento-turmas-qr").get_json()
+    assert r["turmas"] == [] and [n["texto"] for n in r["nao_reconhecidos"]] == ["INF 4 A"]    # sem como conferir, não esconde nada

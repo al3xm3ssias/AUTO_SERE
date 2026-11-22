@@ -1166,14 +1166,102 @@ def _carregar_json_estrito(nome_arquivo: str):
     return carregar_json(caminho, dict, dict) if caminho.exists() else {}
 
 
+def _ciclo_para_tela(c: dict) -> dict:
+    """
+    Uma saída ANTERIOR do aluno (item de `ciclos_anteriores` em transferidos.json), no formato da janela
+    "Saídas anteriores" da tela de Transferidos: datas de saída e de retorno, documentos que foram feitos,
+    onde ficaram a guia e o histórico (PDFs renomeados "(saída dd-mm-aaaa)") e a escola de destino daquela saída.
+    """
+    from src.comum import destino_transferidos as _dest
+    campos = ("emitido_em", "assinado_secretario", "assinado_diretor", "anexado_em")
+
+    def _doc(chave: str) -> dict:
+        d = c.get(chave) if isinstance(c.get(chave), dict) else {}
+        return {k: d.get(k) or None for k in campos}
+
+    guia, hist = _doc("guia"), _doc("historico")
+    parecer = c.get("parecer") if isinstance(c.get("parecer"), dict) else {}
+    feitos = sum(1 for d in (guia, hist) for k in campos[:3] if d[k])
+    retorno = c.get("retorno") if isinstance(c.get("retorno"), dict) else {}
+    arquivos = c.get("arquivos") if isinstance(c.get("arquivos"), dict) else {}
+    destino = _dest.resolver_destino(c)
+    return {
+        "data_transferencia": c.get("data_transferencia") or "", "turma": c.get("turma") or "",
+        "chamada": c.get("chamada"), "id_matricula": c.get("id_matricula") or "",
+        "retorno_em": retorno.get("data") or "", "arquivado_em": c.get("arquivado_em") or None,
+        "guia": guia, "historico": hist,
+        "parecer": {k: parecer.get(k) or None for k in ("digitalizado_em", "anexado_em")},
+        "feitos": feitos, "total_passos": 6,
+        "arquivos": {k: arquivos.get(k) or "" for k in ("guia", "historico")},
+        "destino": {"escola": destino["escola"], "fonte": destino["fonte"]},
+    }
+
+
+SITUACAO_PROCESSO_TEXTO = {
+    "concluido": "Concluído", "em_andamento": "Em andamento", "a_processar": "A processar",
+    "antes_do_corte": "Antes do corte", "retornou": "Retornou à escola", "sem_data": "Sem data válida",
+}
+
+
+def _fila_para_tela() -> tuple[dict, dict]:
+    """
+    Os alunos de fila_transferidos.json por CGM (todos os transferidos da escola, inclusive quem não entra no processo),
+    cada um com `situacao_fila` recalculada pela DATA_CORTE em vigor (a fila pode ter sido gerada com outra data).
+    Devolve ({}, {}) se não há fila ou ela está ilegível: a tabela então mostra só o transferidos.json, como antes.
+    """
+    try:
+        from src.automacao import fila_transferidos as _fila
+        bruta = _carregar_json("fila_transferidos.json", {})
+        alunos = bruta.get("alunos") if isinstance(bruta, dict) else None
+        if not isinstance(alunos, dict) or not alunos:
+            return {}, {}
+        corte = _config.data_corte_transferidos()
+        saida = {str(cgm): {**a, "situacao_fila": _fila.classificar(a, corte)}
+                 for cgm, a in alunos.items() if isinstance(a, dict)}
+        return saida, {"gerado_em": bruta.get("gerado_em") or "", "data_corte": corte.strftime("%d/%m/%Y")}
+    except Exception:                                  # noqa: BLE001 — a fila é um extra: a tabela nunca depende dela
+        return {}, {}
+
+
+def _situacao_no_processo(status: str, no_processo: bool, aluno_da_fila: Optional[dict]) -> str:
+    """
+    Chave da coluna "Situação no processo". Quem voltou à escola (a partir do corte) é "retornou". Quem tem registro no
+    controle vale pelos documentos (concluído / em andamento / a processar). Quem só está na fila vale pela fila.
+    """
+    fila_sit = (aluno_da_fila or {}).get("situacao_fila")
+    if fila_sit == "retornou":
+        return "retornou"
+    if no_processo:
+        return {"completo": "concluido", "parcial": "em_andamento"}.get(status, "a_processar")
+    return "a_processar" if fila_sit in (None, "processar") else fila_sit
+
+
+def _linha_fora_do_processo(cgm: str, a: dict, situacao: str) -> dict:
+    """Linha de quem está na fila mas não tem registro em transferidos.json (antes do corte, retornou, sem data)."""
+    vazio_doc = {k: None for k in ("emitido_em", "assinado_secretario", "assinado_diretor", "anexado_em")}
+    return {
+        "destino": None, "id_matricula": a.get("id_matricula") or "", "data_transferencia": a.get("data_transferencia") or "",
+        "ciclos_anteriores": [], "n_ciclos": 0, "cgm": str(cgm), "nome": a.get("nome") or "—", "turma": a.get("turma") or "—",
+        "guia": dict(vazio_doc), "historico": dict(vazio_doc), "parecer": {"digitalizado_em": None, "anexado_em": None},
+        "feitos": 0, "total_passos": 6, "status": "fora", "no_processo": False,
+        "situacao": situacao, "situacao_texto": SITUACAO_PROCESSO_TEXTO[situacao],
+        "retornou": bool(a.get("retornou")), "retorno_em": (a.get("retorno") or {}).get("data") or "",
+    }
+
+
 @api_bp.route("/transferidos/lista")
 def transferidos_lista():
     """
     Controle dos documentos dos alunos transferidos (transferidos.json, por CGM): guia de transferência,
     histórico escolar (emitido / assinado pela secretária / assinado pela diretora) e parecer
     (digitalizado / anexado). O status é a fração dos 6 passos da guia + histórico, como no index.html.
+
+    Junta o controle (transferidos.json, só quem entra no processo) com a fila (fila_transferidos.json, TODOS os
+    transferidos da escola): quem está só na fila (antes do corte, retornou, sem data) vira uma linha "fora do processo",
+    sem documentos. Cada linha ganha `situacao` ("Situação no processo"), `no_processo` e `retornou`.
     """
     bruto = _carregar_json("transferidos.json", {})
+    fila, fila_info = _fila_para_tela()
     por_cgm = _turma_situacao_por_cgm()
     try:
         from src.automacao import avisos as _avisos
@@ -1190,8 +1278,16 @@ def transferidos_lista():
         feitos = sum(1 for doc in (guia, hist) for campo in ("emitido_em", "assinado_secretario", "assinado_diretor")
                      if doc.get(campo))
         destino = _destino_para_tela(r, _aviso_do_aluno(avisados, str(cgm), r))
+        ciclos = [_ciclo_para_tela(c_) for c_ in (r.get("ciclos_anteriores") or []) if isinstance(c_, dict)]
+        status = "completo" if feitos == 6 else "pendente" if feitos == 0 else "parcial"
+        da_fila = fila.get(str(cgm))
+        situacao = _situacao_no_processo(status, True, da_fila)
         registros.append({
             "destino": destino, "id_matricula": r.get("id_matricula") or "",
+            "data_transferencia": r.get("data_transferencia") or (da_fila or {}).get("data_transferencia") or "",
+            "ciclos_anteriores": ciclos, "n_ciclos": len(ciclos),
+            "no_processo": True, "situacao": situacao, "situacao_texto": SITUACAO_PROCESSO_TEXTO[situacao],
+            "retornou": bool((da_fila or {}).get("retornou")), "retorno_em": ((da_fila or {}).get("retorno") or {}).get("data") or "",
             "cgm": str(cgm),
             "nome": r.get("nome") or (por_cgm.get(str(cgm)) or {}).get("nome") or "—",
             "turma": r.get("turma") or (por_cgm.get(str(cgm)) or {}).get("turma") or "—",
@@ -1200,24 +1296,32 @@ def transferidos_lista():
             "parecer": {k: parecer.get(k) or None for k in ("digitalizado_em", "anexado_em")},
             "feitos": feitos,
             "total_passos": 6,
-            "status": "completo" if feitos == 6 else "pendente" if feitos == 0 else "parcial",
+            "status": status,
         })
+    for cgm, a in fila.items():                        # quem só está na fila: fora do processo, sem documentos
+        if cgm not in bruto:
+            registros.append(_linha_fora_do_processo(cgm, a, _situacao_no_processo("pendente", False, a)))
     registros.sort(key=lambda r: _sem_acento(r["nome"]))
 
     n = {s_: sum(1 for r in registros if r["status"] == s_) for s_ in ("completo", "parcial", "pendente")}
+    fora = sum(1 for r in registros if not r["no_processo"])
     cartoes = []
     if registros:
         cartoes = [
-            _cartao("Total", len(registros), "alunos transferidos", "rose", "transfer"),
+            _cartao("Total", len(registros), "transferidos da escola" if fila else "alunos transferidos", "rose", "transfer"),
             _cartao("Completos", n["completo"], "guia + histórico OK", "lime", "circleCheck"),
             _cartao("Parciais", n["parcial"], "documentação incompleta", "amber", "clock"),
             _cartao("Pendentes", n["pendente"], "nenhum documento emitido", "cyan", "alertFile"),
         ]
+        if fora:
+            cartoes.append(_cartao("Fora do processo", fora, "antes do corte ou retornaram", "blue", "folder"))
     return jsonify({
         "transferidos": registros,
         "cartoes": cartoes,
         "contagem": n,
         "total": len(registros),
+        "total_fora": fora,
+        "fila": fila_info,
         "atualizado_em": _mtime_formatado("transferidos.json"),
     })
 
@@ -2371,6 +2475,109 @@ def configuracao_data_corte_salvar():
     resposta = _estado_data_corte()
     resposta.update({"status": "ok", "mensagem": mensagem})
     return jsonify(resposta)
+
+
+def _turmas_reais() -> list:
+    """Nomes das turmas do turmas.json (as chaves que são listas de alunos), em ordem alfabética."""
+    turmas = _carregar_json("turmas.json", {})
+    if not isinstance(turmas, dict):
+        return []
+    return sorted((k for k, v in turmas.items() if isinstance(v, list)), key=_sem_acento)
+
+
+def _qr_nao_reconhecidos(resolvidos: bool = False) -> list:
+    """
+    Textos de turma do QR antigo que a leitura dos pareceres não reconheceu (ver comum/qr_turmas_nao_reconhecidas.py),
+    SEM os que já passaram a ser reconhecidos (par cadastrado depois, turma que voltou ao turmas.json...).
+    Com `resolvidos=True` devolve só os textos que já se resolveram (para limpar a lista).
+    """
+    from src.automacao import pareceres_transferidos as _pp
+    from src.comum import qr_turmas_nao_reconhecidas as _anotados
+    turmas = _carregar_json("turmas.json", {})
+    turmas = turmas if isinstance(turmas, dict) else {}
+    saida = []
+    for item in _anotados.listar(_dados_dir()):
+        ja_resolve = bool(turmas) and _pp.resolver_turma(turmas, item["texto"]) is not None
+        if ja_resolve == resolvidos:
+            saida.append(item)
+    return saida
+
+
+def _estado_mapeamento_qr() -> dict:
+    reais = _turmas_reais()
+    pares = [{"qr": k, "turma": v, "existe": v in reais if reais else True}
+             for k, v in sorted(_config.mapeamento_turmas_qr().items())]
+    nao = [{"texto": i["texto"], "quantidade": i["quantidade"], "arquivos": i["arquivos"][:3], "ultima_vez": i["ultima_vez"]}
+           for i in _qr_nao_reconhecidos()]
+    return {"pares": pares, "turmas": reais, "nao_reconhecidos": nao}
+
+
+@api_bp.route("/configuracoes/mapeamento-turmas-qr", methods=["GET"])
+def configuracao_mapeamento_qr_obter():
+    """Pares cadastrados (texto da turma no QR antigo → turma do turmas.json) e as turmas reais para escolher."""
+    return jsonify(_estado_mapeamento_qr())
+
+
+@api_bp.route("/configuracoes/mapeamento-turmas-qr", methods=["POST"])
+def configuracao_mapeamento_qr_salvar():
+    """payload: {"pares": [{"qr": "INF 4 A", "turma": "INFANTIL 4 Integral A"}, ...]} — substitui todos os pares."""
+    payload = request.get_json(silent=True) or {}
+    pares = payload.get("pares")
+    if not isinstance(pares, list) or not all(isinstance(p_, dict) for p_ in pares):
+        return jsonify({"erro": "Envie a lista de pares (qr e turma)."}), 400
+    try:
+        gravados = _config.definir_mapeamento_turmas_qr([(p_.get("qr"), p_.get("turma")) for p_ in pares])
+    except ValueError as exc:
+        return jsonify({"erro": str(exc)}), 400
+    from src.comum import qr_turmas_nao_reconhecidas as _anotados
+    _anotados.remover(_dados_dir(), [i["texto"] for i in _qr_nao_reconhecidos(resolvidos=True)])   # os que os pares já resolvem saem da lista
+    resposta = _estado_mapeamento_qr()
+    resposta.update({"status": "ok", "mensagem": (f"{len(gravados)} par(es) salvo(s)." if gravados else "Nenhum par: ficou só o mapeamento do sistema.")})
+    return jsonify(resposta)
+
+
+@api_bp.route("/configuracoes/mapeamento-turmas-qr/ignorar", methods=["POST"])
+def configuracao_mapeamento_qr_ignorar():
+    """payload: {"texto": "INF 4 A"} — tira da lista dos não reconhecidos (leitura ruim, QR de teste...). Não mexe nos pares."""
+    texto = str((request.get_json(silent=True) or {}).get("texto") or "").strip()
+    if not texto:
+        return jsonify({"erro": "Informe o texto da turma."}), 400
+    from src.comum import qr_turmas_nao_reconhecidas as _anotados
+    _anotados.remover(_dados_dir(), [texto])
+    resposta = _estado_mapeamento_qr()
+    resposta.update({"status": "ok", "mensagem": "Tirei da lista."})
+    return jsonify(resposta)
+
+
+@api_bp.route("/configuracoes/mapeamento-turmas-qr/testar", methods=["POST"])
+def configuracao_mapeamento_qr_testar():
+    """
+    Mostra qual turma a leitura do parecer escolheria para um texto de turma do QR. `pares` (opcional) são as linhas da
+    tela ainda NÃO salvas: valem como se já estivessem gravadas, para testar antes de salvar.
+    """
+    payload = request.get_json(silent=True) or {}
+    texto = str(payload.get("texto") or "").strip()
+    if not texto:
+        return jsonify({"erro": "Digite o texto da turma como está no QR (ex.: INF 4 A)."}), 400
+    from src.automacao import pareceres_transferidos as _pp
+    turmas = _carregar_json("turmas.json", {})
+    turmas = turmas if isinstance(turmas, dict) else {}
+    chave = texto.upper()
+    reais = [k for k, v in turmas.items() if isinstance(v, list)]
+    digitado = {str(p_.get("qr") or "").strip().upper(): str(p_.get("turma") or "").strip()
+                for p_ in (payload.get("pares") or []) if isinstance(p_, dict)}
+    if digitado.get(chave) in reais:                   # linha da tela, ainda não salva: vale antes de tudo
+        return jsonify({"texto": texto, "turma": digitado[chave], "via": "linha da tabela (ainda não salva)"})
+    turma = _pp.resolver_turma(turmas, texto)
+    if turma is None:
+        via = ""
+    elif _config.mapeamento_turmas_qr().get(chave) == turma:
+        via = "mapeamento cadastrado"
+    elif _pp.MAPEAMENTO_TURMAS.get(chave) == turma:
+        via = "mapeamento do sistema"
+    else:
+        via = "busca por palavras"
+    return jsonify({"texto": texto, "turma": turma, "via": via})
 
 
 @api_bp.route("/configuracoes/pasta-digitalizacao", methods=["GET"])

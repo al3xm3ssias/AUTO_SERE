@@ -249,26 +249,42 @@ TELAS: dict[str, dict] = {
 
     "transferidos": {
         "titulo": "Transferidos", "icone": "transfer",
-        "resumo": "Controle dos documentos de cada aluno transferido: guia de transferência, histórico escolar e parecer, com as datas de emissão, assinatura e envio.",
-        "dados": "`transferidos.json`, mantido a partir do `turmas.json`. A fila automática usa a **data de corte** definida em Configurações.",
+        "resumo": "Todos os alunos transferidos da escola e o controle dos documentos de cada um: guia de transferência, histórico escolar e parecer, com as datas de emissão, assinatura e envio.",
+        "dados": "`transferidos.json` (o controle dos documentos, só de quem entra no processo) e `fila_transferidos.json` (todos os transferidos, regerada a cada coleta de turmas). "
+                 "Quem entra no processo é definido pela **data de corte** em Configurações.",
         "passos": [
             "Olhe os cartões do alto para ver quantos estão completos, parciais e pendentes.",
-            "Filtre por **Todos**, **Completos**, **Parciais** ou **Pendentes**; busque por nome, CGM ou turma.",
+            "Filtre por **Todos**, **Completos**, **Parciais**, **Pendentes** ou **Fora do processo**; busque por nome, CGM, turma ou situação.",
+            "Leia a coluna **Situação no processo**: ela diz em que ponto cada aluno está, inclusive quem não entra no processo automático.",
             "Leia os selos de cada documento: colorido com data = feito; cinza com **—** = ainda não feito.",
             "Para executar o envio ao SERE, clique em **Atualizar dados** (abre a automação) e siga a tela de execução.",
         ],
         "elementos": [
             E("Atualizar dados", "Abre a automação **Enviar transferidos ao SERE**.", "#sec-transferidos .js-atualizar"),
             E("Exportar", "Baixa a tabela atual em CSV, com uma coluna para cada data.", "#sec-transferidos .js-exportar"),
-            E("Cartões", "Totais por situação.", "#cartoes-transferidos"),
-            E("Filtros", "Todos, Completos, Parciais e Pendentes (cada um com sua contagem).", "#sec-transferidos .fbar"),
-            E("Busca", "Nome, CGM ou turma.", "#transf-q"),
+            E("Cartões", "**Total** é o total de transferidos da escola. Completos, Parciais e Pendentes contam só quem está no processo; "
+                         "**Fora do processo** conta quem saiu antes do corte ou voltou à escola.", "#cartoes-transferidos"),
+            E("Filtros", "Todos, Completos, Parciais, Pendentes e Fora do processo (cada um com sua contagem).", "#sec-transferidos .fbar"),
+            E("Ocultar quem retornou", "Esconde da tabela os alunos que foram transferidos mas voltaram à escola.", "#transf-oculta-retorno"),
+            E("Busca", "Nome, CGM, turma ou situação no processo.", "#transf-q"),
+            E("Situação no processo",
+              "**A processar**: entra no processo e ainda não tem documento. **Em andamento**: já tem parte dos documentos. **Concluído**: guia e histórico completos. "
+              "**Antes do corte**: saiu antes da data de corte e foi tratado à mão. **Retornou à escola**: voltou, o processo não se refaz. "
+              "**Sem data válida**: a data de saída está ilegível e precisa ser conferida. Sob o selo aparecem a data da saída e, se voltou, a do retorno.",
+              "#sec-transferidos [data-ts='situacao_texto']"),
             E("Guia de Transferência",
               "Selos: **Emitida** (gerada no SERE), **Secr.** (assinada pelo secretário) e **Dir.** (assinada pelo diretor).",
               "#transf-tbody"),
             E("Histórico Escolar", "Mesmos selos da guia: Emitido, Secr. e Dir.", "#transf-tbody"),
             E("Parecer", "**Digitalizado** (arquivo encontrado) e **Anexado** (enviado ao SERE).", "#transf-tbody"),
-            E("Status", "**Completo**, **Pendente** ou uma fração como 3/6 (passos feitos de um total).", "#sec-transferidos [data-ts='status']"),
+            E("Destino",
+              "A escola para onde o aluno foi (da Base ABC ou preenchida à mão) e o que o aviso por e-mail fará. O botão **Destino…** preenche ou corrige à mão. "
+              "Quem está fora do processo não tem destino nem documentos: aparece só com o traço.", "#transf-tbody"),
+            E("Saídas anteriores",
+              "O botão **↺ N saída(s) anterior(es)** aparece sob o nome do aluno que saiu, voltou e saiu de novo. A linha da tabela mostra a "
+              "**saída atual**; o botão abre uma janela, só para leitura, com cada saída anterior: data de saída, data em que voltou, turma, "
+              "documentos feitos, escola de destino e o nome dos PDFs guardados.", "#transf-tbody"),
+            E("Status", "**Completo**, **Pendente**, uma fração como 3/6 (passos feitos de um total) ou **Fora do processo**.", "#sec-transferidos [data-ts='status']"),
         ],
         "dicas": ["O Diretor assina em outra sessão do SERE; por isso a assinatura dele pode aparecer depois da do secretário."],
         "veja_tambem": [R("automacao", "transferidos_fila"), R("automacao", "transferidos_gerar"),
@@ -507,7 +523,7 @@ TELAS: dict[str, dict] = {
             "Para saber o que cada painel faz, deixe-o aberto e aperte **F1**: a ajuda é do painel.",
         ],
         "elementos": [
-            E("Escola", "Dados da escola, Ano letivo e Data de corte dos transferidos.", "[data-config='escola']"),
+            E("Escola", "Dados da escola, Ano letivo, Data de corte dos transferidos, Turmas do QR antigo e Navegador das automações.", "[data-config='escola']"),
             E("Credenciais e integrações", "Senhas do SERE, da Pré-matrícula, do RCO e do Gmail; Planilhas do Google Drive; outras credenciais; Temas e Perfil.", "[data-config='senha_sere']"),
             E("Pastas", "Pasta de digitalização e Modelos de parecer.", "[data-config='pasta_digitalizacao']"),
             E("Painel selecionado", "Área onde aparece o formulário do item escolhido.", "#config-detalhe"),
@@ -689,6 +705,33 @@ CONFIGURACOES: dict[str, dict] = {
             "(os PDFs passam a se chamar \"<nome> (saída dd-mm-aaaa).pdf\").",
         ],
         "veja_tambem": [R("automacao", "transferidos_fila"), R("automacao", "transferidos_gerar"), R("tela", "transferidos")],
+    },
+
+    "mapeamento_turmas_qr": {
+        "titulo": "Painel: Turmas do QR antigo", "icone": "compare",
+        "resumo": "Ensina o sistema a reconhecer o nome da turma escrito no QR antigo dos pareceres, quando ele não bate com o nome da turma no sistema.",
+        "passos": [
+            "Se a leitura de pareceres não reconheceu alguma turma, ela aparece num quadro no topo do painel: clique em **Usar**, escolha a turma certa e clique em **Salvar turmas**.",
+            "Para cadastrar à mão, clique em **+ Adicionar linha**. No campo da esquerda, digite o texto da turma **como está no QR** (por exemplo, INF 4 A). No da direita, escolha a turma certa na lista.",
+            "Clique em **Salvar turmas**. A próxima leitura de pareceres já usa os pares.",
+            "Para conferir antes, digite um texto em **Testar um texto de turma** e clique em **Testar**: o painel diz qual turma seria escolhida e por qual caminho. As linhas ainda não salvas também valem no teste.",
+        ],
+        "elementos": [
+            E("Turmas não reconhecidas", "Textos de turma que a leitura dos pareceres não reconheceu, com quantos pareceres trouxeram cada um. **Usar** abre a linha já com o texto; **Ignorar** tira da lista (leitura ruim, QR de teste).", "#cfg-qr-sugestoes"),
+            E("Linhas dos pares", "Cada linha liga o texto do QR (esquerda) à turma do sistema (direita). Maiúsculas e minúsculas contam igual.", "#cfg-qr-linhas"),
+            E("+ Adicionar linha", "Abre uma linha vazia no fim da lista.", "#cfg-qr-add"),
+            E("✕", "Remove a linha. Só vale depois de **Salvar turmas**.", "#cfg-qr-linhas"),
+            E("Testar", "Mostra a turma que a leitura do parecer escolheria para o texto digitado, ou avisa que não achou (ou que há mais de uma possível).", "#cfg-qr-testar"),
+            E("Salvar turmas", "Grava a lista inteira: o que não está na tela deixa de valer.", "#cfg-qr-salvar"),
+        ],
+        "dicas": [
+            "Os pares cadastrados valem **antes** do mapeamento que já vem no sistema e da busca por palavras (que acerta a maioria, como INF 4 A → INFANTIL 4 …).",
+            "Se o texto do QR serve para mais de uma turma (por exemplo, \"3º ANO\" com turmas A e B), a leitura não adivinha: cadastre o texto completo, com a letra da turma.",
+            "Se uma turma for renomeada ou deixar de existir no ano seguinte, o par aparece marcado como **não existe mais**: escolha a nova turma ou remova a linha.",
+            "Os pareceres de turma não reconhecida **continuam na pasta**, esperando: depois de salvar o par, rode a automação de pareceres de novo. A lista só é preenchida nas execuções de verdade (a simulação não grava nada).",
+            "O QR novo (com o CGM) não usa este painel.",
+        ],
+        "veja_tambem": [R("automacao", "pareceres_transferidos"), R("configuracao", "data_corte_transferidos"), R("tela", "transferidos")],
     },
 
     "senha_sere": {

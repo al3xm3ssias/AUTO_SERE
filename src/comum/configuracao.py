@@ -63,6 +63,7 @@ _PADRAO: dict[str, Any] = {
     "unidade_escolar": None,
     "flags_automacoes": {},
     "data_corte_transferidos": None,      # "dd/mm/aaaa"; None = 22/06 do ano letivo (ver data_corte_transferidos)
+    "mapeamento_turmas_qr": {},           # {texto da turma no QR antigo (MAIÚSCULO): turma real do turmas.json} — ver mapeamento_turmas_qr
     "observacao_historico": None,         # último texto usado na etapa "Alterar" do histórico de transferidos
     "navegador_padrao": None,             # None = automático (cada script usa o seu); "chromium" (Chrome) ou "firefox" — ver comum/navegador.py
     "navegador_scripts": {},              # {chave_do_script: {"mostrar_janela": True/False}}; sem a chave = o padrão do script
@@ -364,6 +365,53 @@ def definir_data_corte_transferidos(texto) -> "date":
     configuracao["data_corte_transferidos"] = data.strftime("%d/%m/%Y")
     _salvar_configuracao(configuracao)
     return data
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Turmas do QR antigo dos pareceres (pedido do usuário, 21/11/2026)
+# ─────────────────────────────────────────────────────────────────────────
+# O QR antigo traz o NOME e a TURMA escritos à mão ("INF 4 A"); o turmas.json chama a turma de outro jeito
+# ("INFANTIL 4 Integral A"). A leitura (pareceres_transferidos.resolver_turma) acha a maioria por palavras; o que ela
+# não acha o usuário ensina aqui, e os pares valem ACIMA do mapeamento embutido no código.
+
+MAPEAMENTO_QR_MAX_PARES = 300
+MAPEAMENTO_QR_MAX_TEXTO = 80
+
+
+def mapeamento_turmas_qr() -> dict:
+    """Os pares que o usuário cadastrou: {texto da turma no QR (MAIÚSCULO, sem espaços nas pontas): turma do turmas.json}."""
+    bruto = carregar_configuracao().get("mapeamento_turmas_qr")
+    if not isinstance(bruto, dict):
+        return {}
+    return {str(k).strip().upper(): str(v).strip() for k, v in bruto.items() if str(k).strip() and str(v).strip()}
+
+
+def definir_mapeamento_turmas_qr(pares) -> dict:
+    """
+    Grava os pares (SUBSTITUI os que existiam). `pares`: lista de (texto do QR, turma) ou um dict. Linhas totalmente
+    vazias são ignoradas. ValueError com mensagem pronta se uma linha está pela metade, se o mesmo texto aparece duas
+    vezes ou se passa do limite. A chave segue a regra da leitura (strip + MAIÚSCULO): é assim que ela é procurada.
+    """
+    itens = list(pares.items()) if isinstance(pares, dict) else list(pares or [])
+    gravar: dict = {}
+    for n, (qr, turma) in enumerate(itens, start=1):
+        qr, turma = str(qr or "").strip(), str(turma or "").strip()
+        if not qr and not turma:
+            continue
+        if not qr or not turma:
+            raise ValueError(f"Linha {n}: preencha o texto do QR e a turma (ou apague a linha).")
+        if len(qr) > MAPEAMENTO_QR_MAX_TEXTO:
+            raise ValueError(f"Linha {n}: o texto do QR passa de {MAPEAMENTO_QR_MAX_TEXTO} caracteres.")
+        chave = qr.upper()
+        if chave in gravar:
+            raise ValueError(f"O texto \"{qr}\" aparece mais de uma vez (maiúsculas e minúsculas contam igual).")
+        gravar[chave] = turma
+    if len(gravar) > MAPEAMENTO_QR_MAX_PARES:
+        raise ValueError(f"São pares demais (o máximo é {MAPEAMENTO_QR_MAX_PARES}).")
+    configuracao = carregar_configuracao()
+    configuracao["mapeamento_turmas_qr"] = gravar
+    _salvar_configuracao(configuracao)
+    return dict(gravar)
 
 
 def observacao_historico() -> str:

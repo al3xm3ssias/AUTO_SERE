@@ -407,3 +407,74 @@ def test_transferidos_status_pelos_6_passos_da_guia_e_historico(dados, c):
 def test_transferidos_vazio(dados, c):
     r = c.get("/web/api/transferidos/lista").get_json()
     assert r["transferidos"] == [] and r["cartoes"] == []
+
+
+def test_transferidos_mostra_ciclos_anteriores(dados, c):
+    d = "2026-03-01T10:00:00"
+    ciclo = {"chamada": 7, "turma": "5º A", "data_transferencia": "05/03/2026",
+             "retorno": {"chamada": 31, "turma": "5º A", "data": "20/04/2026"},
+             "guia": {"emitido_em": d, "assinado_secretario": d}, "historico": {"emitido_em": d},
+             "parecer": {"digitalizado_em": d}, "id_matricula": "M-1",
+             "arquivos": {"guia": "Ana (saída 05-03-2026).pdf", "historico": "Ana (saída 05-03-2026).pdf"},
+             "destino_manual": {"escola": "Escola Modelo", "status": "automatico"}, "arquivado_em": "2026-10-01T09:00:00"}
+    gravar(dados, "transferidos.json", {
+        "55": {"nome": "Ana", "turma": "5º A", "data_transferencia": "10/10/2026", "guia": {}, "historico": {},
+               "ciclos_anteriores": [ciclo, "lixo"]},          # item que não é dict é ignorado
+        "66": {"nome": "Beto", "turma": "3º B", "guia": {}, "historico": {}}})
+    r = c.get("/web/api/transferidos/lista").get_json()
+    por = {x["nome"]: x for x in r["transferidos"]}
+    assert por["Beto"]["n_ciclos"] == 0 and por["Beto"]["ciclos_anteriores"] == []
+    ana = por["Ana"]
+    assert ana["n_ciclos"] == 1 and ana["data_transferencia"] == "10/10/2026"
+    (cic,) = ana["ciclos_anteriores"]
+    assert cic["data_transferencia"] == "05/03/2026" and cic["retorno_em"] == "20/04/2026" and cic["id_matricula"] == "M-1"
+    assert cic["feitos"] == 3 and cic["guia"]["assinado_secretario"] == d and cic["parecer"]["digitalizado_em"] == d
+    assert cic["arquivos"]["guia"].startswith("Ana (saída") and cic["destino"] == {"escola": "Escola Modelo", "fonte": "manual"}
+    assert ana["status"] == "pendente"                       # o status da linha é o da saída ATUAL, não o do ciclo
+
+
+def _fila_aluno(nome, data, retorno=None, **extra):
+    return {"nome": nome, "turma": "5º A", "chamada": 1, "data_transferencia": data, "retornou": retorno is not None,
+            "retorno": retorno, "situacao_fila": "x", "processar": False, **extra}
+
+
+def test_transferidos_junta_a_fila_e_mostra_a_situacao_no_processo(dados, c, monkeypatch):
+    from datetime import date
+    monkeypatch.setattr(rotas._config, "data_corte_transferidos", lambda: date(2026, 6, 22))
+    d = "2026-08-01T10:00:00"
+    completo = {"emitido_em": d, "assinado_secretario": d, "assinado_diretor": d}
+    gravar(dados, "transferidos.json", {
+        "111": {"nome": "João", "turma": "5º A", "data_transferencia": "01/08/2026", "guia": completo, "historico": completo},
+        "666": {"nome": "Fábio", "turma": "5º A", "data_transferencia": "10/07/2026", "guia": {"emitido_em": d}, "historico": {}}})
+    gravar(dados, "fila_transferidos.json", {"gerado_em": "2026-11-20 10:00:00", "data_corte": "01/01/2000", "alunos": {
+        "111": _fila_aluno("João", "01/08/2026"),
+        "222": _fila_aluno("Ana", "10/03/2026"),                                                  # antes do corte
+        "333": _fila_aluno("Caio", "01/08/2026", {"chamada": 9, "turma": "5º A", "data": "20/08/2026"}),   # voltou, sem registro
+        "444": _fila_aluno("Duda", ""),                                                           # sem data válida
+        "555": _fila_aluno("Edu", "01/09/2026"),                                                  # entra, ainda sem registro
+        "666": _fila_aluno("Fábio", "10/07/2026", {"chamada": 3, "turma": "5º A", "data": "30/07/2026"}),  # tem registro e voltou
+        "lixo": "não é dict"}})
+    r = c.get("/web/api/transferidos/lista").get_json()
+    por = {x["nome"]: x for x in r["transferidos"]}
+    assert r["total"] == 6 and r["total_fora"] == 4                       # a data de corte vale a de agora, não a que a fila gravou
+    assert r["fila"] == {"gerado_em": "2026-11-20 10:00:00", "data_corte": "22/06/2026"}
+    assert {n: (x["situacao"], x["no_processo"]) for n, x in por.items()} == {
+        "João": ("concluido", True), "Fábio": ("retornou", True), "Ana": ("antes_do_corte", False),
+        "Caio": ("retornou", False), "Duda": ("sem_data", False), "Edu": ("a_processar", False)}
+    assert por["Ana"]["status"] == "fora" and por["Ana"]["destino"] is None and por["Ana"]["feitos"] == 0
+    assert por["Caio"]["retornou"] and por["Caio"]["retorno_em"] == "20/08/2026" and por["Caio"]["data_transferencia"] == "01/08/2026"
+    assert por["Fábio"]["status"] == "parcial" and por["Fábio"]["guia"]["emitido_em"] == d      # quem voltou mantém os documentos
+    assert r["contagem"] == {"completo": 1, "parcial": 1, "pendente": 0}                         # só quem tem registro
+    cartoes = {x["label"]: x for x in r["cartoes"]}
+    assert cartoes["Total"]["valor"] == 6 and cartoes["Total"]["sub"] == "transferidos da escola"
+    assert cartoes["Fora do processo"]["valor"] == 4
+
+
+def test_transferidos_sem_fila_continua_so_com_o_controle(dados, c):
+    gravar(dados, "transferidos.json", {"111": {"nome": "João", "turma": "5º A", "guia": {}, "historico": {}}})
+    r = c.get("/web/api/transferidos/lista").get_json()
+    (j,) = r["transferidos"]
+    assert j["no_processo"] and j["situacao"] == "a_processar" and j["retornou"] is False
+    assert r["total_fora"] == 0 and r["fila"] == {} and "Fora do processo" not in {x["label"] for x in r["cartoes"]}
+    gravar(dados, "fila_transferidos.json", {"alunos": "quebrada"})                  # fila ilegível não derruba a tela
+    assert c.get("/web/api/transferidos/lista").get_json()["total"] == 1
