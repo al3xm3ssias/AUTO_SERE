@@ -86,11 +86,12 @@ Textos podem ser trocados por `config/comunicado_matricula.txt` e `config/comuni
   "pedido a confirmar", nunca como ordem). `WHATSAPP_ZERAR_VINCULO.bat` apaga o vínculo; `WHATSAPP_SUBIR.bat` sobe o gateway.
 - No Linux o contêiner só alcança o host do webhook se o AUTO SERE escutar além do loopback (ou `WHATSAPP_WEBHOOK_URL_BASE`).
 
-## O que falta: item 7b (fila de envio)
-Ainda **não existe**: fila com intervalo e limite diário, pausa/cancelamento, histórico e modelos de mensagem. Qualquer envio
-em lote deve nascer com **intervalo aleatório e limite por dia**. Ganchos prontos: `enviar_midia`, `simular_presenca`
-(só Docker), `eventos.registrar_tratador`. Também previstos: canal WhatsApp em `avisos` (o campo "Canal" da tela já existe) e
-aviso a responsável sem e-mail de quem está saindo. `pendencias.md` recomenda liberar a fila **só depois** de rodar
-`pytest`, limpar duplicatas, validar o SERE real e criar o lock de execução.
+## Item 7b: fila de envio (implementada em 2026-11-22; falta validar com WhatsApp real)
+Fila com pausa entre mensagens, limite por dia, pausa/cancelamento, histórico e modelos de mensagem: ver `docs/WHATSAPP.md`
+(seção "Fila de envio"). Testes: `tests/test_whatsapp_fila.py`. **Ainda não existe**: variação aleatória na pausa, janela de
+horário e canal WhatsApp em `avisos`. Ganchos prontos: `enviar_midia`, `simular_presenca`
+(só Docker), `eventos.registrar_tratador`. Também previstos: canal WhatsApp em `avisos` (o campo "Canal" da tela já existe).
+`pendencias.md` recomenda usar a fila com pais de verdade **só depois** de rodar `pytest`, limpar duplicatas, validar o SERE
+real e criar o lock de execução.
 
 Testes: `tests/test_whatsapp.py`, `test_whatsapp_blake.py`, `test_whatsapp_whatsplay.py` (servidor SSE falso e WhatsApp Web de mentira em localhost).

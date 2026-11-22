@@ -72,6 +72,7 @@
   }
 
   async function atualizar() {
+    atualizarFila();
     try {
       const r = await chamar("/status");
       if (r.ok) renderizar(r.dados);
@@ -104,8 +105,188 @@
     return r;
   }
 
+  /* ───────────── Fila de envio (7b) ───────────── */
+  let fila = null;
+  let ultimaAssinaturaFila = "";
+  let modelosFila = [];
+  const esc = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const ROTULOS_FILA = {
+    parada: ["Parada", "muted"], rodando: ["Enviando", "lime"], pausada: ["Pausada", "amber"],
+    concluida: ["Concluída", "blue"], aguardando_dia: ["Aguardando o dia seguinte", "amber"],
+  };
+  const ROTULOS_ITEM = { pendente: "Pendente", enviando: "Enviando…", enviado: "Enviada", simulado: "Simulada", falhou: "Falhou", cancelado: "Cancelada" };
+
+  async function chamarFila(caminho, metodo = "GET", corpo = null, avisar = true) {
+    const r = await chamar(`/fila${caminho}`, metodo, corpo);
+    if (!r.ok) { if (avisar) toast(r.dados.erro || "Não foi possível."); return null; }
+    if (r.dados.itens) { fila = r.dados; ultimaAssinaturaFila = JSON.stringify(r.dados); desenharFila(); }
+    return r.dados;
+  }
+
+  function desenharFila() {
+    const f = fila;
+    if (!f || !$("wa-fila-badge")) return;
+    const [rotulo, cor] = ROTULOS_FILA[f.estado] || [f.estado, "muted"];
+    pintarBadge($("wa-fila-badge"), rotulo, cor);
+    $("wa-fila-msg").textContent = f.mensagem || "";
+    const c = f.contagem;
+    $("wa-fila-resumo").textContent = `Hoje: ${f.enviados_hoje} de ${f.config.limite_diario} enviadas (restam ${f.restante_hoje}). `
+      + `Na fila: ${c.pendente} pendente(s) · ${c.enviado} enviada(s) · ${c.falhou} com falha · ${c.cancelado} cancelada(s)`
+      + (c.simulado ? ` · ${c.simulado} simulada(s)` : "") + ".";
+    const ativa = f.estado === "rodando" || f.estado === "aguardando_dia";
+    $("wa-fila-iniciar").disabled = ativa || c.pendente === 0;
+    $("wa-fila-iniciar").textContent = f.estado === "pausada" ? "Continuar fila" : "Iniciar fila";
+    $("wa-fila-pausar").disabled = !ativa;
+    $("wa-fila-cancelar-pendentes").disabled = c.pendente === 0;
+    mostrar("wa-fila-linha-confirmo", !!(estado && !estado.simulado));
+    const ativoNoCampo = (id) => document.activeElement && document.activeElement.id === id;
+    if (!ativoNoCampo("wa-fila-intervalo")) $("wa-fila-intervalo").value = String(f.config.intervalo_s);
+    if (!ativoNoCampo("wa-fila-limite")) $("wa-fila-limite").value = f.config.limite_diario;
+    if (document.activeElement !== $("wa-fila-amanha")) $("wa-fila-amanha").checked = f.config.continuar_no_dia_seguinte;
+    desenharItensFila();
+  }
+
+  function desenharItensFila() {
+    const filtro = $("wa-fila-filtro").value;
+    const itens = (fila?.itens || []).filter((i) =>
+      filtro === "todas" ? true : filtro === "abertas" ? ["pendente", "enviando", "falhou"].includes(i.status) : i.status === filtro);
+    $("wa-fila-lista").innerHTML = itens.length ? itens.map((i) => `
+      <div class="checklist-item" style="display:block">
+        <div style="display:flex;gap:8px;justify-content:space-between;align-items:flex-start">
+          <div><strong>${esc(i.nome || i.numero)}</strong> · ${esc(i.numero)} · <em>${esc(ROTULOS_ITEM[i.status] || i.status)}</em>
+            ${i.enviado_em ? ` · ${esc(new Date(i.enviado_em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }))}` : ""}</div>
+          <div>
+            ${i.status === "pendente" ? `<button class="btn-sm" data-fila-acao="cancelar" data-id="${esc(i.id)}">Cancelar</button>` : ""}
+            ${["falhou", "cancelado", "simulado"].includes(i.status) ? `<button class="btn-sm" data-fila-acao="repetir" data-id="${esc(i.id)}">Pôr na fila de novo</button>` : ""}
+          </div>
+        </div>
+        <div class="campo-ajuda" style="margin:2px 0 0;white-space:pre-wrap">${esc(i.texto.length > 160 ? i.texto.slice(0, 160) + "…" : i.texto)}</div>
+        ${i.erro ? `<div class="campo-ajuda" style="margin:2px 0 0;color:var(--rose)">${esc(i.erro)}</div>` : ""}
+      </div>`).join("") : `<div class="campo-ajuda">Nada para mostrar aqui.</div>`;
+  }
+
+  async function atualizarFila() {
+    try {
+      const r = await chamar("/fila");
+      if (!r.ok) return;
+      const assinatura = JSON.stringify(r.dados);
+      if (assinatura === ultimaAssinaturaFila) return;      // nada mudou: não redesenha (não engole cliques nem perde a rolagem)
+      ultimaAssinaturaFila = assinatura;
+      fila = r.dados;
+      desenharFila();
+    } catch (e) { /* tenta no próximo ciclo */ }
+  }
+
+  function opcoesModelos(comComunicado) {
+    return (comComunicado ? [`<option value="comunicado">Comunicado de matrícula (texto oficial do sistema)</option>`] : [])
+      .concat(modelosFila.filter((m) => !comComunicado || m.texto.trim()).map((m) =>
+        `<option value="${esc(m.id)}">${esc(m.nome + (m.padrao && m.personalizado ? " (ajustado)" : ""))}</option>`)).join("");
+  }
+
+  async function carregarModelosFila() {
+    const r = await chamar("/fila/modelos");
+    if (!r.ok) return;
+    modelosFila = r.dados.modelos || [];
+    const atual = $("wa-fila-modelo").value;
+    $("wa-fila-modelo").innerHTML = opcoesModelos(false);
+    if (atual) $("wa-fila-modelo").value = atual;
+    $("wa-fila-pm-modelo").innerHTML = opcoesModelos(true);
+    $("wa-fila-marcadores").textContent = "Marcadores que valem nos modelos: " + (r.dados.marcadores || []).map((m) => "$" + m).join(", ")
+      + ". Na lista de alunos da pré-matrícula eles são trocados pelos dados de cada aluno; numa mensagem avulsa, escreva o texto final.";
+  }
+
+  function iniciarFila() {
+    $("wa-fila-modelo").addEventListener("change", () => {
+      const m = modelosFila.find((x) => x.id === $("wa-fila-modelo").value);
+      if (m) $("wa-fila-texto").value = m.texto;
+    });
+    $("wa-fila-filtro").addEventListener("change", desenharItensFila);
+
+    $("wa-fila-iniciar").addEventListener("click", async () => {
+      const real = estado && !estado.simulado;
+      if (real && !$("wa-fila-confirmo").checked) { toast("Marque a confirmação para enviar de verdade."); return; }
+      const r = await chamarFila("/iniciar", "POST", { confirmo: $("wa-fila-confirmo").checked });
+      if (r) toast(r.mensagem_acao || "Fila iniciada.");
+    });
+    $("wa-fila-pausar").addEventListener("click", () => chamarFila("/pausar", "POST", {}));
+    $("wa-fila-cancelar-pendentes").addEventListener("click", async () => {
+      if (!confirm("Cancelar todas as mensagens pendentes? (Dá para pôr de volta na fila uma a uma.)")) return;
+      const r = await chamarFila("/cancelar-pendentes", "POST", {});
+      if (r) toast(r.mensagem_acao);
+    });
+    $("wa-fila-limpar").addEventListener("click", async () => {
+      if (!confirm("Tirar da lista as mensagens já canceladas, simuladas, com falha e enviadas em dias anteriores? As pendentes e as enviadas hoje ficam.")) return;
+      const r = await chamarFila("/limpar-historico", "POST", {});
+      if (r) toast(r.mensagem_acao);
+    });
+    $("wa-fila-salvar-config").addEventListener("click", async () => {
+      const r = await chamarFila("/config", "POST", {
+        intervalo_s: $("wa-fila-intervalo").value, limite_diario: $("wa-fila-limite").value,
+        continuar_no_dia_seguinte: $("wa-fila-amanha").checked });
+      if (r) toast("Ajustes salvos.");
+    });
+    $("wa-fila-lista").addEventListener("click", async (ev) => {
+      const b = ev.target.closest("[data-fila-acao]");
+      if (b) await chamarFila(`/itens/${encodeURIComponent(b.dataset.id)}/${b.dataset.filaAcao}`, "POST", {});
+    });
+
+    function resumoAdicao(r) {
+      const x = r.resultado || {};
+      const partes = [`${x.adicionados || 0} na fila`];
+      if (x.duplicados) partes.push(`${x.duplicados} já estavam (não repetem)`);
+      if (x.sem_telefone?.length) partes.push(`sem telefone: ${x.sem_telefone.slice(0, 3).join("; ")}${x.sem_telefone.length > 3 ? "…" : ""}`);
+      if (x.invalidos?.length) partes.push(`recusadas: ${x.invalidos.slice(0, 3).map((i) => `${i.nome} (${i.erro})`).join("; ")}`);
+      toast(partes.join(" · "));
+    }
+    $("wa-fila-por").addEventListener("click", async () => {
+      const r = await chamarFila("/itens", "POST", { itens: [{ numero: $("wa-fila-numero").value, nome: $("wa-fila-nome").value, texto: $("wa-fila-texto").value }] });
+      if (!r) return;
+      resumoAdicao(r);
+      if (r.resultado.adicionados) { $("wa-fila-numero").value = ""; $("wa-fila-nome").value = ""; }
+    });
+    $("wa-fila-modelo-salvar").addEventListener("click", async () => {
+      const atual = modelosFila.find((m) => m.id === $("wa-fila-modelo").value);
+      const nome = prompt("Nome do modelo (se for o de um modelo existente, ele é atualizado):", atual && atual.id !== "livre" ? atual.nome : "");
+      if (!nome) return;
+      const existente = modelosFila.find((m) => m.nome.toLowerCase() === nome.trim().toLowerCase());
+      const r = await chamar("/fila/modelos", "POST", { nome, texto: $("wa-fila-texto").value, id: existente?.id || "" });
+      toast(r.ok ? "Modelo salvo." : (r.dados.erro || "Não foi possível salvar."));
+      if (r.ok) { await carregarModelosFila(); $("wa-fila-modelo").value = r.dados.modelo.id; }
+    });
+    $("wa-fila-modelo-excluir").addEventListener("click", async () => {
+      const id = $("wa-fila-modelo").value;
+      if (!id || !confirm("Excluir este modelo? (Num modelo pronto ajustado, volta o texto original.)")) return;
+      const r = await chamar(`/fila/modelos/${encodeURIComponent(id)}`, "DELETE");
+      toast(r.ok ? (r.dados.acao === "restaurado" ? "Texto original restaurado." : "Modelo excluído.") : (r.dados.erro || "Não foi possível excluir."));
+      if (r.ok) carregarModelosFila();
+    });
+
+    $("wa-fila-pm-carregar").addEventListener("click", async () => {
+      const r = await chamar("/fila/prematricula");
+      if (!r.ok) { toast(r.dados.erro || "Não consegui ler a pré-matrícula."); return; }
+      const alunos = r.dados.alunos || [];
+      $("wa-fila-pm-lista").innerHTML = alunos.length ? alunos.map((a) => `
+        <label class="checklist-item"><input type="checkbox" data-pm-id="${esc(a.id)}" data-tem="${a.tem_telefone ? 1 : 0}"${a.tem_telefone ? "" : " disabled"}>
+          ${esc(a.nome)} · ${esc(a.turma)}${a.posicao ? ` · ${esc(a.posicao)}º` : ""}${a.tem_telefone ? "" : " · sem telefone"}</label>`).join("")
+        : `<div class="campo-ajuda">Ninguém na fila da pré-matrícula.</div>`;
+      mostrar("wa-fila-pm-todos", alunos.length > 0);
+      mostrar("wa-fila-pm-por", alunos.length > 0);
+    });
+    $("wa-fila-pm-todos").addEventListener("click", () =>
+      $("wa-fila-pm-lista").querySelectorAll("input[data-tem='1']").forEach((c) => { c.checked = true; }));
+    $("wa-fila-pm-por").addEventListener("click", async () => {
+      const ids = [...$("wa-fila-pm-lista").querySelectorAll("input:checked")].map((c) => c.dataset.pmId);
+      if (!ids.length) { toast("Marque pelo menos um aluno."); return; }
+      const r = await chamarFila("/da-prematricula", "POST", { ids, modelo_id: $("wa-fila-pm-modelo").value });
+      if (r) { resumoAdicao(r); $("wa-fila-pm-lista").querySelectorAll("input:checked").forEach((c) => { c.checked = false; }); }
+    });
+    carregarModelosFila();
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     if (!$("sec-whatsapp")) return;
+
+    iniciarFila();
 
     $("wa-usar-gateway").addEventListener("click", () => acao("/provedor", { provedor: "blake" }));
     $("wa-usar-whatsplay").addEventListener("click", () => acao("/provedor", { provedor: "whatsplay" }));

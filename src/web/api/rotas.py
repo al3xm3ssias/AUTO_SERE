@@ -1673,6 +1673,16 @@ def avisos_alunos():
         return jsonify({"alunos": [], "aviso": str(exc)})
 
 
+@api_bp.route("/avisos/enviados")
+def avisos_enviados():
+    """Registro de quem já recebeu um aviso de verdade (AVISOS/enviados.json), mais recente primeiro. Só leitura."""
+    from src.automacao import avisos as _avisos
+    try:
+        return jsonify(_avisos.listar_enviados())
+    except ValueError as exc:
+        return jsonify({"total": 0, "envios": [], "por_publico": {}, "aviso": str(exc)})
+
+
 @api_bp.route("/avisos/exemplo", methods=["POST"])
 def avisos_exemplo():
     """O texto montado para o primeiro aluno/destinatário da seleção atual (a tela mostra ao vivo). Mesmos campos da prévia."""

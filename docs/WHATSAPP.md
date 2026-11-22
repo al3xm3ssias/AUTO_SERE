@@ -137,9 +137,23 @@ def responder(msg: eventos.MensagemRecebida) -> None:
   escutar além do loopback (isso expõe a interface à rede: avalie antes) ou defina
   `WHATSAPP_WEBHOOK_URL_BASE`.
 - Os tratadores rodam numa thread, isolados: um erro não afeta os outros.
-- **Ainda não existe** (próxima etapa, `PROXIMAS_ETAPAS.md` 7b): fila de envio com intervalo e limite
-  diário, pausa/cancelamento, histórico e modelos de mensagem. Qualquer envio em lote deve nascer
-  com intervalo aleatório e limite por dia.
+
+## Fila de envio (7b)
+
+Cartão **Fila de envio** na tela WhatsApp. Código: `src/servicos/whatsapp/fila.py`; rotas: `/web/api/whatsapp/fila/*`;
+modelos de mensagem: `src/comum/modelos_whatsapp.py` (`config/modelos_whatsapp.json`); dados: `<ano>/WHATSAPP/fila.json`.
+
+- Coloque mensagens na fila (uma avulsa, ou os alunos da pré-matrícula que ainda estão na fila de chamada, com o comunicado
+  oficial de matrícula ou um modelo seu) e clique em **Iniciar fila**.
+- **Pausa entre mensagens**: 10 s a 10 min (padrão 45 s). **Máximo por dia**: 1 a 300 (padrão 40), contando só mensagens de
+  verdade; ao atingir, a fila espera o dia seguinte e continua sozinha (com o AUTO SERE aberto) ou para, conforme a opção.
+- **Pausar** termina a mensagem em andamento. Dá para cancelar um item ou todos os pendentes e pôr de volta na fila o que
+  falhou, foi cancelado ou só simulado. **Limpar histórico** não remove pendentes nem os enviados de hoje.
+- O mesmo texto para o mesmo número não entra duas vezes. Três falhas seguidas, WhatsApp desconectado ou envio real
+  bloqueado **pausam** a fila. Se o programa fechar durante um envio, a mensagem vira "falhou": confira no WhatsApp antes de repetir.
+- No modo **simulado** a fila roda, mas nada sai: os itens ficam "simulado".
+- Ao abrir o programa de novo a fila está parada; ninguém envia sozinho sem você clicar em Iniciar.
+- Ainda não existe: variação aleatória na pausa, janela de horário e o canal WhatsApp dentro de "Mandar avisos".
 
 ## Testes
 

@@ -411,7 +411,7 @@ def test_registrada(amb):
     assert s is not None and "avisos" not in rotas.AUTOMACOES_NAO_IMPLEMENTADAS and s.confirmar is False
     nomes = [e["nome"] for e in s.extras()]
     assert nomes == ["publico", "canal", "modo", "unidades", "situacao_pais", "fonte", "alunos", "tipo_mensagem", "modelo_acoes",
-                     "assunto", "mensagem", "exemplo_mensagem", "intervalo_s", "limite_lote"]
+                     "assunto", "mensagem", "exemplo_mensagem", "intervalo_s", "limite_lote", "enviados_registro"]
     assert "filtro_nome" not in nomes and "email_teste" not in nomes                  # saíram da tela a pedido
     mensagem = next(e for e in s.extras() if e["nome"] == "mensagem")
     assert mensagem["multilinha"] is True
@@ -1203,3 +1203,55 @@ def test_modelo_de_chamada_para_matricula_e_para_os_pais_e_so_usa_marcadores_val
     av.conferir_marcadores(m["mensagem"], "pais", "Mensagem")
     corpo = av.renderizar(m["mensagem"], {"RESPONSAVEL": "Maria", "ALUNO": "Ana", "TURMA": "1º Ano", "ESCOLA": "Escola X", "ANO": "2026"})
     assert "Olá, Maria!" in corpo and "vaga para Ana na turma 1º Ano da Escola X em 2026" in corpo and "$" not in corpo
+
+
+# ───────────── "Quem já recebeu" (só leitura do enviados.json) ─────────────
+
+def _gravar_enviados(envios: dict) -> None:
+    pasta = paths.dados_ano_atual() / "AVISOS"
+    pasta.mkdir(parents=True, exist_ok=True)
+    (pasta / "enviados.json").write_text(json.dumps({"envios": envios}), encoding="utf-8")
+
+
+def test_listar_enviados_sem_registro(amb):
+    assert av.listar_enviados() == {"total": 0, "envios": [], "por_publico": {}}
+
+
+def test_listar_enviados_ordena_pelo_mais_recente_e_reconhece_o_publico(amb):
+    _gravar_enviados({
+        "a": {"para": "x@pg.gov.br", "nome": "Escola X", "assunto": "A", "enviado_em": "2026-11-01T10:00:00", "publico": "pais", "aluno": "ANA"},
+        "b": {"para": "y@pg.gov.br", "nome": "Escola Y", "assunto": "B", "enviado_em": "2026-11-03T09:00:00", "aluno": "BETO",
+              "cgm": "55", "data_saida": "2026-10-30", "anexos": ["guia.pdf"]},
+        "c": {"para": "z@pg.gov.br", "nome": "Escola Z", "assunto": "C", "enviado_em": "2026-11-02T08:00:00"},
+        "lixo": "não é um dicionário",
+    })
+    r = av.listar_enviados()
+    assert [e["para"] for e in r["envios"]] == ["y@pg.gov.br", "z@pg.gov.br", "x@pg.gov.br"] and r["total"] == 3
+    assert r["por_publico"] == {"destino": 1, "": 1, "pais": 1} and r["envios"][0]["anexos"] == ["guia.pdf"]
+
+
+def test_listar_enviados_nao_altera_o_registro(amb):
+    _gravar_enviados({"a": {"para": "x@pg.gov.br", "enviado_em": "2026-11-01T10:00:00"}})
+    arquivo = paths.dados_ano_atual() / "AVISOS" / "enviados.json"
+    antes = arquivo.read_bytes()
+    av.listar_enviados()
+    assert arquivo.read_bytes() == antes
+
+
+def test_rota_enviados(amb):
+    _gravar_enviados({"a": {"para": "x@pg.gov.br", "nome": "X", "assunto": "A", "enviado_em": "2026-11-01T10:00:00"}})
+    r = create_app().test_client().get("/web/api/avisos/enviados")
+    assert r.status_code == 200 and r.get_json()["total"] == 1 and r.get_json()["envios"][0]["para"] == "x@pg.gov.br"
+
+
+def test_rota_enviados_com_registro_corrompido_avisa_sem_quebrar(amb):
+    pasta = paths.dados_ano_atual() / "AVISOS"
+    pasta.mkdir(parents=True, exist_ok=True)
+    (pasta / "enviados.json").write_text("{quebrado", encoding="utf-8")
+    r = create_app().test_client().get("/web/api/avisos/enviados")
+    assert r.status_code == 200 and r.get_json()["envios"] == [] and "Registro de envios" in r.get_json()["aviso"]
+
+
+def test_envio_real_guarda_o_publico_no_registro(chegando, smtp, sem_espera):
+    _simular_e_enviar()
+    assert {e["publico"] for e in av.listar_enviados()["envios"]} == {"escolas"}

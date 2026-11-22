@@ -1025,6 +1025,9 @@ def _extras_avisos() -> list[dict]:
         {"tipo": "select", "id": "campo-limite-lote", "nome": "limite_lote", "label": "Máximo de e-mails por execução",
          "semVazio": True, "padrao": "50", "opcoes": [{"valor": str(n), "texto": f"{n} e-mail" + ("" if n == 1 else "s")} for n in (1, 5, 10, 25, 50, 100, 200)],
          "visivelSe": so("campo-modo-aviso", "enviar")},
+        {"tipo": "enviados_registro", "id": "campo-enviados", "nome": "enviados_registro", "label": "Quem já recebeu",
+         "descricao": "Mostra o registro dos e-mails já enviados de verdade (AVISOS/enviados.json): para quem, quando e com que assunto. "
+                      "É só uma consulta: nada é enviado nem apagado por aqui."},
     ]
 
 

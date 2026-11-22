@@ -62,12 +62,13 @@ Uso real, definido em 2026-11-02 e **revisado em 2026-11-14**: comunicar **só q
 - [~] Responsável sem e-mail (pais que chegam): **não é pendência** (2026-11-21): quem fez a pré-matrícula tem e-mail no cadastro; a prévia continua nomeando o caso raro
 - [?] Mensagem em HTML (hoje o e-mail sai em texto puro, sem negrito, link clicável formatado ou logotipo). **Só se você quiser** esse acabamento; sem decisão. **Anexos já funcionam** no público "escola de destino" (abaixo)
 - [x] **Chamar os pais por turma e faixa de posição (2026-11-21):** no público "pais", a lista de alunos mostra a posição de cada um na turma (`pos` da pré-matrícula) e ganhou a barra **"Marcar por posição"** (turma + "do __ ao __"; "todas as turmas" marca o mesmo intervalo em cada uma). Só marca; o envio segue com prévia, simulação e confirmação. Modelo pronto **"Chamada para matrícula (pais de aluno novo)"**. Quem fica do N-ésimo em diante continua na fila e não é chamado. Use a situação **"Aguardando vaga"** (a padrão é "Matriculados"). A barra só aparece se a coleta trouxe `pos` (confirmar no real, principalmente na coleta pelo relatório .xlsx)
-- [ ] **(NA FILA, pedido em 2026-11-21)** Botão para ver o registro de quem já recebeu (`AVISOS/enviados.json`) na própria tela
+- [x] **Botão "Ver quem já recebeu" (2026-11-22)** na tela "Mandar avisos": lista o `AVISOS/enviados.json` (quando, para quem, aluno, assunto, anexos), mais recente primeiro, com busca. Só leitura (`GET /web/api/avisos/enviados`); os envios novos passam a guardar também o público (os antigos aparecem sem ele, exceto escola de destino). **Falta validar com o registro real**
 - [~] Outros canais: **SERE descartado** (não é canal de comunicação); o WhatsApp é o item 7b (fila de envio), logo abaixo
 - [x] Público em massa "todas as escolas/CMEIs": **sem utilidade** (2026-11-21). Falta decidir se o texto sem marcadores de aluno, que hoje vai para todas, deve ser removido da tela
 
 ### WhatsApp
-- [ ] **7b**: fila de envio com intervalo e limite diário, pausa/cancelamento, histórico e modelos de mensagem
+- [x] **7b: fila de envio (2026-11-22)** — cartão "Fila de envio" na tela WhatsApp (`src/servicos/whatsapp/fila.py`, rotas `/web/api/whatsapp/fila/*`, modelos em `config/modelos_whatsapp.json`): pausa entre mensagens (10 s a 10 min), limite por dia (1 a 300; retoma sozinha no dia seguinte se marcado), Pausar/Continuar, cancelar item ou todos os pendentes, "pôr na fila de novo", histórico, não repete o mesmo texto para o mesmo número, 3 falhas seguidas pausam, envio real só com a permissão e o WhatsApp conectado, e põe na fila direto os alunos da pré-matrícula (comunicado oficial ou modelo). Dados em `<ano>/WHATSAPP/fila.json`. **Falta validar com o WhatsApp real** (whatsplay no Windows e gateway Docker)
+  - [ ] Opcional, não pedido: variação aleatória na pausa (hoje é fixa), janela de horário (ex.: só 8h–18h) e canal WhatsApp dentro de "Mandar avisos"
 
 ### Escola de destino dos transferidos (2026-11-19/20)
 - [x] **Coluna "Destino" na tela de Transferidos** + janela "Destino…": mostra a escola para onde o aluno foi (do `vinculo_base_abc` ou **preenchida à mão**) e a situação do aviso: *Avisar automaticamente* / *Encaminhado por e-mail à parte* / *Não avisar automaticamente*. O preenchimento manual fica em `destino_manual` (separado do vínculo: uma nova consulta não o apaga e ele vale no lugar do vínculo). Rotas `GET/POST /web/api/transferidos/destino/<cgm>` (recusam com automação rodando e em modo consulta)
@@ -207,4 +208,4 @@ Adaptação do script antigo `consulta_transferidos_ano_anterior.py`: automaçã
 4. Confirmar BUG-PRE-001 quando o site da pré-matrícula voltar
 5. Testar o `avisos` com Gmail de verdade (um aluno só) e conferir o vínculo da Base ABC dos alunos que chegam
 6. Lock de execução (11q)
-7. Só então a fila do WhatsApp
+7. ~~Só então a fila do WhatsApp~~ (feita em 2026-11-22, mas **ainda sem teste com WhatsApp real**: faça os itens 1 a 5 antes de usar com pais de verdade)

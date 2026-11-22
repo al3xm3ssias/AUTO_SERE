@@ -9,6 +9,14 @@ API do WhatsApp para a interface web  —  prefixo /web/api/whatsapp
     GET  /modelo-prematricula?id=...   texto sugerido + telefone do responsável (fila da pré-matrícula)
     POST /enviar         envia UMA mensagem a um responsável (mesma trava dupla do /teste)
     POST /envio-real     liga/desliga a permissão de envio real
+    GET  /fila           a fila de envio: estado, configuração, contagens, limite do dia e as mensagens (número mascarado)
+    POST /fila/itens     põe mensagens na fila ({itens:[{numero,nome,texto}]})
+    GET  /fila/prematricula          alunos da fila da pré-matrícula que podem entrar na fila do WhatsApp
+    POST /fila/da-prematricula       põe na fila os alunos escolhidos ({ids, modelo_id})
+    POST /fila/config    intervalo entre mensagens, limite por dia, continuar no dia seguinte
+    POST /fila/iniciar | /fila/pausar | /fila/cancelar-pendentes | /fila/limpar-historico
+    POST /fila/itens/<id>/cancelar | /fila/itens/<id>/repetir
+    GET|POST /fila/modelos, DELETE /fila/modelos/<id>   modelos de mensagem da fila
     POST /provedor       escolhe o modo: simulado, whatsplay (sem Docker) ou blake (gateway Docker)
     POST /desconectar    logout no gateway
     GET|POST|DELETE /webhooks   registra/remove o webhook de mensagens recebidas no gateway
@@ -32,6 +40,7 @@ from src.comum import servidor as _servidor
 from src.servicos.whatsapp import (EnvioNaoAutorizadoError, WhatsAppErro, envio_real_autorizado,
                                    mascarar_numero, normalizar_numero)
 from src.servicos.whatsapp import eventos as _eventos
+from src.servicos.whatsapp.fila import obter_fila
 from src.servicos.whatsapp.gerenciador import obter_gerenciador, reiniciar_gerenciador
 from src.web.api.rotas import _persistir_env
 
@@ -281,6 +290,180 @@ def desconectar():
     r = ger.provedor.sair()
     return jsonify({"ok": r.ok, "mensagem": r.detalhe}), (200 if r.ok else 502)
 
+
+
+# ───────────────────────────── fila de envio (7b) ─────────────────────────────
+COMUNICADO_ID = "comunicado"       # modelo especial: o "Comunicado de Matrícula" oficial do sistema (mesmo do botão "Mandar mensagem")
+
+
+def _resposta_fila(**extra):
+    return jsonify({**obter_fila().resumo(), **extra})
+
+
+@whatsapp_bp.route("/fila")
+def fila():
+    try:
+        return _resposta_fila()
+    except ValueError as exc:
+        return _erro(str(exc))
+
+
+@whatsapp_bp.route("/fila/itens", methods=["POST"])
+def fila_adicionar():
+    corpo = request.get_json(silent=True) or {}
+    itens = corpo.get("itens")
+    if not isinstance(itens, list) or not itens:
+        return _erro("Informe as mensagens a pôr na fila.")
+    try:
+        r = obter_fila().adicionar([i for i in itens if isinstance(i, dict)], origem="manual")
+        return _resposta_fila(resultado=r)
+    except ValueError as exc:
+        return _erro(str(exc))
+
+
+def _alunos_prematricula_para_fila() -> list[dict]:
+    from src.web.api.rotas import _carregar_json, _fila_prematricula
+    cadastros = (_carregar_json("pre_matricula.json", {}) or {}).get("cadastros", {})
+    saida = []
+    for r in _fila_prematricula():
+        tel = r.get("telefone_responsavel")
+        tel = "" if not tel or tel == "—" else str(tel)
+        cad = cadastros.get(str(r.get("id"))) if isinstance(cadastros, dict) else None
+        saida.append({"id": str(r.get("id")), "nome": r.get("nome", ""), "turma": r.get("turma", ""), "posicao": r.get("posicao", ""),
+                      "telefone": tel, "responsavel": str((cad or {}).get("nome_responsavel") or "")})
+    return saida
+
+
+@whatsapp_bp.route("/fila/prematricula")
+def fila_prematricula():
+    try:
+        alunos = _alunos_prematricula_para_fila()
+    except ValueError as exc:
+        return _erro(str(exc))
+    return jsonify({"alunos": [{"id": a["id"], "nome": a["nome"], "turma": a["turma"], "posicao": a["posicao"],
+                                "tem_telefone": bool(a["telefone"])} for a in alunos]})
+
+
+@whatsapp_bp.route("/fila/da-prematricula", methods=["POST"])
+def fila_da_prematricula():
+    from src.comum import modelos_whatsapp as _modelos
+    corpo = request.get_json(silent=True) or {}
+    ids = {str(i) for i in (corpo.get("ids") or [])}
+    modelo_id = str(corpo.get("modelo_id") or COMUNICADO_ID)
+    if not ids:
+        return _erro("Marque pelo menos um aluno.")
+    try:
+        modelo = None if modelo_id == COMUNICADO_ID else _modelos.obter(modelo_id)
+        if modelo_id != COMUNICADO_ID and (modelo is None or not modelo["texto"].strip()):
+            return _erro("Escolha um modelo com texto (ou o comunicado de matrícula).")
+        itens, sem_telefone = [], []
+        for a in _alunos_prematricula_para_fila():
+            if a["id"] not in ids:
+                continue
+            if not a["telefone"]:
+                sem_telefone.append(a["nome"])
+                continue
+            if modelo is None:
+                texto = _modelo_texto_prematricula(a)
+            else:
+                ctx = {**_modelos.contexto_base(), "ALUNO": a["nome"], "TURMA": a["turma"], "RESPONSAVEL": a["responsavel"] or "responsável"}
+                texto = _modelos.renderizar(modelo["texto"], ctx)
+            itens.append({"numero": a["telefone"], "nome": a["nome"], "texto": texto})
+        r = obter_fila().adicionar(itens, origem="prematricula") if itens else {"adicionados": 0, "duplicados": 0, "invalidos": []}
+        r["sem_telefone"] = sem_telefone
+        return _resposta_fila(resultado=r)
+    except ValueError as exc:
+        return _erro(str(exc))
+
+
+@whatsapp_bp.route("/fila/config", methods=["POST"])
+def fila_config():
+    corpo = request.get_json(silent=True) or {}
+    try:
+        obter_fila().configurar(corpo.get("intervalo_s"), corpo.get("limite_diario"), corpo.get("continuar_no_dia_seguinte", True))
+        return _resposta_fila()
+    except ValueError as exc:
+        return _erro(str(exc))
+
+
+@whatsapp_bp.route("/fila/iniciar", methods=["POST"])
+def fila_iniciar():
+    ger, problema = _gerenciador()
+    if ger is None:
+        return _erro(problema or "WhatsApp não configurado.")
+    if not ger.simulado and not (request.get_json(silent=True) or {}).get("confirmo"):
+        return _erro("Confirme que quer enviar mensagens de verdade.", codigo_erro="falta_confirmacao")
+    try:
+        texto = obter_fila().iniciar()
+        return _resposta_fila(mensagem_acao=texto)
+    except ValueError as exc:
+        return _erro(str(exc))
+
+
+@whatsapp_bp.route("/fila/pausar", methods=["POST"])
+def fila_pausar():
+    obter_fila().pausar()
+    return _resposta_fila()
+
+
+@whatsapp_bp.route("/fila/cancelar-pendentes", methods=["POST"])
+def fila_cancelar_pendentes():
+    try:
+        n = obter_fila().cancelar_pendentes()
+        return _resposta_fila(mensagem_acao=f"{n} mensagem(ns) cancelada(s).")
+    except ValueError as exc:
+        return _erro(str(exc))
+
+
+@whatsapp_bp.route("/fila/limpar-historico", methods=["POST"])
+def fila_limpar_historico():
+    try:
+        n = obter_fila().limpar_historico()
+        return _resposta_fila(mensagem_acao=f"{n} registro(s) removido(s) da lista.")
+    except ValueError as exc:
+        return _erro(str(exc))
+
+
+@whatsapp_bp.route("/fila/itens/<string:id_item>/<string:acao>", methods=["POST"])
+def fila_item(id_item, acao):
+    if acao not in ("cancelar", "repetir"):
+        return _erro("Ação desconhecida.", 404)
+    try:
+        (obter_fila().cancelar_item if acao == "cancelar" else obter_fila().repetir_item)(id_item)
+        return _resposta_fila()
+    except ValueError as exc:
+        return _erro(str(exc))
+
+
+def _modelos_fila(**extra):
+    from src.comum import modelos_whatsapp as _modelos
+    return jsonify({"modelos": _modelos.listar(), "marcadores": list(_modelos.MARCADORES), **extra})
+
+
+@whatsapp_bp.route("/fila/modelos", methods=["GET", "POST"])
+def fila_modelos():
+    from src.comum import modelos_whatsapp as _modelos
+    try:
+        if request.method == "GET":
+            return _modelos_fila()
+        d = request.get_json(silent=True) or {}
+        modelo = _modelos.salvar(d.get("nome"), d.get("texto"), d.get("id") or None)
+        return _modelos_fila(modelo=modelo)
+    except ValueError as exc:
+        return _erro(str(exc))
+    except OSError as exc:
+        return _erro(f"Não foi possível gravar o modelo: {exc}", 500)
+
+
+@whatsapp_bp.route("/fila/modelos/<string:id_modelo>", methods=["DELETE"])
+def fila_modelo_excluir(id_modelo):
+    from src.comum import modelos_whatsapp as _modelos
+    try:
+        return _modelos_fila(acao=_modelos.excluir(id_modelo))
+    except ValueError as exc:
+        return _erro(str(exc))
+    except OSError as exc:
+        return _erro(f"Não foi possível gravar a alteração: {exc}", 500)
 
 # ───────────────────────────── webhooks ─────────────────────────────
 def _token_webhook(criar: bool = False) -> str:

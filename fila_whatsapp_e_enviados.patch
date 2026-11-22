@@ -1,0 +1,1806 @@
+diff -ruN -x __pycache__ -x .pytest_cache AUTO_SERE/PROXIMAS_ETAPAS.md AUTO_SERE/PROXIMAS_ETAPAS.md
+--- AUTO_SERE/PROXIMAS_ETAPAS.md	2026-11-06 00:41:52.000000000 +0000
++++ AUTO_SERE/PROXIMAS_ETAPAS.md	2026-11-22 09:37:37.209777646 +0000
+@@ -23,7 +23,7 @@
+ - [ ] `avisos`: reconhecer e-mail de escola escrito de forma disfarçada e mostrar "sem e-mail" na tela; responsável sem e-mail hoje só vai para o log.
+ - [ ] `avisos`: liberar o envio real (confirmação com prévia, intervalo e limite por lote, envio em segundo plano com pausa, registro de quem recebeu/falhou) e outros canais (WhatsApp, SERE).
+ - [ ] Preencher os três `src/web/templates/partials/help/*.html` (hoje vazios): textos de ajuda para os usuários (planejado).
+-- [ ] **7b** WhatsApp: fila de envio com limite diário, pausa, histórico e modelos.
++- [x] **7b** WhatsApp: fila de envio com limite diário, pausa, histórico e modelos (2026-11-22; falta validar com WhatsApp real).
+ - [ ] **3b** Backup automático ao fim das coletas.
+ - [ ] Decidir se os termos de ciência pulam quem tem `na_escola = false`.
+ - [ ] Transferidos (explicados em linguagem simples no fim do fluxo dos transferidos, mais abaixo): (a) aluno que sai, volta e sai de novo no mesmo ano não ganha documentos novos na 2ª saída; (b) a tabela da tela Transferidos mostra só quem está no processo, não o total da escola; (c) falta tela para o mapeamento de turmas do QR antigo.
+@@ -82,7 +82,7 @@
+ - [x] **7. Teste do WhatsApp** — `src/servicos/whatsapp/` (ver "Como executar"). Provedor **simulado por padrão**; gateway HTTP (formato wwebjs-api) só com configuração; envio real exige três travas.
+   - [!] O gateway HTTP foi testado só com servidor falso. Gateways baseados em whatsapp-web.js são não oficiais (risco de banimento do número); a alternativa oficial é a WhatsApp Business Cloud API.
+   - [x] 7a. Tela **WhatsApp** (estado, QR Code, teste de envio, webhook) e passo do wizard — dois modos reais: **sem Docker** (`whatsplay`, Playwright; recomendado no Windows) e gateway Docker `blakegt/whatsapp-web-api-rest` (`blake`, `docker/whatsapp/`). Ver `docs/WHATSAPP.md`. Testado com whatsplay+Chromium reais contra um WhatsApp Web de mentira e com o gateway real **sem WhatsApp**; falta o primeiro pareamento/envio com número real (e testar no Windows).
+-  - [ ] 7b. Fila de envio com intervalo e limite diário, pausa/cancelamento, histórico e modelos de mensagem (ganchos prontos: `enviar_midia`, `eventos.registrar_tratador`).
++  - [x] 7b. Fila de envio com intervalo e limite diário, pausa/cancelamento, histórico e modelos de mensagem (ganchos prontos: `enviar_midia`, `eventos.registrar_tratador`).
+   - [!] whatsplay: biblioteca de 1 mantenedor que depende do HTML do WhatsApp Web (versão fixada; revisar o código a cada atualização).
+   - [!] Docker: a imagem usa `baileys 7.0.0-rc.9` (depreciado por falha de falsificação de mensagens recebidas): não automatizar decisões irreversíveis a partir de mensagens recebidas.
+ 
+diff -ruN -x __pycache__ -x .pytest_cache AUTO_SERE/docs/WHATSAPP.md AUTO_SERE/docs/WHATSAPP.md
+--- AUTO_SERE/docs/WHATSAPP.md	2026-11-06 00:41:52.000000000 +0000
++++ AUTO_SERE/docs/WHATSAPP.md	2026-11-22 09:37:37.210210918 +0000
+@@ -137,9 +137,23 @@
+   escutar além do loopback (isso expõe a interface à rede: avalie antes) ou defina
+   `WHATSAPP_WEBHOOK_URL_BASE`.
+ - Os tratadores rodam numa thread, isolados: um erro não afeta os outros.
+-- **Ainda não existe** (próxima etapa, `PROXIMAS_ETAPAS.md` 7b): fila de envio com intervalo e limite
+-  diário, pausa/cancelamento, histórico e modelos de mensagem. Qualquer envio em lote deve nascer
+-  com intervalo aleatório e limite por dia.
++
++## Fila de envio (7b)
++
++Cartão **Fila de envio** na tela WhatsApp. Código: `src/servicos/whatsapp/fila.py`; rotas: `/web/api/whatsapp/fila/*`;
++modelos de mensagem: `src/comum/modelos_whatsapp.py` (`config/modelos_whatsapp.json`); dados: `<ano>/WHATSAPP/fila.json`.
++
++- Coloque mensagens na fila (uma avulsa, ou os alunos da pré-matrícula que ainda estão na fila de chamada, com o comunicado
++  oficial de matrícula ou um modelo seu) e clique em **Iniciar fila**.
++- **Pausa entre mensagens**: 10 s a 10 min (padrão 45 s). **Máximo por dia**: 1 a 300 (padrão 40), contando só mensagens de
++  verdade; ao atingir, a fila espera o dia seguinte e continua sozinha (com o AUTO SERE aberto) ou para, conforme a opção.
++- **Pausar** termina a mensagem em andamento. Dá para cancelar um item ou todos os pendentes e pôr de volta na fila o que
++  falhou, foi cancelado ou só simulado. **Limpar histórico** não remove pendentes nem os enviados de hoje.
++- O mesmo texto para o mesmo número não entra duas vezes. Três falhas seguidas, WhatsApp desconectado ou envio real
++  bloqueado **pausam** a fila. Se o programa fechar durante um envio, a mensagem vira "falhou": confira no WhatsApp antes de repetir.
++- No modo **simulado** a fila roda, mas nada sai: os itens ficam "simulado".
++- Ao abrir o programa de novo a fila está parada; ninguém envia sozinho sem você clicar em Iniciar.
++- Ainda não existe: variação aleatória na pausa, janela de horário e o canal WhatsApp dentro de "Mandar avisos".
+ 
+ ## Testes
+ 
+diff -ruN -x __pycache__ -x .pytest_cache AUTO_SERE/documentacao/WhatsApp.md AUTO_SERE/documentacao/WhatsApp.md
+--- AUTO_SERE/documentacao/WhatsApp.md	2026-11-06 00:41:52.000000000 +0000
++++ AUTO_SERE/documentacao/WhatsApp.md	2026-11-22 09:37:37.210824710 +0000
+@@ -86,11 +86,12 @@
+   "pedido a confirmar", nunca como ordem). `WHATSAPP_ZERAR_VINCULO.bat` apaga o vínculo; `WHATSAPP_SUBIR.bat` sobe o gateway.
+ - No Linux o contêiner só alcança o host do webhook se o AUTO SERE escutar além do loopback (ou `WHATSAPP_WEBHOOK_URL_BASE`).
+ 
+-## O que falta: item 7b (fila de envio)
+-Ainda **não existe**: fila com intervalo e limite diário, pausa/cancelamento, histórico e modelos de mensagem. Qualquer envio
+-em lote deve nascer com **intervalo aleatório e limite por dia**. Ganchos prontos: `enviar_midia`, `simular_presenca`
+-(só Docker), `eventos.registrar_tratador`. Também previstos: canal WhatsApp em `avisos` (o campo "Canal" da tela já existe) e
+-aviso a responsável sem e-mail de quem está saindo. `pendencias.md` recomenda liberar a fila **só depois** de rodar
+-`pytest`, limpar duplicatas, validar o SERE real e criar o lock de execução.
++## Item 7b: fila de envio (implementada em 2026-11-22; falta validar com WhatsApp real)
++Fila com pausa entre mensagens, limite por dia, pausa/cancelamento, histórico e modelos de mensagem: ver `docs/WHATSAPP.md`
++(seção "Fila de envio"). Testes: `tests/test_whatsapp_fila.py`. **Ainda não existe**: variação aleatória na pausa, janela de
++horário e canal WhatsApp em `avisos`. Ganchos prontos: `enviar_midia`, `simular_presenca`
++(só Docker), `eventos.registrar_tratador`. Também previstos: canal WhatsApp em `avisos` (o campo "Canal" da tela já existe).
++`pendencias.md` recomenda usar a fila com pais de verdade **só depois** de rodar `pytest`, limpar duplicatas, validar o SERE
++real e criar o lock de execução.
+ 
+ Testes: `tests/test_whatsapp.py`, `test_whatsapp_blake.py`, `test_whatsapp_whatsplay.py` (servidor SSE falso e WhatsApp Web de mentira em localhost).
+diff -ruN -x __pycache__ -x .pytest_cache AUTO_SERE/pendencias.md AUTO_SERE/pendencias.md
+--- AUTO_SERE/pendencias.md	2026-11-21 15:57:54.000000000 +0000
++++ AUTO_SERE/pendencias.md	2026-11-22 09:37:37.208417604 +0000
+@@ -62,12 +62,13 @@
+ - [~] Responsável sem e-mail (pais que chegam): **não é pendência** (2026-11-21): quem fez a pré-matrícula tem e-mail no cadastro; a prévia continua nomeando o caso raro
+ - [?] Mensagem em HTML (hoje o e-mail sai em texto puro, sem negrito, link clicável formatado ou logotipo). **Só se você quiser** esse acabamento; sem decisão. **Anexos já funcionam** no público "escola de destino" (abaixo)
+ - [x] **Chamar os pais por turma e faixa de posição (2026-11-21):** no público "pais", a lista de alunos mostra a posição de cada um na turma (`pos` da pré-matrícula) e ganhou a barra **"Marcar por posição"** (turma + "do __ ao __"; "todas as turmas" marca o mesmo intervalo em cada uma). Só marca; o envio segue com prévia, simulação e confirmação. Modelo pronto **"Chamada para matrícula (pais de aluno novo)"**. Quem fica do N-ésimo em diante continua na fila e não é chamado. Use a situação **"Aguardando vaga"** (a padrão é "Matriculados"). A barra só aparece se a coleta trouxe `pos` (confirmar no real, principalmente na coleta pelo relatório .xlsx)
+-- [ ] **(NA FILA, pedido em 2026-11-21)** Botão para ver o registro de quem já recebeu (`AVISOS/enviados.json`) na própria tela
++- [x] **Botão "Ver quem já recebeu" (2026-11-22)** na tela "Mandar avisos": lista o `AVISOS/enviados.json` (quando, para quem, aluno, assunto, anexos), mais recente primeiro, com busca. Só leitura (`GET /web/api/avisos/enviados`); os envios novos passam a guardar também o público (os antigos aparecem sem ele, exceto escola de destino). **Falta validar com o registro real**
+ - [~] Outros canais: **SERE descartado** (não é canal de comunicação); o WhatsApp é o item 7b (fila de envio), logo abaixo
+ - [x] Público em massa "todas as escolas/CMEIs": **sem utilidade** (2026-11-21). Falta decidir se o texto sem marcadores de aluno, que hoje vai para todas, deve ser removido da tela
+ 
+ ### WhatsApp
+-- [ ] **7b**: fila de envio com intervalo e limite diário, pausa/cancelamento, histórico e modelos de mensagem
++- [x] **7b: fila de envio (2026-11-22)** — cartão "Fila de envio" na tela WhatsApp (`src/servicos/whatsapp/fila.py`, rotas `/web/api/whatsapp/fila/*`, modelos em `config/modelos_whatsapp.json`): pausa entre mensagens (10 s a 10 min), limite por dia (1 a 300; retoma sozinha no dia seguinte se marcado), Pausar/Continuar, cancelar item ou todos os pendentes, "pôr na fila de novo", histórico, não repete o mesmo texto para o mesmo número, 3 falhas seguidas pausam, envio real só com a permissão e o WhatsApp conectado, e põe na fila direto os alunos da pré-matrícula (comunicado oficial ou modelo). Dados em `<ano>/WHATSAPP/fila.json`. **Falta validar com o WhatsApp real** (whatsplay no Windows e gateway Docker)
++  - [ ] Opcional, não pedido: variação aleatória na pausa (hoje é fixa), janela de horário (ex.: só 8h–18h) e canal WhatsApp dentro de "Mandar avisos"
+ 
+ ### Escola de destino dos transferidos (2026-11-19/20)
+ - [x] **Coluna "Destino" na tela de Transferidos** + janela "Destino…": mostra a escola para onde o aluno foi (do `vinculo_base_abc` ou **preenchida à mão**) e a situação do aviso: *Avisar automaticamente* / *Encaminhado por e-mail à parte* / *Não avisar automaticamente*. O preenchimento manual fica em `destino_manual` (separado do vínculo: uma nova consulta não o apaga e ele vale no lugar do vínculo). Rotas `GET/POST /web/api/transferidos/destino/<cgm>` (recusam com automação rodando e em modo consulta)
+@@ -207,4 +208,4 @@
+ 4. Confirmar BUG-PRE-001 quando o site da pré-matrícula voltar
+ 5. Testar o `avisos` com Gmail de verdade (um aluno só) e conferir o vínculo da Base ABC dos alunos que chegam
+ 6. Lock de execução (11q)
+-7. Só então a fila do WhatsApp
++7. ~~Só então a fila do WhatsApp~~ (feita em 2026-11-22, mas **ainda sem teste com WhatsApp real**: faça os itens 1 a 5 antes de usar com pais de verdade)
+diff -ruN -x __pycache__ -x .pytest_cache AUTO_SERE/src/automacao/avisos.py AUTO_SERE/src/automacao/avisos.py
+--- AUTO_SERE/src/automacao/avisos.py	2026-11-21 14:16:06.000000000 +0000
++++ AUTO_SERE/src/automacao/avisos.py	2026-11-21 20:12:54.889188630 +0000
+@@ -953,6 +953,29 @@
+     return dict(_carregar_dict(_arquivo_enviados(), "Registro de envios").get("envios") or {})
+ 
+ 
++def listar_enviados() -> dict:
++    """
++    O que já saiu de verdade (AVISOS/enviados.json), do mais recente para o mais antigo, para a tela "Quem já recebeu".
++    Só lê: nada aqui altera ou apaga o registro. Devolve {"total", "envios": [{"para","nome","aluno","cgm","assunto",
++    "enviado_em","publico","anexos"}], "por_publico": {publico: n}}. Registros gravados antes de o público ser guardado
++    ficam com publico "" (só o de escola de destino se reconhece, por ter CGM + data da saída).
++    """
++    envios = []
++    for chave, v in carregar_enviados().items():
++        if not isinstance(v, dict):
++            continue
++        publico = str(v.get("publico") or ("destino" if v.get("data_saida") and v.get("cgm") else ""))
++        envios.append({"para": str(v.get("para") or ""), "nome": str(v.get("nome") or ""), "aluno": str(v.get("aluno") or ""),
++                       "cgm": str(v.get("cgm") or ""), "assunto": str(v.get("assunto") or ""),
++                       "enviado_em": str(v.get("enviado_em") or ""), "publico": publico,
++                       "anexos": [str(a) for a in (v.get("anexos") or [])]})
++    envios.sort(key=lambda e: e["enviado_em"], reverse=True)
++    por_publico: dict[str, int] = {}
++    for e in envios:
++        por_publico[e["publico"]] = por_publico.get(e["publico"], 0) + 1
++    return {"total": len(envios), "envios": envios, "por_publico": por_publico}
++
++
+ def _esperar(segundos: float) -> None:
+     """Pausa entre e-mails, conferindo o botão Cancelar a cada segundo."""
+     fim = time.monotonic() + segundos
+@@ -1003,7 +1026,8 @@
+             if ok:
+                 seguidas = 0
+                 agora = datetime.now().isoformat(timespec="seconds")
+-                novo = {"para": m["para"], "nome": m["nome"], "assunto": m["assunto"], "enviado_em": agora}
++                novo = {"para": m["para"], "nome": m["nome"], "assunto": m["assunto"], "enviado_em": agora,
++                        "publico": p["publico"]}
+                 if m.get("aluno"):
+                     novo["aluno"] = m["aluno"]
+                 if m.get("cgm"):
+diff -ruN -x __pycache__ -x .pytest_cache AUTO_SERE/src/comum/ajuda_automacoes.py AUTO_SERE/src/comum/ajuda_automacoes.py
+--- AUTO_SERE/src/comum/ajuda_automacoes.py	2026-11-18 21:56:10.000000000 +0000
++++ AUTO_SERE/src/comum/ajuda_automacoes.py	2026-11-22 09:37:37.211301541 +0000
+@@ -444,7 +444,7 @@
+         "resultado": ["No modo **Simular**, lista quem receberia, quem fica de fora (e por quê), mostra a prévia e guarda o registro em `AVISOS/`, sem enviar nada.",
+                       "No modo **Teste**, envia UM e-mail de verdade, só para o e-mail de teste (para escolas, a escola fictícia ESCOLA MUNICIPAL TESTE DA SILVA).",
+                       "No modo **Enviar de verdade**, envia um por um, com pausa entre eles e no máximo o limite escolhido por execução; grava cada envio em "
+-                      "`AVISOS/enviados.json` e o registro da execução (enviados, falhas, os que faltam)."],
++                      "`AVISOS/enviados.json` e o registro da execução (enviados, falhas, os que faltam). O botão **Ver quem já recebeu** mostra esse registro."],
+         "cuidados": ["O envio real **não pode ser desfeito** e pede confirmação. Só funciona depois de **Simular** o mesmo texto e os mesmos destinatários (a simulação vale 24 horas).",
+                      "Quem já recebeu o mesmo texto não recebe de novo: dá para cancelar e rodar outra vez, que continua de onde parou. Três falhas seguidas (senha errada, sem rede) param o envio.",
+                      "Um texto com **$ALUNO, $CGM, $SERIE ou $TURMA** vira um e-mail por aluno que chega, para a escola de origem dele; sem esses marcadores, é um e-mail por unidade. "
+diff -ruN -x __pycache__ -x .pytest_cache AUTO_SERE/src/comum/modelos_whatsapp.py AUTO_SERE/src/comum/modelos_whatsapp.py
+--- AUTO_SERE/src/comum/modelos_whatsapp.py	1970-01-01 00:00:00.000000000 +0000
++++ AUTO_SERE/src/comum/modelos_whatsapp.py	2026-11-22 09:15:38.602458147 +0000
+@@ -0,0 +1,131 @@
++"""
++modelos_whatsapp.py — modelos de mensagem da fila do WhatsApp
++=============================================================
++Mesma ideia de modelos_avisos.py (e-mail), mas só com o texto (WhatsApp não tem assunto). Vêm prontos (PADROES) e os do
++usuário ficam em config/modelos_whatsapp.json (entra no backup). Um pronto ajustado vale no lugar do original; excluir o
++ajuste devolve o texto original; um pronto nunca some.
++
++Marcadores ($MARCADOR; um desconhecido é recusado ao salvar e ao montar a mensagem):
++  $ESCOLA  $ANO  $DATA   (nossa escola, ano letivo e data de hoje)
++  $ALUNO  $TURMA         (do aluno da pré-matrícula)  ·  $RESPONSAVEL (quando o nome do responsável é conhecido)
++O texto montado é gravado na própria mensagem da fila: mudar o modelo depois não altera o que já está na fila.
++"""
++from __future__ import annotations
++
++import re
++import unicodedata
++from datetime import datetime
++from typing import Optional
++
++from src.comum import paths
++from src.comum.arquivos_json import ArquivoJsonCorrompidoError, carregar_json, salvar_json_atomico
++
++NOME_ARQUIVO = "modelos_whatsapp.json"
++MARCADORES = ("ESCOLA", "ANO", "DATA", "ALUNO", "TURMA", "RESPONSAVEL")
++LIMITE_NOME, LIMITE_TEXTO = 80, 4000
++_RE_MARCADOR = re.compile(r"\$([A-Z_]+)")
++
++PADROES: dict[str, dict] = {
++    "livre": {"nome": "Mensagem livre (escrever na hora)", "texto": ""},
++    "chamada_matricula": {
++        "nome": "Chamada para matrícula (pais de aluno novo)",
++        "texto": ("Olá, $RESPONSAVEL! Aqui é da $ESCOLA.\n\n"
++                  "Há vaga para $ALUNO na turma $TURMA em $ANO. Para efetivar a matrícula, compareça à secretaria da escola, "
++                  "em horário de atendimento, com os documentos exigidos.\n\n"
++                  "Se não tiver mais interesse na vaga, por favor nos avise, para que ela seja oferecida a outra família."),
++    },
++}
++
++
++def caminho():
++    return paths.CONFIG_DIR / NOME_ARQUIVO
++
++
++def _ler() -> dict[str, dict]:
++    arquivo = caminho()
++    try:
++        dados = carregar_json(arquivo, dict, dict)
++    except ArquivoJsonCorrompidoError as exc:
++        raise ValueError(str(exc)) from exc
++    return {str(k): v for k, v in (dados.get("modelos") or {}).items() if isinstance(v, dict)}
++
++
++def _gravar(modelos: dict[str, dict]) -> None:
++    salvar_json_atomico(caminho(), {"modelos": modelos}, indent=2)
++
++
++def _completo(id_: str, base: dict, personalizado: bool) -> dict:
++    return {"id": id_, "nome": str(base.get("nome") or id_), "texto": str(base.get("texto") or ""),
++            "padrao": id_ in PADROES, "personalizado": personalizado}
++
++
++def listar() -> list[dict]:
++    mios = _ler()
++    saida = [_completo(i, mios.get(i, p), i in mios) for i, p in PADROES.items()]
++    return saida + [_completo(i, m, True) for i, m in mios.items() if i not in PADROES]
++
++
++def obter(id_: str) -> Optional[dict]:
++    return next((m for m in listar() if m["id"] == id_), None)
++
++
++def conferir_marcadores(texto: str) -> None:
++    desconhecidos = sorted({m for m in _RE_MARCADOR.findall(texto) if m not in MARCADORES})
++    if desconhecidos:
++        raise ValueError("Marcador(es) desconhecido(s) " + ", ".join("$" + m for m in desconhecidos)
++                         + ". Os que valem: " + ", ".join("$" + m for m in MARCADORES) + ".")
++
++
++def renderizar(texto: str, contexto: dict) -> str:
++    """Troca os marcadores pelo contexto; um sem valor fica como está (à vista, para o usuário perceber)."""
++    return _RE_MARCADOR.sub(lambda m: str(contexto.get(m.group(1)) or m.group(0)), texto)
++
++
++def contexto_base() -> dict:
++    from src.comum import escola
++    return {"ESCOLA": " ".join(str(escola.nome()).split()), "ANO": str(paths.ano_atual()), "DATA": datetime.now().strftime("%d/%m/%Y")}
++
++
++def _slug(nome: str) -> str:
++    base = unicodedata.normalize("NFKD", nome).encode("ascii", "ignore").decode("ascii").lower()
++    return re.sub(r"[^a-z0-9]+", "-", base).strip("-")[:40] or "modelo"
++
++
++def salvar(nome, texto, id_: Optional[str] = None) -> dict:
++    nome, texto = " ".join(str(nome or "").split()), str(texto or "").strip()
++    if not nome:
++        raise ValueError("Dê um nome ao modelo.")
++    if len(nome) > LIMITE_NOME:
++        raise ValueError(f"O nome do modelo passa de {LIMITE_NOME} caracteres.")
++    if not texto:
++        raise ValueError("Escreva a mensagem do modelo.")
++    if len(texto) > LIMITE_TEXTO:
++        raise ValueError(f"A mensagem passa de {LIMITE_TEXTO} caracteres.")
++    conferir_marcadores(texto)
++    mios = _ler()
++    if id_:
++        if id_ not in PADROES and id_ not in mios:
++            raise ValueError("Modelo não encontrado.")
++    else:
++        if any(" ".join(str(m.get("nome") or "").split()).casefold() == nome.casefold() for m in [*PADROES.values(), *mios.values()]):
++            raise ValueError(f"Já existe um modelo chamado \"{nome}\". Escolha outro nome ou ajuste aquele.")
++        base = _slug(nome)
++        id_, n = base, 1
++        while id_ in PADROES or id_ in mios:
++            n += 1
++            id_ = f"{base}-{n}"
++    mios[id_] = {"nome": nome, "texto": texto}
++    _gravar(mios)
++    return obter(id_)
++
++
++def excluir(id_: str) -> str:
++    """\"excluido\" (criado pelo usuário) ou \"restaurado\" (pronto ajustado voltou ao original)."""
++    mios = _ler()
++    if id_ in mios:
++        del mios[id_]
++        _gravar(mios)
++        return "restaurado" if id_ in PADROES else "excluido"
++    if id_ in PADROES:
++        raise ValueError("Este é um modelo pronto e já está no texto original: não há o que excluir.")
++    raise ValueError("Modelo não encontrado.")
+diff -ruN -x __pycache__ -x .pytest_cache AUTO_SERE/src/comum/registro_scripts.py AUTO_SERE/src/comum/registro_scripts.py
+--- AUTO_SERE/src/comum/registro_scripts.py	2026-11-19 20:12:06.000000000 +0000
++++ AUTO_SERE/src/comum/registro_scripts.py	2026-11-21 20:12:54.891692151 +0000
+@@ -1025,6 +1025,9 @@
+         {"tipo": "select", "id": "campo-limite-lote", "nome": "limite_lote", "label": "Máximo de e-mails por execução",
+          "semVazio": True, "padrao": "50", "opcoes": [{"valor": str(n), "texto": f"{n} e-mail" + ("" if n == 1 else "s")} for n in (1, 5, 10, 25, 50, 100, 200)],
+          "visivelSe": so("campo-modo-aviso", "enviar")},
++        {"tipo": "enviados_registro", "id": "campo-enviados", "nome": "enviados_registro", "label": "Quem já recebeu",
++         "descricao": "Mostra o registro dos e-mails já enviados de verdade (AVISOS/enviados.json): para quem, quando e com que assunto. "
++                      "É só uma consulta: nada é enviado nem apagado por aqui."},
+     ]
+ 
+ 
+diff -ruN -x __pycache__ -x .pytest_cache AUTO_SERE/src/servicos/whatsapp/fila.py AUTO_SERE/src/servicos/whatsapp/fila.py
+--- AUTO_SERE/src/servicos/whatsapp/fila.py	1970-01-01 00:00:00.000000000 +0000
++++ AUTO_SERE/src/servicos/whatsapp/fila.py	2026-11-22 09:15:20.964609999 +0000
+@@ -0,0 +1,347 @@
++"""
++Fila de envio do WhatsApp (7b)
++==============================
++Em vez de mandar uma mensagem de cada vez, o usuário põe várias na fila e o sistema as envia sozinho, devagar, para não
++parecer envio em massa (o WhatsApp bane números que mandam rápido demais; este é um cliente não oficial).
++
++O que a fila garante:
++  - pausa fixa ENTRE uma mensagem e a seguinte (INTERVALO_MIN_S a INTERVALO_MAX_S segundos);
++  - limite por dia de mensagens de verdade (LIMITE_MIN a LIMITE_MAX). Ao atingi-lo, a fila espera o dia seguinte e
++    continua sozinha (se `continuar_no_dia_seguinte`) ou para;
++  - Pausar a qualquer momento (termina a mensagem em andamento) e continuar depois; cancelar item a item ou todos os
++    pendentes; "tentar de novo" para o que falhou;
++  - histórico: cada item guarda o resultado (enviado, simulado, falhou, cancelado) e a hora;
++  - nada se repete: o mesmo texto para o mesmo número, se já está na fila ou já foi enviado, não entra de novo;
++  - envio real só com WHATSAPP_ENVIO_REAL=1 (a fila pausa e avisa se estiver bloqueado) e só com o WhatsApp conectado;
++  - 3 falhas seguidas pausam a fila; uma mensagem que ficou "enviando" quando o programa caiu vira "falhou" (confira no
++    WhatsApp se saiu antes de tentar de novo, para não mandar duas vezes).
++No provedor SIMULADO a fila roda (sem pausas longas) mas nada sai: os itens ficam "simulado" e podem voltar à fila.
++
++Os dados ficam em <dados do ano>/WHATSAPP/fila.json (entra no backup do ano). O estado de execução (rodando/pausada)
++vale só enquanto o programa está aberto: ao reabrir, a fila está parada e o usuário decide continuar.
++"""
++from __future__ import annotations
++
++import threading
++import uuid
++from datetime import datetime, timedelta
++from pathlib import Path
++from typing import Callable, Optional
++
++from .base import EnvioNaoAutorizadoError, mascarar_numero, normalizar_numero
++from .gateway_http import envio_real_autorizado
++
++INTERVALO_PADRAO_S, INTERVALO_MIN_S, INTERVALO_MAX_S = 45, 10, 600
++LIMITE_PADRAO, LIMITE_MIN, LIMITE_MAX = 40, 1, 300
++LIMITE_TEXTO = 4000
++FALHAS_SEGUIDAS_MAX = 3
++PAUSA_SIMULADO_S = 0.5
++
++PENDENTE, ENVIANDO, ENVIADO, SIMULADO, FALHOU, CANCELADO = "pendente", "enviando", "enviado", "simulado", "falhou", "cancelado"
++STATUS = (PENDENTE, ENVIANDO, ENVIADO, SIMULADO, FALHOU, CANCELADO)
++
++PARADA, RODANDO, PAUSADA, CONCLUIDA, AGUARDANDO_DIA = "parada", "rodando", "pausada", "concluida", "aguardando_dia"
++
++
++def _caminho_padrao() -> Path:
++    from src.comum import paths
++    return paths.dados_ano_atual() / "WHATSAPP" / "fila.json"
++
++
++def _obter_provedor_padrao():
++    from .gerenciador import obter_gerenciador
++    return obter_gerenciador().provedor
++
++
++def _inteiro_entre(valor, minimo: int, maximo: int, nome: str) -> int:
++    try:
++        n = int(str(valor).strip())
++    except ValueError as exc:
++        raise ValueError(f"{nome}: use um número inteiro.") from exc
++    if not minimo <= n <= maximo:
++        raise ValueError(f"{nome}: use um valor de {minimo} a {maximo}.")
++    return n
++
++
++class FilaWhatsApp:
++    def __init__(self, caminho: Callable[[], Path] = _caminho_padrao, provedor: Callable[[], object] = _obter_provedor_padrao,
++                 agora: Callable[[], datetime] = datetime.now) -> None:
++        self._caminho, self._provedor, self._agora = caminho, provedor, agora
++        self._trava = threading.RLock()
++        self._parar = threading.Event()
++        self._thread: Optional[threading.Thread] = None
++        self._estado, self._mensagem = PARADA, ""
++
++    # ── armazenamento ──
++    def _ler(self) -> dict:
++        from src.comum.arquivos_json import ArquivoJsonCorrompidoError, carregar_json
++        arquivo = self._caminho()
++        try:
++            dados = carregar_json(arquivo, dict, dict)
++        except ArquivoJsonCorrompidoError as exc:
++            raise ValueError(f"Fila do WhatsApp: {exc}") from exc
++        dados.setdefault("config", {})
++        dados.setdefault("itens", [])
++        if not self._rodando():          # sobrou "enviando" de uma queda: não sabemos se saiu, então não repete sozinho
++            for item in dados["itens"]:
++                if item.get("status") == ENVIANDO:
++                    item.update(status=FALHOU, erro="O programa fechou durante o envio. Confira no WhatsApp se esta mensagem saiu "
++                                                   "antes de tentar de novo.")
++        return dados
++
++    def _gravar(self, dados: dict) -> None:
++        from src.comum.arquivos_json import salvar_json_atomico
++        salvar_json_atomico(self._caminho(), dados, indent=2)
++
++    def _rodando(self) -> bool:
++        return bool(self._thread and self._thread.is_alive())
++
++    @staticmethod
++    def _config(dados: dict) -> dict:
++        c = dados.get("config") or {}
++        return {"intervalo_s": int(c.get("intervalo_s") or INTERVALO_PADRAO_S),
++                "limite_diario": int(c.get("limite_diario") or LIMITE_PADRAO),
++                "continuar_no_dia_seguinte": bool(c.get("continuar_no_dia_seguinte", True))}
++
++    def _enviados_hoje(self, dados: dict) -> int:
++        hoje = self._agora().date().isoformat()
++        return sum(1 for i in dados["itens"] if i.get("status") == ENVIADO and not i.get("simulado")
++                   and str(i.get("enviado_em", ""))[:10] == hoje)
++
++    # ── o que a tela mostra ──
++    def resumo(self) -> dict:
++        with self._trava:
++            dados = self._ler()
++            cfg = self._config(dados)
++            contagem = {s: 0 for s in STATUS}
++            for i in dados["itens"]:
++                contagem[i.get("status", PENDENTE)] = contagem.get(i.get("status", PENDENTE), 0) + 1
++            hoje = self._enviados_hoje(dados)
++            itens = [{"id": i["id"], "nome": i.get("nome", ""), "numero": mascarar_numero(i.get("numero")), "texto": i.get("texto", ""),
++                      "origem": i.get("origem", ""), "status": i.get("status", PENDENTE), "erro": i.get("erro", ""),
++                      "criado_em": i.get("criado_em", ""), "enviado_em": i.get("enviado_em", ""), "tentativas": i.get("tentativas", 0)}
++                     for i in dados["itens"]]
++            return {"estado": self._estado if self._rodando() or self._estado != RODANDO else PARADA, "mensagem": self._mensagem,
++                    "config": cfg, "contagem": contagem, "enviados_hoje": hoje,
++                    "restante_hoje": max(0, cfg["limite_diario"] - hoje), "itens": itens}
++
++    # ── configuração e itens ──
++    def configurar(self, intervalo_s, limite_diario, continuar_no_dia_seguinte=True) -> dict:
++        cfg = {"intervalo_s": _inteiro_entre(intervalo_s, INTERVALO_MIN_S, INTERVALO_MAX_S, "Intervalo entre mensagens (segundos)"),
++               "limite_diario": _inteiro_entre(limite_diario, LIMITE_MIN, LIMITE_MAX, "Limite por dia"),
++               "continuar_no_dia_seguinte": bool(continuar_no_dia_seguinte)}
++        with self._trava:
++            dados = self._ler()
++            dados["config"] = cfg
++            self._gravar(dados)
++        return cfg
++
++    def adicionar(self, itens: list[dict], origem: str = "manual") -> dict:
++        """Cada item: {numero, nome, texto}. Devolve {"adicionados","duplicados","invalidos":[{"nome","erro"}]}."""
++        adicionados, duplicados, invalidos = 0, 0, []
++        with self._trava:
++            dados = self._ler()
++            existentes = {(i.get("numero"), i.get("texto")) for i in dados["itens"] if i.get("status") in (PENDENTE, ENVIANDO, ENVIADO)}
++            for it in itens:
++                nome = " ".join(str(it.get("nome") or "").split())
++                texto = str(it.get("texto") or "").strip()
++                try:
++                    numero = normalizar_numero(it.get("numero"))
++                    if not texto:
++                        raise ValueError("Mensagem vazia.")
++                    if len(texto) > LIMITE_TEXTO:
++                        raise ValueError(f"Mensagem longa demais (máximo {LIMITE_TEXTO} caracteres).")
++                except ValueError as exc:
++                    invalidos.append({"nome": nome or str(it.get("numero") or ""), "erro": str(exc)})
++                    continue
++                if (numero, texto) in existentes:
++                    duplicados += 1
++                    continue
++                existentes.add((numero, texto))
++                dados["itens"].append({"id": uuid.uuid4().hex[:12], "numero": numero, "nome": nome, "texto": texto, "origem": origem,
++                                       "status": PENDENTE, "tentativas": 0, "erro": "",
++                                       "criado_em": self._agora().isoformat(timespec="seconds")})
++                adicionados += 1
++            if adicionados:
++                self._gravar(dados)
++        return {"adicionados": adicionados, "duplicados": duplicados, "invalidos": invalidos}
++
++    def _alterar_item(self, id_item: str, de: tuple, para: str, mensagem: str) -> None:
++        with self._trava:
++            dados = self._ler()
++            item = next((i for i in dados["itens"] if i["id"] == id_item), None)
++            if item is None:
++                raise ValueError("Mensagem não encontrada na fila.")
++            if item["status"] not in de:
++                raise ValueError(mensagem)
++            item.update(status=para, erro="")
++            self._gravar(dados)
++
++    def cancelar_item(self, id_item: str) -> None:
++        self._alterar_item(id_item, (PENDENTE,), CANCELADO, "Só dá para cancelar o que ainda está pendente.")
++
++    def repetir_item(self, id_item: str) -> None:
++        self._alterar_item(id_item, (FALHOU, CANCELADO, SIMULADO), PENDENTE,
++                           "Só voltam para a fila as mensagens que falharam, foram canceladas ou só simuladas.")
++
++    def cancelar_pendentes(self) -> int:
++        with self._trava:
++            dados = self._ler()
++            n = 0
++            for i in dados["itens"]:
++                if i.get("status") == PENDENTE:
++                    i["status"] = CANCELADO
++                    n += 1
++            if n:
++                self._gravar(dados)
++            return n
++
++    def limpar_historico(self) -> int:
++        """Tira da lista o que já terminou (cancelado, simulado, falhou, enviado de dias anteriores). Os enviados de hoje ficam,
++        porque contam para o limite do dia; pendentes nunca saem."""
++        hoje = self._agora().date().isoformat()
++        with self._trava:
++            dados = self._ler()
++            ficam = [i for i in dados["itens"] if i.get("status") in (PENDENTE, ENVIANDO)
++                     or (i.get("status") == ENVIADO and not i.get("simulado") and str(i.get("enviado_em", ""))[:10] == hoje)]
++            n = len(dados["itens"]) - len(ficam)
++            if n:
++                dados["itens"] = ficam
++                self._gravar(dados)
++            return n
++
++    # ── execução ──
++    def iniciar(self) -> str:
++        """Começa (ou continua) a enviar. ValueError com o motivo se não dá. Devolve uma frase para a tela."""
++        with self._trava:
++            if self._rodando():
++                return "A fila já está enviando."
++            dados = self._ler()
++            if not any(i.get("status") == PENDENTE for i in dados["itens"]):
++                raise ValueError("Não há mensagens pendentes na fila.")
++            prov = self._provedor()
++            if prov.nome != "simulado" and not envio_real_autorizado():
++                raise ValueError("O envio real está bloqueado. Permita o envio real no cartão \"Mensagem de teste\" e tente de novo.")
++            self._parar.clear()
++            self._estado, self._mensagem = RODANDO, "Enviando…"
++            self._thread = threading.Thread(target=self._executar, name="whatsapp-fila", daemon=True)
++            self._thread.start()
++        return "Fila iniciada." + (" (Modo simulado: nada sai de verdade.)" if prov.nome == "simulado" else "")
++
++    def pausar(self) -> None:
++        """Pede para parar; a mensagem em andamento termina e a fila fica pausada."""
++        self._parar.set()
++        with self._trava:
++            if self._rodando():
++                self._mensagem = "Pausando…"
++
++    def esperar_fim(self, timeout: float = 10.0) -> None:
++        t = self._thread
++        if t:
++            t.join(timeout)
++
++    def _dormir(self, segundos: float) -> bool:
++        """Espera `segundos`; devolve True se pediram para parar."""
++        return self._parar.wait(segundos)
++
++    def _terminar(self, estado: str, mensagem: str) -> None:
++        with self._trava:
++            self._estado, self._mensagem = estado, mensagem
++
++    def _proximo(self) -> Optional[tuple[dict, dict]]:
++        dados = self._ler()
++        item = next((i for i in dados["itens"] if i.get("status") == PENDENTE), None)
++        return (dados, item) if item else None
++
++    def _executar(self) -> None:
++        falhas_seguidas = 0
++        try:
++            while not self._parar.is_set():
++                with self._trava:
++                    achou = self._proximo()
++                    if achou is None:
++                        self._terminar(CONCLUIDA, "Fila concluída: não há mais mensagens pendentes.")
++                        return
++                    dados, item = achou
++                    cfg = self._config(dados)
++                    prov = self._provedor()
++                    real = prov.nome != "simulado"
++                    if real and not envio_real_autorizado():
++                        self._terminar(PAUSADA, "Pausada: o envio real foi bloqueado.")
++                        return
++                    if real and not prov.estado().conectado:
++                        self._terminar(PAUSADA, "Pausada: o WhatsApp não está conectado. Conecte e continue.")
++                        return
++                    if real and self._enviados_hoje(dados) >= cfg["limite_diario"]:
++                        if not cfg["continuar_no_dia_seguinte"]:
++                            self._terminar(PAUSADA, f"Limite de {cfg['limite_diario']} mensagens por dia atingido. Continue amanhã.")
++                            return
++                        amanha = (self._agora() + timedelta(days=1)).replace(hour=0, minute=0, second=5, microsecond=0)
++                        espera = max(1.0, (amanha - self._agora()).total_seconds())
++                        self._estado = AGUARDANDO_DIA
++                        self._mensagem = (f"Limite de {cfg['limite_diario']} mensagens por dia atingido. "
++                                          f"Retoma sozinha a partir de {amanha.strftime('%d/%m %H:%M')} (com o programa aberto).")
++                    else:
++                        espera = 0.0
++                        self._estado, self._mensagem = RODANDO, f"Enviando para {item.get('nome') or mascarar_numero(item['numero'])}…"
++                        item.update(status=ENVIANDO, tentativas=int(item.get("tentativas", 0)) + 1)
++                        self._gravar(dados)
++                if espera:
++                    if self._dormir(min(espera, 60.0)):
++                        break
++                    continue
++                try:
++                    r = prov.enviar(item["numero"], item["texto"])
++                    ok, simulado, erro, id_msg = r.ok, bool(r.simulado), r.erro, r.id_mensagem
++                except EnvioNaoAutorizadoError:
++                    self._devolver(item["id"], PENDENTE, "")
++                    self._terminar(PAUSADA, "Pausada: o envio real foi bloqueado.")
++                    return
++                except Exception as exc:                       # noqa: BLE001 — qualquer falha do provedor vira "falhou"
++                    ok, simulado, erro, id_msg = False, False, f"{type(exc).__name__}: {exc}", None
++                if ok:
++                    falhas_seguidas = 0
++                    self._registrar(item["id"], SIMULADO if simulado else ENVIADO, "", simulado, id_msg)
++                else:
++                    falhas_seguidas += 1
++                    self._registrar(item["id"], FALHOU, str(erro or "Falha desconhecida."), False, None)
++                    if falhas_seguidas >= FALHAS_SEGUIDAS_MAX:
++                        self._terminar(PAUSADA, f"Pausada depois de {FALHAS_SEGUIDAS_MAX} falhas seguidas (última: {erro}).")
++                        return
++                with self._trava:
++                    resta = self._proximo() is not None
++                if resta and self._dormir(PAUSA_SIMULADO_S if simulado else cfg["intervalo_s"]):
++                    break
++            self._terminar(PAUSADA, "Fila pausada. Continue quando quiser.")
++        except Exception as exc:                               # noqa: BLE001 — a thread nunca morre calada
++            self._terminar(PAUSADA, f"Pausada por erro: {exc}")
++
++    def _registrar(self, id_item: str, status: str, erro: str, simulado: bool, id_mensagem) -> None:
++        with self._trava:
++            dados = self._ler()
++            for i in dados["itens"]:
++                if i["id"] == id_item:
++                    i.update(status=status, erro=erro, simulado=simulado, id_mensagem=id_mensagem)
++                    if status in (ENVIADO, SIMULADO):
++                        i["enviado_em"] = self._agora().isoformat(timespec="seconds")
++            self._gravar(dados)
++
++    def _devolver(self, id_item: str, status: str, erro: str) -> None:
++        with self._trava:
++            dados = self._ler()
++            for i in dados["itens"]:
++                if i["id"] == id_item:
++                    i.update(status=status, erro=erro, tentativas=max(0, int(i.get("tentativas", 1)) - 1))
++            self._gravar(dados)
++
++
++_instancia: Optional[FilaWhatsApp] = None
++_trava_instancia = threading.Lock()
++
++
++def obter_fila() -> FilaWhatsApp:
++    global _instancia
++    with _trava_instancia:
++        if _instancia is None:
++            _instancia = FilaWhatsApp()
++        return _instancia
+diff -ruN -x __pycache__ -x .pytest_cache AUTO_SERE/src/web/api/rotas.py AUTO_SERE/src/web/api/rotas.py
+--- AUTO_SERE/src/web/api/rotas.py	2026-11-21 06:31:34.000000000 +0000
++++ AUTO_SERE/src/web/api/rotas.py	2026-11-21 20:12:54.891198695 +0000
+@@ -1673,6 +1673,16 @@
+         return jsonify({"alunos": [], "aviso": str(exc)})
+ 
+ 
++@api_bp.route("/avisos/enviados")
++def avisos_enviados():
++    """Registro de quem já recebeu um aviso de verdade (AVISOS/enviados.json), mais recente primeiro. Só leitura."""
++    from src.automacao import avisos as _avisos
++    try:
++        return jsonify(_avisos.listar_enviados())
++    except ValueError as exc:
++        return jsonify({"total": 0, "envios": [], "por_publico": {}, "aviso": str(exc)})
++
++
+ @api_bp.route("/avisos/exemplo", methods=["POST"])
+ def avisos_exemplo():
+     """O texto montado para o primeiro aluno/destinatário da seleção atual (a tela mostra ao vivo). Mesmos campos da prévia."""
+diff -ruN -x __pycache__ -x .pytest_cache AUTO_SERE/src/web/api/whatsapp.py AUTO_SERE/src/web/api/whatsapp.py
+--- AUTO_SERE/src/web/api/whatsapp.py	2026-11-06 00:41:52.000000000 +0000
++++ AUTO_SERE/src/web/api/whatsapp.py	2026-11-22 09:16:00.901607698 +0000
+@@ -9,6 +9,14 @@
+     GET  /modelo-prematricula?id=...   texto sugerido + telefone do responsável (fila da pré-matrícula)
+     POST /enviar         envia UMA mensagem a um responsável (mesma trava dupla do /teste)
+     POST /envio-real     liga/desliga a permissão de envio real
++    GET  /fila           a fila de envio: estado, configuração, contagens, limite do dia e as mensagens (número mascarado)
++    POST /fila/itens     põe mensagens na fila ({itens:[{numero,nome,texto}]})
++    GET  /fila/prematricula          alunos da fila da pré-matrícula que podem entrar na fila do WhatsApp
++    POST /fila/da-prematricula       põe na fila os alunos escolhidos ({ids, modelo_id})
++    POST /fila/config    intervalo entre mensagens, limite por dia, continuar no dia seguinte
++    POST /fila/iniciar | /fila/pausar | /fila/cancelar-pendentes | /fila/limpar-historico
++    POST /fila/itens/<id>/cancelar | /fila/itens/<id>/repetir
++    GET|POST /fila/modelos, DELETE /fila/modelos/<id>   modelos de mensagem da fila
+     POST /provedor       escolhe o modo: simulado, whatsplay (sem Docker) ou blake (gateway Docker)
+     POST /desconectar    logout no gateway
+     GET|POST|DELETE /webhooks   registra/remove o webhook de mensagens recebidas no gateway
+@@ -32,6 +40,7 @@
+ from src.servicos.whatsapp import (EnvioNaoAutorizadoError, WhatsAppErro, envio_real_autorizado,
+                                    mascarar_numero, normalizar_numero)
+ from src.servicos.whatsapp import eventos as _eventos
++from src.servicos.whatsapp.fila import obter_fila
+ from src.servicos.whatsapp.gerenciador import obter_gerenciador, reiniciar_gerenciador
+ from src.web.api.rotas import _persistir_env
+ 
+@@ -282,6 +291,180 @@
+     return jsonify({"ok": r.ok, "mensagem": r.detalhe}), (200 if r.ok else 502)
+ 
+ 
++
++# ───────────────────────────── fila de envio (7b) ─────────────────────────────
++COMUNICADO_ID = "comunicado"       # modelo especial: o "Comunicado de Matrícula" oficial do sistema (mesmo do botão "Mandar mensagem")
++
++
++def _resposta_fila(**extra):
++    return jsonify({**obter_fila().resumo(), **extra})
++
++
++@whatsapp_bp.route("/fila")
++def fila():
++    try:
++        return _resposta_fila()
++    except ValueError as exc:
++        return _erro(str(exc))
++
++
++@whatsapp_bp.route("/fila/itens", methods=["POST"])
++def fila_adicionar():
++    corpo = request.get_json(silent=True) or {}
++    itens = corpo.get("itens")
++    if not isinstance(itens, list) or not itens:
++        return _erro("Informe as mensagens a pôr na fila.")
++    try:
++        r = obter_fila().adicionar([i for i in itens if isinstance(i, dict)], origem="manual")
++        return _resposta_fila(resultado=r)
++    except ValueError as exc:
++        return _erro(str(exc))
++
++
++def _alunos_prematricula_para_fila() -> list[dict]:
++    from src.web.api.rotas import _carregar_json, _fila_prematricula
++    cadastros = (_carregar_json("pre_matricula.json", {}) or {}).get("cadastros", {})
++    saida = []
++    for r in _fila_prematricula():
++        tel = r.get("telefone_responsavel")
++        tel = "" if not tel or tel == "—" else str(tel)
++        cad = cadastros.get(str(r.get("id"))) if isinstance(cadastros, dict) else None
++        saida.append({"id": str(r.get("id")), "nome": r.get("nome", ""), "turma": r.get("turma", ""), "posicao": r.get("posicao", ""),
++                      "telefone": tel, "responsavel": str((cad or {}).get("nome_responsavel") or "")})
++    return saida
++
++
++@whatsapp_bp.route("/fila/prematricula")
++def fila_prematricula():
++    try:
++        alunos = _alunos_prematricula_para_fila()
++    except ValueError as exc:
++        return _erro(str(exc))
++    return jsonify({"alunos": [{"id": a["id"], "nome": a["nome"], "turma": a["turma"], "posicao": a["posicao"],
++                                "tem_telefone": bool(a["telefone"])} for a in alunos]})
++
++
++@whatsapp_bp.route("/fila/da-prematricula", methods=["POST"])
++def fila_da_prematricula():
++    from src.comum import modelos_whatsapp as _modelos
++    corpo = request.get_json(silent=True) or {}
++    ids = {str(i) for i in (corpo.get("ids") or [])}
++    modelo_id = str(corpo.get("modelo_id") or COMUNICADO_ID)
++    if not ids:
++        return _erro("Marque pelo menos um aluno.")
++    try:
++        modelo = None if modelo_id == COMUNICADO_ID else _modelos.obter(modelo_id)
++        if modelo_id != COMUNICADO_ID and (modelo is None or not modelo["texto"].strip()):
++            return _erro("Escolha um modelo com texto (ou o comunicado de matrícula).")
++        itens, sem_telefone = [], []
++        for a in _alunos_prematricula_para_fila():
++            if a["id"] not in ids:
++                continue
++            if not a["telefone"]:
++                sem_telefone.append(a["nome"])
++                continue
++            if modelo is None:
++                texto = _modelo_texto_prematricula(a)
++            else:
++                ctx = {**_modelos.contexto_base(), "ALUNO": a["nome"], "TURMA": a["turma"], "RESPONSAVEL": a["responsavel"] or "responsável"}
++                texto = _modelos.renderizar(modelo["texto"], ctx)
++            itens.append({"numero": a["telefone"], "nome": a["nome"], "texto": texto})
++        r = obter_fila().adicionar(itens, origem="prematricula") if itens else {"adicionados": 0, "duplicados": 0, "invalidos": []}
++        r["sem_telefone"] = sem_telefone
++        return _resposta_fila(resultado=r)
++    except ValueError as exc:
++        return _erro(str(exc))
++
++
++@whatsapp_bp.route("/fila/config", methods=["POST"])
++def fila_config():
++    corpo = request.get_json(silent=True) or {}
++    try:
++        obter_fila().configurar(corpo.get("intervalo_s"), corpo.get("limite_diario"), corpo.get("continuar_no_dia_seguinte", True))
++        return _resposta_fila()
++    except ValueError as exc:
++        return _erro(str(exc))
++
++
++@whatsapp_bp.route("/fila/iniciar", methods=["POST"])
++def fila_iniciar():
++    ger, problema = _gerenciador()
++    if ger is None:
++        return _erro(problema or "WhatsApp não configurado.")
++    if not ger.simulado and not (request.get_json(silent=True) or {}).get("confirmo"):
++        return _erro("Confirme que quer enviar mensagens de verdade.", codigo_erro="falta_confirmacao")
++    try:
++        texto = obter_fila().iniciar()
++        return _resposta_fila(mensagem_acao=texto)
++    except ValueError as exc:
++        return _erro(str(exc))
++
++
++@whatsapp_bp.route("/fila/pausar", methods=["POST"])
++def fila_pausar():
++    obter_fila().pausar()
++    return _resposta_fila()
++
++
++@whatsapp_bp.route("/fila/cancelar-pendentes", methods=["POST"])
++def fila_cancelar_pendentes():
++    try:
++        n = obter_fila().cancelar_pendentes()
++        return _resposta_fila(mensagem_acao=f"{n} mensagem(ns) cancelada(s).")
++    except ValueError as exc:
++        return _erro(str(exc))
++
++
++@whatsapp_bp.route("/fila/limpar-historico", methods=["POST"])
++def fila_limpar_historico():
++    try:
++        n = obter_fila().limpar_historico()
++        return _resposta_fila(mensagem_acao=f"{n} registro(s) removido(s) da lista.")
++    except ValueError as exc:
++        return _erro(str(exc))
++
++
++@whatsapp_bp.route("/fila/itens/<string:id_item>/<string:acao>", methods=["POST"])
++def fila_item(id_item, acao):
++    if acao not in ("cancelar", "repetir"):
++        return _erro("Ação desconhecida.", 404)
++    try:
++        (obter_fila().cancelar_item if acao == "cancelar" else obter_fila().repetir_item)(id_item)
++        return _resposta_fila()
++    except ValueError as exc:
++        return _erro(str(exc))
++
++
++def _modelos_fila(**extra):
++    from src.comum import modelos_whatsapp as _modelos
++    return jsonify({"modelos": _modelos.listar(), "marcadores": list(_modelos.MARCADORES), **extra})
++
++
++@whatsapp_bp.route("/fila/modelos", methods=["GET", "POST"])
++def fila_modelos():
++    from src.comum import modelos_whatsapp as _modelos
++    try:
++        if request.method == "GET":
++            return _modelos_fila()
++        d = request.get_json(silent=True) or {}
++        modelo = _modelos.salvar(d.get("nome"), d.get("texto"), d.get("id") or None)
++        return _modelos_fila(modelo=modelo)
++    except ValueError as exc:
++        return _erro(str(exc))
++    except OSError as exc:
++        return _erro(f"Não foi possível gravar o modelo: {exc}", 500)
++
++
++@whatsapp_bp.route("/fila/modelos/<string:id_modelo>", methods=["DELETE"])
++def fila_modelo_excluir(id_modelo):
++    from src.comum import modelos_whatsapp as _modelos
++    try:
++        return _modelos_fila(acao=_modelos.excluir(id_modelo))
++    except ValueError as exc:
++        return _erro(str(exc))
++    except OSError as exc:
++        return _erro(f"Não foi possível gravar a alteração: {exc}", 500)
++
+ # ───────────────────────────── webhooks ─────────────────────────────
+ def _token_webhook(criar: bool = False) -> str:
+     token = os.environ.get("WHATSAPP_WEBHOOK_TOKEN", "").strip()
+diff -ruN -x __pycache__ -x .pytest_cache AUTO_SERE/src/web/static/js/app.js AUTO_SERE/src/web/static/js/app.js
+--- AUTO_SERE/src/web/static/js/app.js	2026-11-21 14:16:52.000000000 +0000
++++ AUTO_SERE/src/web/static/js/app.js	2026-11-22 09:14:05.447717354 +0000
+@@ -2074,6 +2074,22 @@
+         <div class="campo-ajuda" id="modelo-acoes-msg">Escolha um tipo acima para carregar o assunto e a mensagem; edite à vontade e salve como modelo para reaproveitar.</div>
+       </div>`;
+   }
++  if (campo.tipo === "enviados_registro") {
++    return `
++      <div class="field"${cond} id="${campo.id}">
++        <label>${campo.label}</label>
++        <div style="display:flex; gap:8px; flex-wrap:wrap;">
++          <button type="button" class="btn-sm" id="${campo.id}-ver">Ver quem já recebeu</button>
++          <button type="button" class="btn-sm" id="${campo.id}-atualizar" style="display:none">Atualizar</button>
++        </div>
++        <div id="${campo.id}-painel" style="display:none; margin-top:8px;">
++          <input type="text" id="${campo.id}-busca" placeholder="Pesquisar por nome, e-mail, aluno ou assunto…" autocomplete="off">
++          <div class="campo-ajuda" id="${campo.id}-resumo"></div>
++          <div class="checklist" id="${campo.id}-lista" style="margin-top:8px; max-height:280px; overflow:auto;"></div>
++        </div>
++        ${campo.descricao ? `<div class="campo-ajuda">${campo.descricao}</div>` : ""}
++      </div>`;
++  }
+   if (campo.tipo === "pasta") {
+     return `
+       <div class="field">
+@@ -2600,8 +2616,69 @@
+   }
+ }
+ 
++const _ROTULO_PUBLICO_ENVIO = { escolas: "escola de origem", pais: "responsável", destino: "escola de destino" };
++
++/** "Quem já recebeu": mostra o registro de envios (só leitura), com busca. Sem o campo na tela, não faz nada. */
++function inicializarCampoEnviados() {
++  const raiz = document.getElementById("campo-enviados");
++  if (!raiz) return;
++  const painel = document.getElementById("campo-enviados-painel");
++  const lista = document.getElementById("campo-enviados-lista");
++  const resumo = document.getElementById("campo-enviados-resumo");
++  const busca = document.getElementById("campo-enviados-busca");
++  const btnVer = document.getElementById("campo-enviados-ver");
++  const btnAtualizar = document.getElementById("campo-enviados-atualizar");
++  let envios = [];
++  let total = 0;
++
++  const fmtData = (iso) => {
++    const d = new Date(iso);
++    return Number.isNaN(d.getTime()) ? iso : d.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
++  };
++  const desenhar = () => {
++    const q = _semAcentoJS(busca.value.trim());
++    const vistos = !q ? envios : envios.filter((e) =>
++      _semAcentoJS([e.nome, e.para, e.aluno, e.assunto, e.cgm].join(" ")).includes(q));
++    resumo.textContent = total === 0 ? "Nenhum e-mail foi enviado de verdade ainda."
++      : `${vistos.length} de ${total} envio(s)${q ? " com a busca" : ""}.`;
++    lista.innerHTML = vistos.map((e) => `
++      <div class="checklist-item" style="display:block">
++        <strong>${_escHtml(e.nome || e.para)}</strong> &lt;${_escHtml(e.para)}&gt;
++        <div class="campo-ajuda" style="margin:0">
++          ${_escHtml(fmtData(e.enviado_em))}${e.publico ? ` · ${_escHtml(_ROTULO_PUBLICO_ENVIO[e.publico] || e.publico)}` : ""}
++          ${e.aluno ? ` · aluno ${_escHtml(e.aluno)}` : ""}${e.cgm ? ` (CGM ${_escHtml(e.cgm)})` : ""}
++          · ${_escHtml(e.assunto)}${e.anexos.length ? ` · ${e.anexos.length} anexo(s)` : ""}
++        </div>
++      </div>`).join("");
++  };
++  const carregar = async () => {
++    resumo.textContent = "Carregando…";
++    try {
++      const r = await apiGet("/avisos/enviados");
++      envios = r.envios || [];
++      total = r.total || 0;
++      desenhar();
++      if (r.aviso) resumo.textContent = r.aviso;
++    } catch (e) {
++      envios = [];
++      lista.innerHTML = "";
++      resumo.textContent = "Não foi possível ler o registro de envios.";
++    }
++  };
++  btnVer.addEventListener("click", () => {
++    const abrir = painel.style.display === "none";
++    painel.style.display = abrir ? "" : "none";
++    btnAtualizar.style.display = abrir ? "" : "none";
++    btnVer.textContent = abrir ? "Esconder" : "Ver quem já recebeu";
++    if (abrir) carregar();
++  });
++  btnAtualizar.addEventListener("click", carregar);
++  busca.addEventListener("input", desenhar);
++}
++
+ /** Liga o que é só da tela "Mandar avisos" (lista de unidades, tipo de mensagem). Sem esses campos, não faz nada. */
+ function inicializarCamposAvisos() {
++  inicializarCampoEnviados();
+   inicializarCampoUnidades();
+   inicializarCampoAlunos();
+   document.getElementById("campo-tipo-mensagem")?.addEventListener("change", aplicarModeloEscolhido);
+diff -ruN -x __pycache__ -x .pytest_cache AUTO_SERE/src/web/static/js/whatsapp.js AUTO_SERE/src/web/static/js/whatsapp.js
+--- AUTO_SERE/src/web/static/js/whatsapp.js	2026-11-06 00:41:52.000000000 +0000
++++ AUTO_SERE/src/web/static/js/whatsapp.js	2026-11-22 09:17:38.197106774 +0000
+@@ -72,6 +72,7 @@
+   }
+ 
+   async function atualizar() {
++    atualizarFila();
+     try {
+       const r = await chamar("/status");
+       if (r.ok) renderizar(r.dados);
+@@ -104,9 +105,189 @@
+     return r;
+   }
+ 
++  /* ───────────── Fila de envio (7b) ───────────── */
++  let fila = null;
++  let ultimaAssinaturaFila = "";
++  let modelosFila = [];
++  const esc = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
++  const ROTULOS_FILA = {
++    parada: ["Parada", "muted"], rodando: ["Enviando", "lime"], pausada: ["Pausada", "amber"],
++    concluida: ["Concluída", "blue"], aguardando_dia: ["Aguardando o dia seguinte", "amber"],
++  };
++  const ROTULOS_ITEM = { pendente: "Pendente", enviando: "Enviando…", enviado: "Enviada", simulado: "Simulada", falhou: "Falhou", cancelado: "Cancelada" };
++
++  async function chamarFila(caminho, metodo = "GET", corpo = null, avisar = true) {
++    const r = await chamar(`/fila${caminho}`, metodo, corpo);
++    if (!r.ok) { if (avisar) toast(r.dados.erro || "Não foi possível."); return null; }
++    if (r.dados.itens) { fila = r.dados; ultimaAssinaturaFila = JSON.stringify(r.dados); desenharFila(); }
++    return r.dados;
++  }
++
++  function desenharFila() {
++    const f = fila;
++    if (!f || !$("wa-fila-badge")) return;
++    const [rotulo, cor] = ROTULOS_FILA[f.estado] || [f.estado, "muted"];
++    pintarBadge($("wa-fila-badge"), rotulo, cor);
++    $("wa-fila-msg").textContent = f.mensagem || "";
++    const c = f.contagem;
++    $("wa-fila-resumo").textContent = `Hoje: ${f.enviados_hoje} de ${f.config.limite_diario} enviadas (restam ${f.restante_hoje}). `
++      + `Na fila: ${c.pendente} pendente(s) · ${c.enviado} enviada(s) · ${c.falhou} com falha · ${c.cancelado} cancelada(s)`
++      + (c.simulado ? ` · ${c.simulado} simulada(s)` : "") + ".";
++    const ativa = f.estado === "rodando" || f.estado === "aguardando_dia";
++    $("wa-fila-iniciar").disabled = ativa || c.pendente === 0;
++    $("wa-fila-iniciar").textContent = f.estado === "pausada" ? "Continuar fila" : "Iniciar fila";
++    $("wa-fila-pausar").disabled = !ativa;
++    $("wa-fila-cancelar-pendentes").disabled = c.pendente === 0;
++    mostrar("wa-fila-linha-confirmo", !!(estado && !estado.simulado));
++    const ativoNoCampo = (id) => document.activeElement && document.activeElement.id === id;
++    if (!ativoNoCampo("wa-fila-intervalo")) $("wa-fila-intervalo").value = String(f.config.intervalo_s);
++    if (!ativoNoCampo("wa-fila-limite")) $("wa-fila-limite").value = f.config.limite_diario;
++    if (document.activeElement !== $("wa-fila-amanha")) $("wa-fila-amanha").checked = f.config.continuar_no_dia_seguinte;
++    desenharItensFila();
++  }
++
++  function desenharItensFila() {
++    const filtro = $("wa-fila-filtro").value;
++    const itens = (fila?.itens || []).filter((i) =>
++      filtro === "todas" ? true : filtro === "abertas" ? ["pendente", "enviando", "falhou"].includes(i.status) : i.status === filtro);
++    $("wa-fila-lista").innerHTML = itens.length ? itens.map((i) => `
++      <div class="checklist-item" style="display:block">
++        <div style="display:flex;gap:8px;justify-content:space-between;align-items:flex-start">
++          <div><strong>${esc(i.nome || i.numero)}</strong> · ${esc(i.numero)} · <em>${esc(ROTULOS_ITEM[i.status] || i.status)}</em>
++            ${i.enviado_em ? ` · ${esc(new Date(i.enviado_em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }))}` : ""}</div>
++          <div>
++            ${i.status === "pendente" ? `<button class="btn-sm" data-fila-acao="cancelar" data-id="${esc(i.id)}">Cancelar</button>` : ""}
++            ${["falhou", "cancelado", "simulado"].includes(i.status) ? `<button class="btn-sm" data-fila-acao="repetir" data-id="${esc(i.id)}">Pôr na fila de novo</button>` : ""}
++          </div>
++        </div>
++        <div class="campo-ajuda" style="margin:2px 0 0;white-space:pre-wrap">${esc(i.texto.length > 160 ? i.texto.slice(0, 160) + "…" : i.texto)}</div>
++        ${i.erro ? `<div class="campo-ajuda" style="margin:2px 0 0;color:var(--rose)">${esc(i.erro)}</div>` : ""}
++      </div>`).join("") : `<div class="campo-ajuda">Nada para mostrar aqui.</div>`;
++  }
++
++  async function atualizarFila() {
++    try {
++      const r = await chamar("/fila");
++      if (!r.ok) return;
++      const assinatura = JSON.stringify(r.dados);
++      if (assinatura === ultimaAssinaturaFila) return;      // nada mudou: não redesenha (não engole cliques nem perde a rolagem)
++      ultimaAssinaturaFila = assinatura;
++      fila = r.dados;
++      desenharFila();
++    } catch (e) { /* tenta no próximo ciclo */ }
++  }
++
++  function opcoesModelos(comComunicado) {
++    return (comComunicado ? [`<option value="comunicado">Comunicado de matrícula (texto oficial do sistema)</option>`] : [])
++      .concat(modelosFila.filter((m) => !comComunicado || m.texto.trim()).map((m) =>
++        `<option value="${esc(m.id)}">${esc(m.nome + (m.padrao && m.personalizado ? " (ajustado)" : ""))}</option>`)).join("");
++  }
++
++  async function carregarModelosFila() {
++    const r = await chamar("/fila/modelos");
++    if (!r.ok) return;
++    modelosFila = r.dados.modelos || [];
++    const atual = $("wa-fila-modelo").value;
++    $("wa-fila-modelo").innerHTML = opcoesModelos(false);
++    if (atual) $("wa-fila-modelo").value = atual;
++    $("wa-fila-pm-modelo").innerHTML = opcoesModelos(true);
++    $("wa-fila-marcadores").textContent = "Marcadores que valem nos modelos: " + (r.dados.marcadores || []).map((m) => "$" + m).join(", ")
++      + ". Na lista de alunos da pré-matrícula eles são trocados pelos dados de cada aluno; numa mensagem avulsa, escreva o texto final.";
++  }
++
++  function iniciarFila() {
++    $("wa-fila-modelo").addEventListener("change", () => {
++      const m = modelosFila.find((x) => x.id === $("wa-fila-modelo").value);
++      if (m) $("wa-fila-texto").value = m.texto;
++    });
++    $("wa-fila-filtro").addEventListener("change", desenharItensFila);
++
++    $("wa-fila-iniciar").addEventListener("click", async () => {
++      const real = estado && !estado.simulado;
++      if (real && !$("wa-fila-confirmo").checked) { toast("Marque a confirmação para enviar de verdade."); return; }
++      const r = await chamarFila("/iniciar", "POST", { confirmo: $("wa-fila-confirmo").checked });
++      if (r) toast(r.mensagem_acao || "Fila iniciada.");
++    });
++    $("wa-fila-pausar").addEventListener("click", () => chamarFila("/pausar", "POST", {}));
++    $("wa-fila-cancelar-pendentes").addEventListener("click", async () => {
++      if (!confirm("Cancelar todas as mensagens pendentes? (Dá para pôr de volta na fila uma a uma.)")) return;
++      const r = await chamarFila("/cancelar-pendentes", "POST", {});
++      if (r) toast(r.mensagem_acao);
++    });
++    $("wa-fila-limpar").addEventListener("click", async () => {
++      if (!confirm("Tirar da lista as mensagens já canceladas, simuladas, com falha e enviadas em dias anteriores? As pendentes e as enviadas hoje ficam.")) return;
++      const r = await chamarFila("/limpar-historico", "POST", {});
++      if (r) toast(r.mensagem_acao);
++    });
++    $("wa-fila-salvar-config").addEventListener("click", async () => {
++      const r = await chamarFila("/config", "POST", {
++        intervalo_s: $("wa-fila-intervalo").value, limite_diario: $("wa-fila-limite").value,
++        continuar_no_dia_seguinte: $("wa-fila-amanha").checked });
++      if (r) toast("Ajustes salvos.");
++    });
++    $("wa-fila-lista").addEventListener("click", async (ev) => {
++      const b = ev.target.closest("[data-fila-acao]");
++      if (b) await chamarFila(`/itens/${encodeURIComponent(b.dataset.id)}/${b.dataset.filaAcao}`, "POST", {});
++    });
++
++    function resumoAdicao(r) {
++      const x = r.resultado || {};
++      const partes = [`${x.adicionados || 0} na fila`];
++      if (x.duplicados) partes.push(`${x.duplicados} já estavam (não repetem)`);
++      if (x.sem_telefone?.length) partes.push(`sem telefone: ${x.sem_telefone.slice(0, 3).join("; ")}${x.sem_telefone.length > 3 ? "…" : ""}`);
++      if (x.invalidos?.length) partes.push(`recusadas: ${x.invalidos.slice(0, 3).map((i) => `${i.nome} (${i.erro})`).join("; ")}`);
++      toast(partes.join(" · "));
++    }
++    $("wa-fila-por").addEventListener("click", async () => {
++      const r = await chamarFila("/itens", "POST", { itens: [{ numero: $("wa-fila-numero").value, nome: $("wa-fila-nome").value, texto: $("wa-fila-texto").value }] });
++      if (!r) return;
++      resumoAdicao(r);
++      if (r.resultado.adicionados) { $("wa-fila-numero").value = ""; $("wa-fila-nome").value = ""; }
++    });
++    $("wa-fila-modelo-salvar").addEventListener("click", async () => {
++      const atual = modelosFila.find((m) => m.id === $("wa-fila-modelo").value);
++      const nome = prompt("Nome do modelo (se for o de um modelo existente, ele é atualizado):", atual && atual.id !== "livre" ? atual.nome : "");
++      if (!nome) return;
++      const existente = modelosFila.find((m) => m.nome.toLowerCase() === nome.trim().toLowerCase());
++      const r = await chamar("/fila/modelos", "POST", { nome, texto: $("wa-fila-texto").value, id: existente?.id || "" });
++      toast(r.ok ? "Modelo salvo." : (r.dados.erro || "Não foi possível salvar."));
++      if (r.ok) { await carregarModelosFila(); $("wa-fila-modelo").value = r.dados.modelo.id; }
++    });
++    $("wa-fila-modelo-excluir").addEventListener("click", async () => {
++      const id = $("wa-fila-modelo").value;
++      if (!id || !confirm("Excluir este modelo? (Num modelo pronto ajustado, volta o texto original.)")) return;
++      const r = await chamar(`/fila/modelos/${encodeURIComponent(id)}`, "DELETE");
++      toast(r.ok ? (r.dados.acao === "restaurado" ? "Texto original restaurado." : "Modelo excluído.") : (r.dados.erro || "Não foi possível excluir."));
++      if (r.ok) carregarModelosFila();
++    });
++
++    $("wa-fila-pm-carregar").addEventListener("click", async () => {
++      const r = await chamar("/fila/prematricula");
++      if (!r.ok) { toast(r.dados.erro || "Não consegui ler a pré-matrícula."); return; }
++      const alunos = r.dados.alunos || [];
++      $("wa-fila-pm-lista").innerHTML = alunos.length ? alunos.map((a) => `
++        <label class="checklist-item"><input type="checkbox" data-pm-id="${esc(a.id)}" data-tem="${a.tem_telefone ? 1 : 0}"${a.tem_telefone ? "" : " disabled"}>
++          ${esc(a.nome)} · ${esc(a.turma)}${a.posicao ? ` · ${esc(a.posicao)}º` : ""}${a.tem_telefone ? "" : " · sem telefone"}</label>`).join("")
++        : `<div class="campo-ajuda">Ninguém na fila da pré-matrícula.</div>`;
++      mostrar("wa-fila-pm-todos", alunos.length > 0);
++      mostrar("wa-fila-pm-por", alunos.length > 0);
++    });
++    $("wa-fila-pm-todos").addEventListener("click", () =>
++      $("wa-fila-pm-lista").querySelectorAll("input[data-tem='1']").forEach((c) => { c.checked = true; }));
++    $("wa-fila-pm-por").addEventListener("click", async () => {
++      const ids = [...$("wa-fila-pm-lista").querySelectorAll("input:checked")].map((c) => c.dataset.pmId);
++      if (!ids.length) { toast("Marque pelo menos um aluno."); return; }
++      const r = await chamarFila("/da-prematricula", "POST", { ids, modelo_id: $("wa-fila-pm-modelo").value });
++      if (r) { resumoAdicao(r); $("wa-fila-pm-lista").querySelectorAll("input:checked").forEach((c) => { c.checked = false; }); }
++    });
++    carregarModelosFila();
++  }
++
+   document.addEventListener("DOMContentLoaded", () => {
+     if (!$("sec-whatsapp")) return;
+ 
++    iniciarFila();
++
+     $("wa-usar-gateway").addEventListener("click", () => acao("/provedor", { provedor: "blake" }));
+     $("wa-usar-whatsplay").addEventListener("click", () => acao("/provedor", { provedor: "whatsplay" }));
+     document.querySelectorAll("[data-wa-modo]").forEach((b) =>
+diff -ruN -x __pycache__ -x .pytest_cache AUTO_SERE/src/web/templates/whatsapp.html AUTO_SERE/src/web/templates/whatsapp.html
+--- AUTO_SERE/src/web/templates/whatsapp.html	2026-11-06 00:41:52.000000000 +0000
++++ AUTO_SERE/src/web/templates/whatsapp.html	2026-11-22 09:17:01.922556000 +0000
+@@ -90,6 +90,84 @@
+     </div>
+   </div>
+ 
++  <div class="card" id="wa-card-fila">
++    <div class="card-header"><div><div class="card-title">Fila de envio</div>
++      <div class="card-subtitle">Várias mensagens, enviadas aos poucos: pausa entre elas e limite por dia</div></div>
++      <div class="card-header-actions"><span class="badge" id="wa-fila-badge">—</span></div></div>
++    <div class="card-body">
++      <p class="wa-msg" id="wa-fila-msg"></p>
++      <p class="campo-ajuda" id="wa-fila-resumo"></p>
++
++      <label class="comp-check" id="wa-fila-linha-confirmo" hidden>
++        <input type="checkbox" id="wa-fila-confirmo"><span>Confirmo que a fila vai enviar mensagens de verdade.</span>
++      </label>
++      <div class="wa-acoes">
++        <button class="btn-primary" id="wa-fila-iniciar">Iniciar fila</button>
++        <button class="btn-sm" id="wa-fila-pausar">Pausar</button>
++        <button class="btn-sm" id="wa-fila-cancelar-pendentes">Cancelar pendentes</button>
++        <button class="btn-sm" id="wa-fila-limpar">Limpar histórico</button>
++      </div>
++
++      <div class="wa-acoes" style="margin-top:14px; align-items:flex-end">
++        <div class="field" style="margin:0"><label for="wa-fila-intervalo">Pausa entre mensagens</label>
++          <select id="wa-fila-intervalo">
++            <option value="10">10 segundos</option><option value="20">20 segundos</option><option value="30">30 segundos</option>
++            <option value="45">45 segundos</option><option value="60">1 minuto</option><option value="90">1 min 30 s</option>
++            <option value="120">2 minutos</option><option value="300">5 minutos</option><option value="600">10 minutos</option>
++          </select></div>
++        <div class="field" style="margin:0"><label for="wa-fila-limite">Máximo por dia</label>
++          <input type="number" id="wa-fila-limite" min="1" max="300" style="width:90px"></div>
++        <label class="comp-check" style="margin:0"><input type="checkbox" id="wa-fila-amanha"><span>Continuar sozinha no dia seguinte</span></label>
++        <button class="btn-sm" id="wa-fila-salvar-config">Salvar ajustes</button>
++      </div>
++      <p class="campo-ajuda">Para não parecer envio em massa, use pausas longas e um limite baixo por dia. O envio real precisa estar
++      permitido (cartão "Mensagem de teste") e o WhatsApp conectado. Com 3 falhas seguidas a fila pausa sozinha.
++      A pausa só vale enquanto o AUTO SERE está aberto; ao reabrir, a fila fica parada até você iniciar.</p>
++
++      <details class="wa-ajuda" id="wa-fila-adicionar">
++        <summary>Adicionar mensagens à fila</summary>
++        <div style="margin-top:10px">
++          <strong>Uma mensagem</strong>
++          <div class="wa-acoes" style="margin-top:8px">
++            <div class="field" style="margin:0;max-width:220px"><label for="wa-fila-numero">Número (com DDD)</label>
++              <input type="text" id="wa-fila-numero" placeholder="(42) 99999-8888" autocomplete="off"></div>
++            <div class="field" style="margin:0;max-width:260px"><label for="wa-fila-nome">Nome (para a lista)</label>
++              <input type="text" id="wa-fila-nome" autocomplete="off"></div>
++            <div class="field" style="margin:0;max-width:300px"><label for="wa-fila-modelo">Modelo</label>
++              <select id="wa-fila-modelo"></select></div>
++          </div>
++          <div class="field"><label for="wa-fila-texto">Mensagem</label>
++            <textarea id="wa-fila-texto" rows="5" maxlength="4000"></textarea></div>
++          <div class="wa-acoes">
++            <button class="btn-primary" id="wa-fila-por">Pôr na fila</button>
++            <button class="btn-sm" id="wa-fila-modelo-salvar">Salvar como modelo…</button>
++            <button class="btn-sm" id="wa-fila-modelo-excluir">Excluir modelo</button>
++          </div>
++          <p class="campo-ajuda" id="wa-fila-marcadores"></p>
++
++          <strong style="display:block;margin-top:16px">Alunos da pré-matrícula (quem ainda está na fila de chamada)</strong>
++          <div class="wa-acoes" style="margin-top:8px">
++            <div class="field" style="margin:0;max-width:320px"><label for="wa-fila-pm-modelo">Mensagem</label>
++              <select id="wa-fila-pm-modelo"></select></div>
++            <button class="btn-sm" id="wa-fila-pm-carregar">Carregar alunos</button>
++            <button class="btn-sm" id="wa-fila-pm-todos" hidden>Marcar todos com telefone</button>
++            <button class="btn-primary" id="wa-fila-pm-por" hidden>Pôr marcados na fila</button>
++          </div>
++          <div class="checklist" id="wa-fila-pm-lista" style="margin-top:8px;max-height:240px;overflow:auto"></div>
++        </div>
++      </details>
++
++      <div class="wa-acoes" style="margin-top:14px;align-items:center">
++        <strong>Mensagens da fila</strong>
++        <select id="wa-fila-filtro">
++          <option value="abertas">Pendentes e com problema</option><option value="enviado">Enviadas</option>
++          <option value="simulado">Simuladas</option><option value="cancelado">Canceladas</option><option value="todas">Todas</option>
++        </select>
++      </div>
++      <div class="checklist" id="wa-fila-lista" style="margin-top:8px;max-height:340px;overflow:auto"></div>
++    </div>
++  </div>
++
+   <div class="card" id="wa-card-avancado">
+     <div class="card-header"><div><div class="card-title">Avançado</div>
+       <div class="card-subtitle">Modo de funcionamento, mensagens recebidas (módulos futuros) e desconexão</div></div></div>
+diff -ruN -x __pycache__ -x .pytest_cache AUTO_SERE/tests/js/teste_enviados_e_fila.js AUTO_SERE/tests/js/teste_enviados_e_fila.js
+--- AUTO_SERE/tests/js/teste_enviados_e_fila.js	1970-01-01 00:00:00.000000000 +0000
++++ AUTO_SERE/tests/js/teste_enviados_e_fila.js	2026-11-22 09:18:14.142736949 +0000
+@@ -0,0 +1,126 @@
++/* "Quem já recebeu" (tela Mandar avisos) e "Fila de envio" (tela WhatsApp) no jsdom. Rodar: cd tests/js && npm install jsdom && node teste_enviados_e_fila.js */
++const { JSDOM } = require("jsdom");
++const fs = require("fs");
++const path = require("path");
++const RAIZ = path.join(__dirname, "..", "..", "src", "web");
++const ler = (...p) => fs.readFileSync(path.join(RAIZ, ...p), "utf-8");
++const esperar = (ms = 30) => new Promise((r) => setTimeout(r, ms));
++let falhas = 0;
++const ok = (cond, msg) => { console.log((cond ? "  ok   " : "  FALHA ") + msg); if (!cond) falhas++; };
++const resp = (j, status = 200) => ({ ok: status < 400, status, json: async () => j });
++
++async function testeEnviados() {
++  console.log("# quem já recebeu");
++  const dom = new JSDOM(`<body><div id="toast"><span id="toast-msg"></span></div><div id="x"></div></body>`, { runScripts: "dangerously", url: "http://localhost/" });
++  const w = dom.window;
++  let abriu = 0;
++  w.fetch = async (url) => {
++    if (url.endsWith("/avisos/enviados")) {
++      abriu++;
++      return resp({ total: 2, por_publico: {}, envios: [
++        { para: "ana@pg.gov.br", nome: "Escola <b>Ana</b>", aluno: "ANA LIMA", cgm: "10", assunto: "Transferência", enviado_em: "2026-11-02T10:00:00", publico: "destino", anexos: ["g.pdf"] },
++        { para: "mae@x.com", nome: "MARIA", aluno: "BETO", cgm: "", assunto: "Vaga", enviado_em: "2026-11-01T09:00:00", publico: "pais", anexos: [] }] });
++    }
++    return resp({});
++  };
++  for (const arq of ["icons.js", "app.js"]) {
++    const sc = w.document.createElement("script"); sc.textContent = ler("static", "js", arq); w.document.body.appendChild(sc);
++  }
++  await esperar(100);
++  w.document.getElementById("x").innerHTML = w.eval(`campoHTML({tipo:"enviados_registro",id:"campo-enviados",nome:"enviados_registro",label:"Quem já recebeu",descricao:"d"})`);
++  w.eval("inicializarCampoEnviados()");
++  const $ = (id) => w.document.getElementById(id);
++  ok($("campo-enviados-painel").style.display === "none" && abriu === 0, "começa fechado e não lê nada");
++  $("campo-enviados-ver").click(); await esperar();
++  ok($("campo-enviados-painel").style.display !== "none" && abriu === 1, "abrir carrega o registro");
++  ok($("campo-enviados-resumo").textContent.includes("2 de 2"), "resumo: " + $("campo-enviados-resumo").textContent);
++  ok(!$("campo-enviados-lista").innerHTML.includes("<b>Ana"), "nome com HTML é escapado");
++  ok($("campo-enviados-lista").textContent.includes("escola de destino") && $("campo-enviados-lista").textContent.includes("responsável"), "mostra o público");
++  $("campo-enviados-busca").value = "maria"; $("campo-enviados-busca").dispatchEvent(new w.Event("input"));
++  ok($("campo-enviados-lista").querySelectorAll(".checklist-item").length === 1 && $("campo-enviados-resumo").textContent.includes("1 de 2"), "busca filtra sem acento/caixa");
++  $("campo-enviados-busca").value = "zzz"; $("campo-enviados-busca").dispatchEvent(new w.Event("input"));
++  ok($("campo-enviados-lista").children.length === 0, "busca sem resultado esvazia a lista");
++  $("campo-enviados-atualizar").click(); await esperar();
++  ok(abriu === 2, "Atualizar lê de novo");
++  $("campo-enviados-ver").click();
++  ok($("campo-enviados-painel").style.display === "none", "Esconder fecha o painel");
++}
++
++async function testeFila() {
++  console.log("# fila do WhatsApp");
++  const estadoFila = (extra = {}) => ({
++    estado: "parada", mensagem: "", config: { intervalo_s: 45, limite_diario: 40, continuar_no_dia_seguinte: true },
++    contagem: { pendente: 2, enviado: 0, simulado: 0, falhou: 1, cancelado: 0, enviando: 0 }, enviados_hoje: 3, restante_hoje: 37,
++    itens: [
++      { id: "a1", nome: "Ana <i>Pai</i>", numero: "55 42 *****-**11", texto: "Oi", status: "pendente", erro: "", enviado_em: "" },
++      { id: "b2", nome: "Beto", numero: "55 42 *****-**22", texto: "Oi 2", status: "pendente", erro: "", enviado_em: "" },
++      { id: "c3", nome: "Caio", numero: "55 42 *****-**33", texto: "Oi 3", status: "falhou", erro: "sem rede", enviado_em: "" }], ...extra });
++  const chamadas = [];
++  let confirma = true;
++  const html = `<body><div id="toast"><span id="toast-msg"></span></div>${ler("templates", "whatsapp.html")}
++    <script>window.__t=[];function toast(m){window.__t.push(m)}</script><script>${ler("static", "js", "whatsapp.js").replace(/<\/script>/g, "<\\/script>")}</script></body>`;
++  const dom = new JSDOM(html, { runScripts: "dangerously", url: "http://localhost/", beforeParse(w) {
++    w.confirm = () => confirma; w.prompt = () => "Meu modelo";
++    w.fetch = async (url, op = {}) => {
++      const metodo = op.method || "GET"; chamadas.push([metodo, url, op.body]);
++      if (url.endsWith("/status")) return resp({ situacao: "conectado", simulado: false, provedor: "blake", mensagem: "", tem_sessao: true });
++      if (url.endsWith("/fila") || url.endsWith("/fila/pausar")) return resp(estadoFila());
++      if (url.endsWith("/fila/iniciar")) return resp(estadoFila({ estado: "rodando", mensagem_acao: "Fila iniciada." }));
++      if (url.endsWith("/fila/itens") && metodo === "POST") return resp({ ...estadoFila(), resultado: { adicionados: 1, duplicados: 0, invalidos: [] } });
++      if (url.endsWith("/fila/config")) return resp(estadoFila());
++      if (url.endsWith("/fila/modelos")) return resp({ modelos: [{ id: "livre", nome: "Livre", texto: "", padrao: true, personalizado: false }, { id: "chamada", nome: "Chamada", texto: "Olá $ALUNO", padrao: true, personalizado: false }], marcadores: ["ALUNO"] });
++      if (url.endsWith("/fila/prematricula")) return resp({ alunos: [{ id: "111", nome: "ANA", turma: "T1", posicao: 1, tem_telefone: true }, { id: "112", nome: "BETO", turma: "T1", posicao: 2, tem_telefone: false }] });
++      if (url.endsWith("/fila/da-prematricula")) return resp({ ...estadoFila(), resultado: { adicionados: 1, duplicados: 0, invalidos: [], sem_telefone: [] } });
++      if (url.includes("/fila/itens/") && url.endsWith("/cancelar")) return resp(estadoFila());
++      return resp({});
++    };
++    w.HTMLElement.prototype.scrollIntoView = () => {};
++  } });
++  const w = dom.window, $ = (id) => w.document.getElementById(id);
++  w.document.dispatchEvent(new w.Event("DOMContentLoaded"));
++  w.carregarWhatsapp(); await esperar(80);
++  w.pararWhatsapp();
++  ok($("wa-fila-badge").textContent === "Parada", "badge: " + $("wa-fila-badge").textContent);
++  ok($("wa-fila-resumo").textContent.includes("3 de 40") && $("wa-fila-resumo").textContent.includes("2 pendente"), "resumo do dia e contagem");
++  ok($("wa-fila-lista").querySelectorAll(".checklist-item").length === 3 && !$("wa-fila-lista").innerHTML.includes("<i>Pai"), "lista com 3 itens e nome escapado");
++  ok($("wa-fila-intervalo").value === "45" && $("wa-fila-limite").value === "40" && $("wa-fila-amanha").checked, "ajustes carregados");
++  ok($("wa-fila-modelo").options.length === 2 && $("wa-fila-pm-modelo").options.length === 2 && $("wa-fila-pm-modelo").options[0].value === "comunicado", "modelos nos dois seletores (só os com texto + comunicado no da pré-matrícula)");
++
++  $("wa-fila-iniciar").click(); await esperar();
++  ok(!chamadas.some((c) => c[1].endsWith("/fila/iniciar")) && w.__t.some((t) => t.includes("confirmação")), "envio real exige a caixa de confirmação");
++  $("wa-fila-confirmo").checked = true; $("wa-fila-iniciar").click(); await esperar();
++  const ini = chamadas.find((c) => c[1].endsWith("/fila/iniciar"));
++  ok(ini && JSON.parse(ini[2]).confirmo === true && $("wa-fila-badge").textContent === "Enviando", "iniciar manda a confirmação e mostra Enviando");
++  ok($("wa-fila-iniciar").disabled && !$("wa-fila-pausar").disabled, "enquanto envia: Iniciar desligado, Pausar ligado");
++
++  $("wa-fila-lista").querySelector("[data-fila-acao='cancelar']").click(); await esperar();
++  ok(chamadas.some((c) => c[1].endsWith("/fila/itens/a1/cancelar") && c[0] === "POST"), "cancelar item chama a rota certa");
++
++  $("wa-fila-numero").value = "42999991111"; $("wa-fila-nome").value = "Ana"; $("wa-fila-texto").value = "Oi";
++  $("wa-fila-por").click(); await esperar();
++  const add = chamadas.find((c) => c[1].endsWith("/fila/itens") && c[0] === "POST");
++  ok(add && JSON.parse(add[2]).itens[0].numero === "42999991111" && $("wa-fila-numero").value === "", "pôr na fila envia e limpa o formulário");
++
++  $("wa-fila-modelo").value = "chamada"; $("wa-fila-modelo").dispatchEvent(new w.Event("change"));
++  ok($("wa-fila-texto").value === "Olá $ALUNO", "escolher modelo preenche o texto");
++
++  $("wa-fila-pm-carregar").click(); await esperar();
++  ok($("wa-fila-pm-lista").querySelectorAll("input").length === 2 && $("wa-fila-pm-lista").querySelector("input[disabled]"), "pré-matrícula: sem telefone fica desabilitado");
++  $("wa-fila-pm-todos").click(); $("wa-fila-pm-por").click(); await esperar();
++  const pm = chamadas.find((c) => c[1].endsWith("/fila/da-prematricula"));
++  ok(pm && JSON.stringify(JSON.parse(pm[2]).ids) === '["111"]' && JSON.parse(pm[2]).modelo_id === "comunicado", "manda só os marcados e o modelo escolhido");
++
++  $("wa-fila-limite").value = "10"; $("wa-fila-salvar-config").click(); await esperar();
++  const cfg = chamadas.find((c) => c[1].endsWith("/fila/config"));
++  ok(cfg && JSON.parse(cfg[2]).limite_diario === "10", "salvar ajustes manda o limite");
++
++  $("wa-fila-filtro").value = "enviado"; $("wa-fila-filtro").dispatchEvent(new w.Event("change"));
++  ok($("wa-fila-lista").textContent.includes("Nada para mostrar"), "filtro 'Enviadas' sem itens mostra aviso");
++}
++
++(async () => {
++  await testeEnviados();
++  await testeFila();
++  console.log(falhas ? `\n${falhas} FALHA(S)` : "\nTUDO OK");
++  process.exit(falhas ? 1 : 0);
++})().catch((e) => { console.log("ERRO:", e.stack); process.exit(1); });
+diff -ruN -x __pycache__ -x .pytest_cache AUTO_SERE/tests/test_avisos.py AUTO_SERE/tests/test_avisos.py
+--- AUTO_SERE/tests/test_avisos.py	2026-11-21 14:16:26.000000000 +0000
++++ AUTO_SERE/tests/test_avisos.py	2026-11-22 09:14:14.684606059 +0000
+@@ -411,7 +411,7 @@
+     assert s is not None and "avisos" not in rotas.AUTOMACOES_NAO_IMPLEMENTADAS and s.confirmar is False
+     nomes = [e["nome"] for e in s.extras()]
+     assert nomes == ["publico", "canal", "modo", "unidades", "situacao_pais", "fonte", "alunos", "tipo_mensagem", "modelo_acoes",
+-                     "assunto", "mensagem", "exemplo_mensagem", "intervalo_s", "limite_lote"]
++                     "assunto", "mensagem", "exemplo_mensagem", "intervalo_s", "limite_lote", "enviados_registro"]
+     assert "filtro_nome" not in nomes and "email_teste" not in nomes                  # saíram da tela a pedido
+     mensagem = next(e for e in s.extras() if e["nome"] == "mensagem")
+     assert mensagem["multilinha"] is True
+@@ -1203,3 +1203,55 @@
+     av.conferir_marcadores(m["mensagem"], "pais", "Mensagem")
+     corpo = av.renderizar(m["mensagem"], {"RESPONSAVEL": "Maria", "ALUNO": "Ana", "TURMA": "1º Ano", "ESCOLA": "Escola X", "ANO": "2026"})
+     assert "Olá, Maria!" in corpo and "vaga para Ana na turma 1º Ano da Escola X em 2026" in corpo and "$" not in corpo
++
++
++# ───────────── "Quem já recebeu" (só leitura do enviados.json) ─────────────
++
++def _gravar_enviados(envios: dict) -> None:
++    pasta = paths.dados_ano_atual() / "AVISOS"
++    pasta.mkdir(parents=True, exist_ok=True)
++    (pasta / "enviados.json").write_text(json.dumps({"envios": envios}), encoding="utf-8")
++
++
++def test_listar_enviados_sem_registro(amb):
++    assert av.listar_enviados() == {"total": 0, "envios": [], "por_publico": {}}
++
++
++def test_listar_enviados_ordena_pelo_mais_recente_e_reconhece_o_publico(amb):
++    _gravar_enviados({
++        "a": {"para": "x@pg.gov.br", "nome": "Escola X", "assunto": "A", "enviado_em": "2026-11-01T10:00:00", "publico": "pais", "aluno": "ANA"},
++        "b": {"para": "y@pg.gov.br", "nome": "Escola Y", "assunto": "B", "enviado_em": "2026-11-03T09:00:00", "aluno": "BETO",
++              "cgm": "55", "data_saida": "2026-10-30", "anexos": ["guia.pdf"]},
++        "c": {"para": "z@pg.gov.br", "nome": "Escola Z", "assunto": "C", "enviado_em": "2026-11-02T08:00:00"},
++        "lixo": "não é um dicionário",
++    })
++    r = av.listar_enviados()
++    assert [e["para"] for e in r["envios"]] == ["y@pg.gov.br", "z@pg.gov.br", "x@pg.gov.br"] and r["total"] == 3
++    assert r["por_publico"] == {"destino": 1, "": 1, "pais": 1} and r["envios"][0]["anexos"] == ["guia.pdf"]
++
++
++def test_listar_enviados_nao_altera_o_registro(amb):
++    _gravar_enviados({"a": {"para": "x@pg.gov.br", "enviado_em": "2026-11-01T10:00:00"}})
++    arquivo = paths.dados_ano_atual() / "AVISOS" / "enviados.json"
++    antes = arquivo.read_bytes()
++    av.listar_enviados()
++    assert arquivo.read_bytes() == antes
++
++
++def test_rota_enviados(amb):
++    _gravar_enviados({"a": {"para": "x@pg.gov.br", "nome": "X", "assunto": "A", "enviado_em": "2026-11-01T10:00:00"}})
++    r = create_app().test_client().get("/web/api/avisos/enviados")
++    assert r.status_code == 200 and r.get_json()["total"] == 1 and r.get_json()["envios"][0]["para"] == "x@pg.gov.br"
++
++
++def test_rota_enviados_com_registro_corrompido_avisa_sem_quebrar(amb):
++    pasta = paths.dados_ano_atual() / "AVISOS"
++    pasta.mkdir(parents=True, exist_ok=True)
++    (pasta / "enviados.json").write_text("{quebrado", encoding="utf-8")
++    r = create_app().test_client().get("/web/api/avisos/enviados")
++    assert r.status_code == 200 and r.get_json()["envios"] == [] and "Registro de envios" in r.get_json()["aviso"]
++
++
++def test_envio_real_guarda_o_publico_no_registro(chegando, smtp, sem_espera):
++    _simular_e_enviar()
++    assert {e["publico"] for e in av.listar_enviados()["envios"]} == {"escolas"}
+diff -ruN -x __pycache__ -x .pytest_cache AUTO_SERE/tests/test_ui_fila_whatsapp_js.py AUTO_SERE/tests/test_ui_fila_whatsapp_js.py
+--- AUTO_SERE/tests/test_ui_fila_whatsapp_js.py	1970-01-01 00:00:00.000000000 +0000
++++ AUTO_SERE/tests/test_ui_fila_whatsapp_js.py	2026-11-22 09:18:20.366093924 +0000
+@@ -0,0 +1,18 @@
++"""'Quem já recebeu' (Mandar avisos) e 'Fila de envio' (WhatsApp) rodando no jsdom. Pula sem node ou sem jsdom."""
++import shutil
++import subprocess
++from pathlib import Path
++
++import pytest
++
++JS = Path(__file__).parent / "js"
++
++
++def _tem_jsdom() -> bool:
++    return shutil.which("node") is not None and any((p / "node_modules" / "jsdom").exists() for p in (JS, JS.parent, JS.parent.parent))
++
++
++@pytest.mark.skipif(not _tem_jsdom(), reason="precisa de node e do pacote jsdom (npm install jsdom em tests/js)")
++def test_enviados_e_fila_no_jsdom():
++    r = subprocess.run(["node", str(JS / "teste_enviados_e_fila.js")], capture_output=True, text=True, timeout=120, cwd=JS, encoding="utf-8")
++    assert r.returncode == 0 and "TUDO OK" in r.stdout, r.stdout[-3000:] + r.stderr[-1500:]
+diff -ruN -x __pycache__ -x .pytest_cache AUTO_SERE/tests/test_whatsapp_fila.py AUTO_SERE/tests/test_whatsapp_fila.py
+--- AUTO_SERE/tests/test_whatsapp_fila.py	1970-01-01 00:00:00.000000000 +0000
++++ AUTO_SERE/tests/test_whatsapp_fila.py	2026-11-22 09:42:34.279540863 +0000
+@@ -0,0 +1,318 @@
++"""WhatsApp: fila de envio (7b) — intervalo, limite diário, pausa/cancelamento, histórico, modelos e rotas. Sem rede."""
++import json
++import threading
++from datetime import datetime, timedelta
++
++import pytest
++
++from src.comum import modelos_whatsapp as modelos
++from src.comum import paths
++from src.servicos.whatsapp import ResultadoEnvio, EnvioNaoAutorizadoError, EstadoConexao
++from src.servicos.whatsapp import fila as f
++from src.web.app import create_app
++
++N1, N2, N3 = "(42) 99999-1111", "(42) 99999-2222", "(42) 99999-3333"
++
++
++class Prov:
++    def __init__(self, nome="blake", conectado=True, falha=None):
++        self.nome, self.conectado, self.falha, self.enviados = nome, conectado, falha, []
++
++    def estado(self):
++        return EstadoConexao(self.conectado, "x")
++
++    def enviar(self, numero, texto):
++        if self.falha == "bloqueado":
++            raise EnvioNaoAutorizadoError("bloqueado")
++        if self.falha:
++            return ResultadoEnvio(False, False, None, self.falha)
++        self.enviados.append((numero, texto))
++        return ResultadoEnvio(True, self.nome == "simulado", f"id{len(self.enviados)}")
++
++
++@pytest.fixture()
++def amb(tmp_path, monkeypatch):
++    dados = tmp_path / "dados" / "2026"
++    dados.mkdir(parents=True)
++    monkeypatch.setattr(paths, "ano_atual", lambda: "2026")
++    monkeypatch.setattr(paths, "dados_ano_atual", lambda: dados)
++    monkeypatch.setattr(paths, "CONFIG_DIR", tmp_path / "config")
++    monkeypatch.setenv("WHATSAPP_ENVIO_REAL", "1")
++    return tmp_path
++
++
++def _fila(prov, agora=None):
++    fila = f.FilaWhatsApp(provedor=lambda: prov, agora=agora or datetime.now)
++    esperas = []
++    fila._dormir = lambda s: (esperas.append(s) or fila._parar.is_set())    # sem esperar de verdade
++    fila.esperas = esperas
++    return fila
++
++
++def _rodar(fila):
++    fila.iniciar()
++    fila.esperar_fim()
++
++
++def _tres(fila):
++    return fila.adicionar([{"numero": n, "nome": f"Pai {i}", "texto": f"Oi {i}"} for i, n in enumerate((N1, N2, N3), 1)])
++
++
++def test_adicionar_valida_e_nao_repete(amb):
++    fila = _fila(Prov())
++    r = fila.adicionar([{"numero": N1, "nome": "A", "texto": "Oi"}, {"numero": N1, "nome": "A", "texto": "Oi"},
++                        {"numero": "123", "nome": "B", "texto": "Oi"}, {"numero": N2, "nome": "C", "texto": "  "}])
++    assert r["adicionados"] == 1 and r["duplicados"] == 1 and [i["nome"] for i in r["invalidos"]] == ["B", "C"]
++    assert fila.resumo()["contagem"]["pendente"] == 1
++
++
++def test_envia_tudo_com_intervalo_e_registra_historico(amb):
++    prov = Prov()
++    fila = _fila(prov)
++    _tres(fila)
++    fila.configurar(30, 10)
++    _rodar(fila)
++    r = fila.resumo()
++    assert [t for _, t in prov.enviados] == ["Oi 1", "Oi 2", "Oi 3"] and r["estado"] == f.CONCLUIDA
++    assert fila.esperas == [30, 30] and r["contagem"]["enviado"] == 3 and r["enviados_hoje"] == 3 and r["restante_hoje"] == 7
++    assert all(i["enviado_em"] and "*" in i["numero"] for i in r["itens"])         # número mascarado na saída
++
++
++def test_limite_diario_para_e_nao_envia_alem(amb):
++    prov = Prov()
++    fila = _fila(prov)
++    _tres(fila)
++    fila.configurar(10, 2, continuar_no_dia_seguinte=False)
++    _rodar(fila)
++    r = fila.resumo()
++    assert len(prov.enviados) == 2 and r["estado"] == f.PAUSADA and "Limite de 2" in r["mensagem"] and r["contagem"]["pendente"] == 1
++
++
++def test_limite_diario_espera_o_dia_seguinte_e_retoma(amb):
++    prov = Prov()
++    relogio = {"t": datetime(2026, 11, 22, 15, 0)}
++    fila = f.FilaWhatsApp(provedor=lambda: prov, agora=lambda: relogio["t"])
++    fila.adicionar([{"numero": N1, "nome": "A", "texto": "1"}, {"numero": N2, "nome": "B", "texto": "2"}])
++    fila.configurar(10, 1)
++    esperas = []
++
++    def dormir(s):
++        esperas.append(s)
++        relogio["t"] += timedelta(hours=10)          # a espera atravessa a meia-noite
++        return False
++    fila._dormir = dormir
++    _rodar(fila)
++    assert len(prov.enviados) == 2 and fila.resumo()["estado"] == f.CONCLUIDA and any(e > 1 for e in esperas)
++
++
++def test_pausar_termina_a_mensagem_atual_e_continua_depois(amb):
++    prov = Prov()
++    fila = _fila(prov)
++    _tres(fila)
++    fila._dormir = lambda s: (fila.pausar() or True)                    # pede pausa na 1ª espera entre mensagens
++    _rodar(fila)
++    assert len(prov.enviados) == 1 and fila.resumo()["estado"] == f.PAUSADA and fila.resumo()["contagem"]["pendente"] == 2
++    fila._dormir = lambda s: fila._parar.is_set()
++    _rodar(fila)
++    assert len(prov.enviados) == 3 and fila.resumo()["estado"] == f.CONCLUIDA
++
++
++def test_cancelar_item_e_pendentes_e_repetir(amb):
++    fila = _fila(Prov())
++    _tres(fila)
++    ids = [i["id"] for i in fila.resumo()["itens"]]
++    fila.cancelar_item(ids[0])
++    assert fila.resumo()["contagem"]["cancelado"] == 1
++    assert fila.cancelar_pendentes() == 2
++    fila.repetir_item(ids[0])
++    r = fila.resumo()
++    assert r["contagem"]["pendente"] == 1 and r["contagem"]["cancelado"] == 2
++    with pytest.raises(ValueError, match="pendente"):
++        fila.cancelar_item(ids[1])                    # já cancelado em bloco: não é mais pendente
++
++
++def test_tres_falhas_seguidas_pausam_e_item_fica_para_tentar_de_novo(amb):
++    prov = Prov(falha="sem rede")
++    fila = _fila(prov)
++    fila.adicionar([{"numero": n, "nome": "x", "texto": f"t{n}"} for n in (N1, N2, N3, "(42) 99999-4444")])
++    _rodar(fila)
++    r = fila.resumo()
++    assert r["estado"] == f.PAUSADA and "3 falhas" in r["mensagem"] and r["contagem"]["falhou"] == 3 and r["contagem"]["pendente"] == 1
++    assert all(i["erro"] == "sem rede" for i in r["itens"] if i["status"] == "falhou")
++    fila.repetir_item(next(i["id"] for i in r["itens"] if i["status"] == "falhou"))
++    assert fila.resumo()["contagem"]["pendente"] == 2
++
++
++def test_envio_real_bloqueado_nao_consome_o_item(amb, monkeypatch):
++    monkeypatch.setenv("WHATSAPP_ENVIO_REAL", "0")
++    fila = _fila(Prov())
++    _tres(fila)
++    with pytest.raises(ValueError, match="bloqueado"):
++        fila.iniciar()
++    assert fila.resumo()["contagem"]["pendente"] == 3
++
++
++def test_provedor_levanta_envio_nao_autorizado_no_meio_pausa_sem_perder_o_item(amb):
++    fila = _fila(Prov(falha="bloqueado"))
++    _tres(fila)
++    _rodar(fila)
++    r = fila.resumo()
++    assert r["estado"] == f.PAUSADA and r["contagem"]["pendente"] == 3 and r["contagem"]["falhou"] == 0
++
++
++def test_whatsapp_desconectado_pausa(amb):
++    fila = _fila(Prov(conectado=False))
++    _tres(fila)
++    _rodar(fila)
++    assert fila.resumo()["estado"] == f.PAUSADA and "não está conectado" in fila.resumo()["mensagem"] and fila.resumo()["contagem"]["pendente"] == 3
++
++
++def test_simulado_nao_envia_de_verdade_nem_conta_no_limite_e_pode_voltar(amb):
++    prov = Prov(nome="simulado")
++    fila = _fila(prov)
++    _tres(fila)
++    fila.configurar(10, 1)
++    _rodar(fila)
++    r = fila.resumo()
++    assert r["contagem"]["simulado"] == 3 and r["enviados_hoje"] == 0 and r["estado"] == f.CONCLUIDA
++    assert set(fila.esperas) == {f.PAUSA_SIMULADO_S}
++    fila.repetir_item(r["itens"][0]["id"])
++    assert fila.resumo()["contagem"]["pendente"] == 1
++
++
++def test_enviando_que_sobrou_de_uma_queda_vira_falhou(amb):
++    fila = _fila(Prov())
++    _tres(fila)
++    arquivo = paths.dados_ano_atual() / "WHATSAPP" / "fila.json"
++    dados = json.loads(arquivo.read_text(encoding="utf-8"))
++    dados["itens"][0]["status"] = "enviando"
++    arquivo.write_text(json.dumps(dados), encoding="utf-8")
++    r = fila.resumo()
++    assert r["contagem"]["falhou"] == 1 and "Confira no WhatsApp" in r["itens"][0]["erro"]
++
++
++def test_limpar_historico_preserva_pendentes_e_enviados_de_hoje(amb):
++    prov = Prov()
++    fila = _fila(prov)
++    _tres(fila)
++    fila.cancelar_item(fila.resumo()["itens"][2]["id"])
++    fila.configurar(10, 1, False)
++    _rodar(fila)                                  # envia 1 (limite), deixa 1 pendente, 1 cancelado
++    assert fila.limpar_historico() == 1           # só o cancelado sai
++    r = fila.resumo()
++    assert r["contagem"]["enviado"] == 1 and r["contagem"]["pendente"] == 1
++
++
++def test_configurar_valida_limites(amb):
++    fila = _fila(Prov())
++    for args in ((5, 10), (601, 10), (30, 0), (30, 301), ("x", 10)):
++        with pytest.raises(ValueError):
++            fila.configurar(*args)
++    assert fila.configurar(45, 40)["intervalo_s"] == 45
++
++
++def test_iniciar_sem_pendentes_recusa_e_duas_vezes_nao_duplica(amb):
++    fila = _fila(Prov())
++    with pytest.raises(ValueError, match="pendentes"):
++        fila.iniciar()
++
++
++def test_arquivo_corrompido_da_erro_claro_e_nao_apaga(amb):
++    fila = _fila(Prov())
++    arquivo = paths.dados_ano_atual() / "WHATSAPP"
++    arquivo.mkdir()
++    (arquivo / "fila.json").write_text("{quebrado", encoding="utf-8")
++    with pytest.raises(ValueError, match="Fila do WhatsApp"):
++        fila.resumo()
++    assert (arquivo / "fila.json").read_text(encoding="utf-8") == "{quebrado"
++
++
++# ───────────── modelos ─────────────
++
++def test_modelos_prontos_criar_ajustar_excluir(amb):
++    assert [m["id"] for m in modelos.listar()] == ["livre", "chamada_matricula"]
++    novo = modelos.salvar("Lembrete", "Olá, $RESPONSAVEL! $ALUNO.")
++    assert novo["id"] == "lembrete" and not novo["padrao"]
++    with pytest.raises(ValueError, match="desconhecido"):
++        modelos.salvar("Ruim", "Oi $NADA")
++    with pytest.raises(ValueError, match="Já existe"):
++        modelos.salvar("lembrete", "x")
++    ajustado = modelos.salvar("Chamada", "Texto novo", "chamada_matricula")
++    assert ajustado["personalizado"] and modelos.excluir("chamada_matricula") == "restaurado"
++    assert modelos.excluir("lembrete") == "excluido"
++    with pytest.raises(ValueError, match="pronto"):
++        modelos.excluir("livre")
++
++
++def test_renderizar_deixa_marcador_sem_valor_a_vista():
++    assert modelos.renderizar("Oi $ALUNO $TURMA", {"ALUNO": "Ana"}) == "Oi Ana $TURMA"
++
++
++# ───────────── rotas ─────────────
++
++@pytest.fixture()
++def cli(amb, monkeypatch):
++    prov = Prov(nome="simulado")
++    monkeypatch.setattr(f, "_instancia", f.FilaWhatsApp(provedor=lambda: prov))
++    from src.servicos.whatsapp import gerenciador as g
++    from src.servicos.whatsapp.gerenciador import GerenciadorWhatsApp
++    monkeypatch.setattr(g, "_instancia", GerenciadorWhatsApp(prov))
++    return create_app().test_client()
++
++
++def test_rotas_fluxo_basico(cli):
++    r = cli.post("/web/api/whatsapp/fila/itens", json={"itens": [{"numero": N1, "nome": "Ana", "texto": "Oi"}]})
++    assert r.status_code == 200 and r.get_json()["resultado"]["adicionados"] == 1 and r.get_json()["contagem"]["pendente"] == 1
++    assert cli.post("/web/api/whatsapp/fila/itens", json={"itens": []}).status_code == 400
++    assert cli.post("/web/api/whatsapp/fila/config", json={"intervalo_s": 5, "limite_diario": 10}).status_code == 400
++    assert cli.post("/web/api/whatsapp/fila/config", json={"intervalo_s": 20, "limite_diario": 10}).get_json()["config"]["intervalo_s"] == 20
++    r = cli.post("/web/api/whatsapp/fila/iniciar", json={})                      # simulado: não exige confirmação
++    assert r.status_code == 200
++    f.obter_fila().esperar_fim()
++    assert cli.get("/web/api/whatsapp/fila").get_json()["contagem"]["simulado"] == 1
++    assert "numero" in cli.get("/web/api/whatsapp/fila").get_json()["itens"][0]
++
++
++def test_rota_iniciar_real_exige_confirmacao(cli, monkeypatch):
++    from src.servicos.whatsapp import gerenciador as g
++    from src.servicos.whatsapp.gerenciador import GerenciadorWhatsApp
++    prov = Prov(nome="blake")
++    monkeypatch.setattr(g, "_instancia", GerenciadorWhatsApp(prov))
++    monkeypatch.setattr(f, "_instancia", f.FilaWhatsApp(provedor=lambda: prov))
++    cli.post("/web/api/whatsapp/fila/itens", json={"itens": [{"numero": N1, "nome": "Ana", "texto": "Oi"}]})
++    r = cli.post("/web/api/whatsapp/fila/iniciar", json={})
++    assert r.status_code == 400 and r.get_json()["codigo_erro"] == "falta_confirmacao" and prov.enviados == []
++
++
++def test_rotas_cancelar_repetir_modelos(cli):
++    cli.post("/web/api/whatsapp/fila/itens", json={"itens": [{"numero": N1, "nome": "Ana", "texto": "Oi"}]})
++    id_ = cli.get("/web/api/whatsapp/fila").get_json()["itens"][0]["id"]
++    assert cli.post(f"/web/api/whatsapp/fila/itens/{id_}/cancelar").get_json()["contagem"]["cancelado"] == 1
++    assert cli.post(f"/web/api/whatsapp/fila/itens/{id_}/repetir").get_json()["contagem"]["pendente"] == 1
++    assert cli.post(f"/web/api/whatsapp/fila/itens/{id_}/apagar").status_code == 404
++    assert cli.post(f"/web/api/whatsapp/fila/itens/inexistente/cancelar").status_code == 400
++    m = cli.post("/web/api/whatsapp/fila/modelos", json={"nome": "Meu", "texto": "Oi $ALUNO"}).get_json()
++    assert m["modelo"]["id"] == "meu" and "ALUNO" in m["marcadores"]
++    assert cli.delete("/web/api/whatsapp/fila/modelos/meu").get_json()["acao"] == "excluido"
++    assert cli.post("/web/api/whatsapp/fila/modelos", json={"nome": "X", "texto": "$ZZ"}).status_code == 400
++
++
++def test_da_prematricula_enfileira_quem_tem_telefone(cli, amb):
++    (paths.dados_ano_atual() / "pre_matricula.json").write_text(json.dumps({
++        "turmas_intencao": {"Infantil IV": [
++            {"cpf": "111", "nome": "ANA LIMA", "pos": 1, "situacao": ""},
++            {"cpf": "112", "nome": "BETO LIMA", "pos": 2, "situacao": ""}]},
++        "cadastros": {"111": {"nome_responsavel": "MARIA", "telefone": N1}, "112": {"nome_responsavel": "JOAO"}}}), encoding="utf-8")
++    lista = cli.get("/web/api/whatsapp/fila/prematricula").get_json()["alunos"]
++    assert {a["nome"]: a["tem_telefone"] for a in lista} == {"ANA LIMA": True, "BETO LIMA": False}
++    r = cli.post("/web/api/whatsapp/fila/da-prematricula", json={"ids": ["111", "112"], "modelo_id": "chamada_matricula"})
++    d = r.get_json()
++    assert r.status_code == 200 and d["resultado"]["adicionados"] == 1 and d["resultado"]["sem_telefone"] == ["BETO LIMA"]
++    assert "MARIA" in f.obter_fila()._ler()["itens"][0]["texto"] and "ANA LIMA" in f.obter_fila()._ler()["itens"][0]["texto"]
++    assert cli.post("/web/api/whatsapp/fila/da-prematricula", json={"ids": []}).status_code == 400
++
++
++def test_modo_consulta_bloqueia_escrita_da_fila(cli, monkeypatch):
++    monkeypatch.setattr(paths, "somente_consulta", lambda: True)
++    assert cli.post("/web/api/whatsapp/fila/iniciar", json={}).status_code == 403
++    assert cli.get("/web/api/whatsapp/fila").status_code == 200

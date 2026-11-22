@@ -23,7 +23,7 @@ Quase tudo foi testado só com navegador ou dados simulados.
 - [ ] `avisos`: reconhecer e-mail de escola escrito de forma disfarçada e mostrar "sem e-mail" na tela; responsável sem e-mail hoje só vai para o log.
 - [ ] `avisos`: liberar o envio real (confirmação com prévia, intervalo e limite por lote, envio em segundo plano com pausa, registro de quem recebeu/falhou) e outros canais (WhatsApp, SERE).
 - [ ] Preencher os três `src/web/templates/partials/help/*.html` (hoje vazios): textos de ajuda para os usuários (planejado).
-- [ ] **7b** WhatsApp: fila de envio com limite diário, pausa, histórico e modelos.
+- [x] **7b** WhatsApp: fila de envio com limite diário, pausa, histórico e modelos (2026-11-22; falta validar com WhatsApp real).
 - [ ] **3b** Backup automático ao fim das coletas.
 - [ ] Decidir se os termos de ciência pulam quem tem `na_escola = false`.
 - [ ] Transferidos (explicados em linguagem simples no fim do fluxo dos transferidos, mais abaixo): (a) aluno que sai, volta e sai de novo no mesmo ano não ganha documentos novos na 2ª saída; (b) a tabela da tela Transferidos mostra só quem está no processo, não o total da escola; (c) falta tela para o mapeamento de turmas do QR antigo.
@@ -82,7 +82,7 @@ Quase tudo foi testado só com navegador ou dados simulados.
 - [x] **7. Teste do WhatsApp** — `src/servicos/whatsapp/` (ver "Como executar"). Provedor **simulado por padrão**; gateway HTTP (formato wwebjs-api) só com configuração; envio real exige três travas.
   - [!] O gateway HTTP foi testado só com servidor falso. Gateways baseados em whatsapp-web.js são não oficiais (risco de banimento do número); a alternativa oficial é a WhatsApp Business Cloud API.
   - [x] 7a. Tela **WhatsApp** (estado, QR Code, teste de envio, webhook) e passo do wizard — dois modos reais: **sem Docker** (`whatsplay`, Playwright; recomendado no Windows) e gateway Docker `blakegt/whatsapp-web-api-rest` (`blake`, `docker/whatsapp/`). Ver `docs/WHATSAPP.md`. Testado com whatsplay+Chromium reais contra um WhatsApp Web de mentira e com o gateway real **sem WhatsApp**; falta o primeiro pareamento/envio com número real (e testar no Windows).
-  - [ ] 7b. Fila de envio com intervalo e limite diário, pausa/cancelamento, histórico e modelos de mensagem (ganchos prontos: `enviar_midia`, `eventos.registrar_tratador`).
+  - [x] 7b. Fila de envio com intervalo e limite diário, pausa/cancelamento, histórico e modelos de mensagem (ganchos prontos: `enviar_midia`, `eventos.registrar_tratador`).
   - [!] whatsplay: biblioteca de 1 mantenedor que depende do HTML do WhatsApp Web (versão fixada; revisar o código a cada atualização).
   - [!] Docker: a imagem usa `baileys 7.0.0-rc.9` (depreciado por falha de falsificação de mensagens recebidas): não automatizar decisões irreversíveis a partir de mensagens recebidas.
 

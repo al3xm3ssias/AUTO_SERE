@@ -2074,6 +2074,22 @@ function campoHTML(campo) {
         <div class="campo-ajuda" id="modelo-acoes-msg">Escolha um tipo acima para carregar o assunto e a mensagem; edite à vontade e salve como modelo para reaproveitar.</div>
       </div>`;
   }
+  if (campo.tipo === "enviados_registro") {
+    return `
+      <div class="field"${cond} id="${campo.id}">
+        <label>${campo.label}</label>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" class="btn-sm" id="${campo.id}-ver">Ver quem já recebeu</button>
+          <button type="button" class="btn-sm" id="${campo.id}-atualizar" style="display:none">Atualizar</button>
+        </div>
+        <div id="${campo.id}-painel" style="display:none; margin-top:8px;">
+          <input type="text" id="${campo.id}-busca" placeholder="Pesquisar por nome, e-mail, aluno ou assunto…" autocomplete="off">
+          <div class="campo-ajuda" id="${campo.id}-resumo"></div>
+          <div class="checklist" id="${campo.id}-lista" style="margin-top:8px; max-height:280px; overflow:auto;"></div>
+        </div>
+        ${campo.descricao ? `<div class="campo-ajuda">${campo.descricao}</div>` : ""}
+      </div>`;
+  }
   if (campo.tipo === "pasta") {
     return `
       <div class="field">
@@ -2600,8 +2616,69 @@ async function excluirModeloDeMensagem() {
   }
 }
 
+const _ROTULO_PUBLICO_ENVIO = { escolas: "escola de origem", pais: "responsável", destino: "escola de destino" };
+
+/** "Quem já recebeu": mostra o registro de envios (só leitura), com busca. Sem o campo na tela, não faz nada. */
+function inicializarCampoEnviados() {
+  const raiz = document.getElementById("campo-enviados");
+  if (!raiz) return;
+  const painel = document.getElementById("campo-enviados-painel");
+  const lista = document.getElementById("campo-enviados-lista");
+  const resumo = document.getElementById("campo-enviados-resumo");
+  const busca = document.getElementById("campo-enviados-busca");
+  const btnVer = document.getElementById("campo-enviados-ver");
+  const btnAtualizar = document.getElementById("campo-enviados-atualizar");
+  let envios = [];
+  let total = 0;
+
+  const fmtData = (iso) => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? iso : d.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  };
+  const desenhar = () => {
+    const q = _semAcentoJS(busca.value.trim());
+    const vistos = !q ? envios : envios.filter((e) =>
+      _semAcentoJS([e.nome, e.para, e.aluno, e.assunto, e.cgm].join(" ")).includes(q));
+    resumo.textContent = total === 0 ? "Nenhum e-mail foi enviado de verdade ainda."
+      : `${vistos.length} de ${total} envio(s)${q ? " com a busca" : ""}.`;
+    lista.innerHTML = vistos.map((e) => `
+      <div class="checklist-item" style="display:block">
+        <strong>${_escHtml(e.nome || e.para)}</strong> &lt;${_escHtml(e.para)}&gt;
+        <div class="campo-ajuda" style="margin:0">
+          ${_escHtml(fmtData(e.enviado_em))}${e.publico ? ` · ${_escHtml(_ROTULO_PUBLICO_ENVIO[e.publico] || e.publico)}` : ""}
+          ${e.aluno ? ` · aluno ${_escHtml(e.aluno)}` : ""}${e.cgm ? ` (CGM ${_escHtml(e.cgm)})` : ""}
+          · ${_escHtml(e.assunto)}${e.anexos.length ? ` · ${e.anexos.length} anexo(s)` : ""}
+        </div>
+      </div>`).join("");
+  };
+  const carregar = async () => {
+    resumo.textContent = "Carregando…";
+    try {
+      const r = await apiGet("/avisos/enviados");
+      envios = r.envios || [];
+      total = r.total || 0;
+      desenhar();
+      if (r.aviso) resumo.textContent = r.aviso;
+    } catch (e) {
+      envios = [];
+      lista.innerHTML = "";
+      resumo.textContent = "Não foi possível ler o registro de envios.";
+    }
+  };
+  btnVer.addEventListener("click", () => {
+    const abrir = painel.style.display === "none";
+    painel.style.display = abrir ? "" : "none";
+    btnAtualizar.style.display = abrir ? "" : "none";
+    btnVer.textContent = abrir ? "Esconder" : "Ver quem já recebeu";
+    if (abrir) carregar();
+  });
+  btnAtualizar.addEventListener("click", carregar);
+  busca.addEventListener("input", desenhar);
+}
+
 /** Liga o que é só da tela "Mandar avisos" (lista de unidades, tipo de mensagem). Sem esses campos, não faz nada. */
 function inicializarCamposAvisos() {
+  inicializarCampoEnviados();
   inicializarCampoUnidades();
   inicializarCampoAlunos();
   document.getElementById("campo-tipo-mensagem")?.addEventListener("change", aplicarModeloEscolhido);

@@ -953,6 +953,29 @@ def carregar_enviados() -> dict:
     return dict(_carregar_dict(_arquivo_enviados(), "Registro de envios").get("envios") or {})
 
 
+def listar_enviados() -> dict:
+    """
+    O que já saiu de verdade (AVISOS/enviados.json), do mais recente para o mais antigo, para a tela "Quem já recebeu".
+    Só lê: nada aqui altera ou apaga o registro. Devolve {"total", "envios": [{"para","nome","aluno","cgm","assunto",
+    "enviado_em","publico","anexos"}], "por_publico": {publico: n}}. Registros gravados antes de o público ser guardado
+    ficam com publico "" (só o de escola de destino se reconhece, por ter CGM + data da saída).
+    """
+    envios = []
+    for chave, v in carregar_enviados().items():
+        if not isinstance(v, dict):
+            continue
+        publico = str(v.get("publico") or ("destino" if v.get("data_saida") and v.get("cgm") else ""))
+        envios.append({"para": str(v.get("para") or ""), "nome": str(v.get("nome") or ""), "aluno": str(v.get("aluno") or ""),
+                       "cgm": str(v.get("cgm") or ""), "assunto": str(v.get("assunto") or ""),
+                       "enviado_em": str(v.get("enviado_em") or ""), "publico": publico,
+                       "anexos": [str(a) for a in (v.get("anexos") or [])]})
+    envios.sort(key=lambda e: e["enviado_em"], reverse=True)
+    por_publico: dict[str, int] = {}
+    for e in envios:
+        por_publico[e["publico"]] = por_publico.get(e["publico"], 0) + 1
+    return {"total": len(envios), "envios": envios, "por_publico": por_publico}
+
+
 def _esperar(segundos: float) -> None:
     """Pausa entre e-mails, conferindo o botão Cancelar a cada segundo."""
     fim = time.monotonic() + segundos
@@ -1003,7 +1026,8 @@ def _enviar_real(p: dict, mensagens: list[dict], base_registro: dict) -> dict:
             if ok:
                 seguidas = 0
                 agora = datetime.now().isoformat(timespec="seconds")
-                novo = {"para": m["para"], "nome": m["nome"], "assunto": m["assunto"], "enviado_em": agora}
+                novo = {"para": m["para"], "nome": m["nome"], "assunto": m["assunto"], "enviado_em": agora,
+                        "publico": p["publico"]}
                 if m.get("aluno"):
                     novo["aluno"] = m["aluno"]
                 if m.get("cgm"):

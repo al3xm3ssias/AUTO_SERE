@@ -444,7 +444,7 @@ AUTOMACOES: dict[str, dict] = {
         "resultado": ["No modo **Simular**, lista quem receberia, quem fica de fora (e por quê), mostra a prévia e guarda o registro em `AVISOS/`, sem enviar nada.",
                       "No modo **Teste**, envia UM e-mail de verdade, só para o e-mail de teste (para escolas, a escola fictícia ESCOLA MUNICIPAL TESTE DA SILVA).",
                       "No modo **Enviar de verdade**, envia um por um, com pausa entre eles e no máximo o limite escolhido por execução; grava cada envio em "
-                      "`AVISOS/enviados.json` e o registro da execução (enviados, falhas, os que faltam)."],
+                      "`AVISOS/enviados.json` e o registro da execução (enviados, falhas, os que faltam). O botão **Ver quem já recebeu** mostra esse registro."],
         "cuidados": ["O envio real **não pode ser desfeito** e pede confirmação. Só funciona depois de **Simular** o mesmo texto e os mesmos destinatários (a simulação vale 24 horas).",
                      "Quem já recebeu o mesmo texto não recebe de novo: dá para cancelar e rodar outra vez, que continua de onde parou. Três falhas seguidas (senha errada, sem rede) param o envio.",
                      "Um texto com **$ALUNO, $CGM, $SERIE ou $TURMA** vira um e-mail por aluno que chega, para a escola de origem dele; sem esses marcadores, é um e-mail por unidade. "
