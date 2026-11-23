@@ -49,7 +49,7 @@ Homônimos — a data de nascimento e o nome da mãe é que separam um aluno do 
   • sobrou mais de um → NÃO escolhe: registra "ambiguo" com os candidatos. Informe a mãe ou a data para separar.
   • a tabela de resultados traz CGM, Nome, Nome da Mãe e Data Nasc.: são lidos pelo cabeçalho e já descartam quem tem outra
     data ou outra mãe; entre os que sobram, se só um tem o nome IGUAL ao pedido, é ele;
-  • se a tabela de resultados não mostra a data, abre o cadastro de cada candidato (até LIMITE_VERIFICAR) e confere lá;
+  • se a tabela de resultados não mostra a data, abre o cadastro de cada candidato da tabela (todos os que aparecem na página, sem limite) e confere lá;
   • a busca começa só com o NOME COMPLETO; se não achar o aluno OU se achar homônimos que a tabela/cadastro não separam
     (ambíguo), repete com o nome completo + a DATA DE NASCIMENTO no formulário (quando a data foi informada) e, depois,
     com o nome encurtado (tirando uma palavra do fim de cada vez até as duas primeiras: "João Maria dos Santos" →
@@ -80,7 +80,6 @@ from src.comum import navegador as _navegador
 
 ARQUIVO_PRE_ATUAL = "pre_matricula.json"      # alvo "atual" da coleta (ano vigente); o do próximo ano é previsao_alunos_<ano+1>.json
 NOME_ARQUIVO = "buscas_base.json"
-LIMITE_VERIFICAR = 5                      # candidatos a conferir abrindo o cadastro
 CAMPOS_REGISTRO = ("ano", "municipio", "escola", "curso", "serie", "resultado")   # colunas da tabela de histórico do SERE
 
 # Nomes tentados no formulário da Base ABC (id ou name). Ajustar aqui se o SERE usar outros.
@@ -935,7 +934,7 @@ async def _avaliar_nome(nav, consulta: Consulta, pesquisa: dict) -> Resultado:
                          parecidos=parecidos + [_parecido_do_cadastro(cad)])
 
     confirmados, rejeitados = [], []
-    for c in a_conferir[:LIMITE_VERIFICAR]:
+    for c in a_conferir:
         cad = await _abrir_e_ler(nav, pesquisa, c)
         await nav.fechar()
         (confirmados if cadastro_confere(consulta, cad) else rejeitados).append((c, cad))
@@ -967,8 +966,7 @@ async def _avaliar_nome(nav, consulta: Consulta, pesquisa: dict) -> Resultado:
         faltam = f"informe {' e '.join(falta)} para separá-los" if falta else "têm o mesmo nome, data de nascimento e mãe"
         return Resultado("ambiguo", motivo=f"{len(confirmados)} alunos servem para o pedido: {faltam}",
                          parecidos=[_parecido_do_cadastro(cad) for _, cad in confirmados])
-    aviso = f" (só os {LIMITE_VERIFICAR} primeiros foram conferidos)" if len(a_conferir) > LIMITE_VERIFICAR else ""
-    return Resultado("nao_encontrado", motivo=f"há alunos com esse nome, mas nenhum com essa data de nascimento e essa mãe{aviso}",
+    return Resultado("nao_encontrado", motivo=f"há alunos com esse nome, mas nenhum com essa data de nascimento e essa mãe",
                      parecidos=parecidos)
 
 

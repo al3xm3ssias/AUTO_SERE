@@ -9,7 +9,7 @@ Transferidos (emitir/assinar/baixar/enviar com aluno real; QR com scans reais; `
 BUG-REM-001) · Tela Alunos com dados reais.
 
 ## Funcionalidades
-`avisos` (público escola de origem e responsáveis de quem sai; envio real; outros canais) · **WhatsApp 7b (fila)** ·
+`avisos` (escola de origem e envio real já feitos; falta testar com Gmail real; responsáveis de quem sai descartado) · **WhatsApp 7b (fila)**, falta validar com WhatsApp real ·
 backup automático após coletas (3b) · Funcionários completo retomar de onde parou · transferido duas vezes no ano ·
 painel de transferidos · decodificar QR dos pareceres.
 

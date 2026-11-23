@@ -312,6 +312,15 @@ def test_tabela_sem_data_abre_o_cadastro_para_conferir(amb):
     assert _lido()[0]["cgm"] == "1025059227" and nav.fechados >= 2                  # abriu os candidatos para conferir e depois o escolhido
 
 
+def test_confere_todos_os_resultados_da_pagina_sem_limite(amb):
+    """Nome comum: a tabela traz 8 homônimos, sem data nem mãe. O aluno certo é o 8º e tem de ser achado (nada de olhar só os primeiros)."""
+    base = [{"cgm": f"20000000{i}", "nome": "JOSE DA SILVA SANTOS", "nasc": D(2015, 1, i + 1), "mae": f"MAE {i}", "historico": HIST}
+            for i in range(8)]
+    nav = NavFalso(base, mostra_data=False)
+    _rodar(nav, "Jose da Silva Santos 08/01/2015 mãe: Mae 7")
+    assert _lido()[0]["situacao"] == "encontrado" and _lido()[0]["cgm"] == "200000007"
+
+
 def test_busca_por_cgm_como_no_script_antigo(amb):
     resumo, _ = _rodar(NavFalso(BASE), "1025059300")
     assert len(resumo.encontrados) == 1 and _lido()[0]["nome"] == "MARIA SILVA LIMA" and _lido()[0]["pedido"]["cgm"] == "1025059300"
