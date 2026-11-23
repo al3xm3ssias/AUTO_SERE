@@ -2,7 +2,7 @@
 
 Lista curta do que ainda falta. O detalhe e o histórico estão em [`PROXIMAS_ETAPAS.md`](PROXIMAS_ETAPAS.md) (os números, como 3b e 11q, são os mesmos) e os bugs em [`BUGS_CONHECIDOS.md`](BUGS_CONHECIDOS.md).
 
-Atualizado em 2026-11-20 (destino dos transferidos e aviso à escola de destino; ID da matrícula em Transferidos, Base ABC e pré-matrícula; o resto segue como em 18/11). Legenda: `[ ]` pendente · `[!]` depende de ambiente real ou de decisão · `[x]` decidido/feito.
+Atualizado em 2026-11-23 (nova seção 2c: segurança dos dados, com exportação de credenciais criptografada, criptografia dos dados salvos e tela de login; decisão sobre a cópia da `chave_qr.key`). Antes, em 2026-11-20 (destino dos transferidos e aviso à escola de destino; ID da matrícula em Transferidos, Base ABC e pré-matrícula; o resto segue como em 18/11). Legenda: `[ ]` pendente · `[!]` depende de ambiente real ou de decisão · `[x]` decidido/feito.
 
 ---
 
@@ -94,7 +94,7 @@ Uso real, definido em 2026-11-02 e **revisado em 2026-11-14**: comunicar **só q
 - [x] **QR com o ano letivo e criptografado** (2026-11-07): `AUTOSERE|PF2|…` leva ano, chamada, nome, turma e CGM (AES-GCM, chave em `credenciais/chave_qr.key`). O ano do QR é conferido com o ano letivo em uso
 - [x] **Parecer para imprimir em PDF** (2026-11-07): `parecer_fund` gera PDF em `PARECERES/_PARA_IMPRIMIR/<turma>/` (LibreOffice); Word e "ambos" continuam como opção
 - [!] **Validar no computador da escola**: LibreOffice no Windows gerando o PDF com o modelo real; imprimir, digitalizar e ler o QR criptografado de verdade (o QR tem mais módulos: se a leitura falhar com o scan, aumentar `LADO_QR_SEGURO_PX` em `parecer_fund.py`)
-- [!] **Guardar cópia de `credenciais/chave_qr.key`** (sem ela os QR já impressos não abrem). Decidir onde fica o backup da chave
+- [!] **Guardar cópia de `credenciais/chave_qr.key`** (sem ela os QR já impressos não abrem). **Em 2026-11-23** o usuário decidiu guardar a cópia em `dados/<ano>/credenciais/` e, no mesmo dia, pediu a **exportação de credenciais criptografada** (seção 2c, item 2c-1), que passa a ser o backup da chave levado para fora da máquina. Falta confirmar se a cópia em `dados/<ano>/credenciais/` continua valendo além da exportação. Pontos levantados: fica no mesmo disco (não protege contra perda do disco); a chave é um segredo (quem a tem lê nome, turma e CGM de qualquer QR impresso), então essa pasta não pode ir para backups e exportações de dados; a chave é **única e não é por ano**, então cópias por ano podem divergir se ela for trocada
 
 ### Consulta na Base ABC (2026-11-08)
 Adaptação do script antigo `consulta_transferidos_ano_anterior.py`: automação `base_abc` (menu → Consulta na Base ABC), em `src/automacao/consulta_base_abc.py`. Busca por **nome + data de nascimento + nome da mãe** (ou CGM) e registra em `dados/<ano>/buscas_base.json`: data da busca, nome, possui CGM, CGM, data de nascimento, nome da mãe e `escolas` numeradas (ano, escola, série), mais situação, observação, parecidos achados e o pedido digitado. Aluno que não está na base **não é erro**: fica registrado. Só lê do SERE.
@@ -167,6 +167,41 @@ Adaptação do script antigo `consulta_transferidos_ano_anterior.py`: automaçã
 
 ---
 
+## 2c. Segurança dos dados (pedido do usuário, 2026-11-23)
+
+**Objetivo.** Se o PC for invadido ou roubado, ninguém consegue levar os dados de alunos, funcionários e as credenciais. Registrado em 2026-11-23; **nada foi implementado ainda**. Para implementar é preciso o código do projeto (`src/` e `tests/`).
+
+**Limites combinados na conversa (valem para os três itens):**
+- O login protege contra quem abre a interface web, **não** contra quem tem acesso ao disco ou ao Windows. Para valer contra PC invadido, a senha do login tem de ser também a chave que destrava os dados (item 2c-3 ligado ao 2c-2).
+- Com o sistema aberto e destravado, a chave está na memória: se o PC for invadido nessa hora, nada disso ajuda. Por isso o bloqueio por inatividade.
+- Senha ou frase-senha esquecida **não tem recuperação**. A tela precisa avisar.
+- Os dados mais sensíveis incluem as **pastas dos alunos no Samba** (PDFs de guias, históricos, pareceres e documentos). Cifrar só os JSONs não cobre isso.
+
+### 2c-1. Exportação de credenciais criptografada (primeiro passo, pequeno e independente)
+- [ ] Modo **Exportar credenciais**: empacota `credenciais/` (inclui `chave_qr.key`, tokens do Google e logins) e `config_usuario.json` num único arquivo (ex.: `.autosere-cred`), cifrado com **AES-256-GCM**; a chave vem de uma **frase-senha** digitada pelo usuário, derivada com scrypt ou Argon2. A frase nunca é guardada
+- [ ] Modo **Importar credenciais** (restaurar), com verificação que confere se o arquivo abre e se o hash do conteúdo bate, antes de confiar nele
+- [ ] A exportação **não** entra no backup normal dos JSONs; o arquivo é levado para fora da máquina (pendrive guardado, pasta de rede ou Samba da .222)
+- [ ] Testes: exportar e importar de volta idêntico, frase errada recusada, arquivo adulterado recusado
+- [ ] Conferir se `credenciais/` hoje guarda senhas em texto puro (isso entra no item 2c-2)
+
+### 2c-2. Criptografar os dados salvos (médio a grande, em fases)
+- [ ] **Camada única de armazenamento** (`ler_json` e `gravar_json` cifrados) que mantém a gravação atômica e as cópias `.antes`; hoje muitos módulos leem e gravam JSON direto, e quase todos os testes montam JSON em pasta temporária
+- [ ] Migrar módulo por módulo, começando por `credenciais/` e `chave_qr.key`, depois os JSONs mais sensíveis: `pre_matricula.json` e `alunos_completo.json` (CPF e dados dos responsáveis), funcionários e vínculos
+- [ ] Impacto a avaliar: backup (`backup.py` hoje copia JSONs por ano letivo), troca e modo "somente consulta" do ano letivo, testes e telas que leem direto dos JSONs
+- [ ] **BitLocker** (disco inteiro) no PC da escola e no servidor, em paralelo: cobre JSONs, PDFs, logs e backups sem mexer no código. É PC de domínio: combinar com o setor de TI da prefeitura
+- [!] **Decidir: automações agendadas (rotina diária, coletas) rodam sem ninguém logado.** Opção A: chave protegida pelo Windows (**DPAPI**), ligada ao usuário (protege contra roubo do disco, não contra quem já está logado como o usuário). Opção B: a rotina só roda com o sistema destravado pelo usuário. **Sem decisão**
+
+### 2c-3. Tela de login com senha criptografada (médio)
+- [ ] Senha guardada só como **hash** (Argon2 ou scrypt, com sal); sessão assinada; **bloqueio após tentativas erradas**; bloqueio por inatividade
+- [ ] Servidor escutando só em `127.0.0.1`, a menos que haja necessidade de acessar de outra máquina da rede (hoje o programa roda na porta 8000: conferir)
+- [ ] Ligar a senha à chave que destrava os dados (2c-2); sem isso o login só protege a interface
+- [ ] Proteção contra CSRF nas rotas de escrita; trocar e redefinir a senha (a redefinição depende da frase de recuperação, ver 2c-1)
+- [ ] Ajuda F1 e `tests/test_ajuda.py` atualizados para a tela de login e o bloqueio
+
+**Ordem proposta (2026-11-23):** 2c-1 → camada de armazenamento e cifra de `credenciais/` e da chave do QR → 2c-3 ligado à chave de dados → migrar os JSONs sensíveis um por um com testes → BitLocker em paralelo. O 2c-1 não depende dos demais e pode ser feito antes de qualquer outro item desta seção.
+
+---
+
 ## 3. Limpeza e robustez
 
 - [ ] **11q**: a trava contra execução simultânea é por processo; criar arquivo de lock em `locks/`
@@ -210,3 +245,4 @@ Adaptação do script antigo `consulta_transferidos_ano_anterior.py`: automaçã
 5. Testar o `avisos` com Gmail de verdade (um aluno só) e conferir o vínculo da Base ABC dos alunos que chegam
 6. Lock de execução (11q)
 7. ~~Só então a fila do WhatsApp~~ (feita em 2026-11-22, mas **ainda sem teste com WhatsApp real**: faça os itens 1 a 5 antes de usar com pais de verdade)
+8. **Segurança dos dados (seção 2c, 2026-11-23):** o item 2c-1 (exportação de credenciais criptografada) pode vir já, porque é independente e protege a `chave_qr.key`; o resto (2c-2 e 2c-3) só depois de decidir DPAPI ou rotina destravada e de estabilizar a validação real (itens 1 a 5)
