@@ -834,6 +834,28 @@ CONFIGURACOES: dict[str, dict] = {
         "cuidados": ["O script do RCO precisa do Chrome e ignora esta escolha."],
     },
 
+    "backup_automatico": {
+        "titulo": "Painel: Backup automático", "icone": "database",
+        "resumo": "Liga ou desliga o backup que o sistema faz sozinho ao fim das coletas de turmas, alunos e funcionários.",
+        "passos": [
+            "Marque **Fazer backup automático ao fim das coletas** para ligar, ou desmarque para desligar.",
+            "Clique em **Salvar**. Vale a partir da próxima coleta.",
+        ],
+        "elementos": [
+            E("Fazer backup automático", "Marcado = cada coleta termina com um backup dos dados do ano.", "#cfg-backup-auto-ligado"),
+            E("Situação", "Mostra se o backup automático está ligado de verdade e avisa se algo o está desligando por fora.", "#cfg-backup-auto-status"),
+            E("Salvar", "Grava a escolha.", "#cfg-backup-auto-salvar"),
+        ],
+        "dicas": [
+            "Ficam os 7 backups automáticos mais recentes; eles não empurram para fora os backups manuais.",
+            "Coletas seguidas (menos de 30 minutos) trocam o automático anterior pelo novo.",
+        ],
+        "cuidados": [
+            "Desligar não apaga os backups que já existem. O backup manual (Automações → Backup) continua funcionando.",
+            "Se a variável de ambiente AUTO_SERE_BACKUP_AUTO estiver em 0 no computador, ela desliga o backup acima desta escolha, e o painel avisa.",
+        ],
+    },
+
     "google_conta": {
         "titulo": "Painel: Conta Google da autorização", "icone": "lock",
         "resumo": "Define com qual conta, em qual navegador e em qual perfil abre o link de autorização do Google (planilhas e contatos).",

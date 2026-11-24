@@ -143,6 +143,9 @@ def _validar(nome, publico, assunto, mensagem) -> tuple[str, str, str, str]:
         raise ValueError("Escreva a mensagem do modelo.")
     if len(mensagem) > LIMITE_MENSAGEM:
         raise ValueError(f"A mensagem passa de {LIMITE_MENSAGEM} caracteres.")
+    if publico == "escolas" and not re.search(r"\$(?:ALUNO|CGM|SERIE|TURMA)\b", assunto + " " + mensagem):
+        raise ValueError("Modelo para escolas precisa de $ALUNO, $CGM, $SERIE ou $TURMA: o e-mail é sempre um por aluno, "
+                         "não existe aviso em massa para escolas.")
     return nome, publico, assunto, mensagem
 
 

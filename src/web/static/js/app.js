@@ -3495,6 +3495,14 @@ const DETALHE_CONFIG = {
     <div id="cfg-nav-opcoes" style="display:flex; flex-direction:column; gap:10px; margin-bottom:14px;">Carregando…</div>
     <div id="cfg-nav-status" style="font-family:var(--mono); font-size:.72rem; color:var(--txt3); margin-bottom:14px;"></div>
     <button class="btn-primary" id="cfg-nav-salvar">Salvar navegador</button>`,
+  backup_automatico: `
+    <h4 style="margin-bottom:14px; font-size:.9rem;">Backup automático</h4>
+    <p style="color:var(--txt3); font-size:.82rem; margin-bottom:12px;">Ao fim de cada coleta de <b>turmas</b>, <b>alunos</b> e <b>funcionários</b> (inclusive nas rotinas diárias), o sistema guarda uma cópia dos dados do ano. Ficam os <b>7 mais recentes</b> desse tipo, sem empurrar para fora os backups manuais. Desligar não apaga nada do que já existe, e o backup manual (Automações → Backup) continua funcionando.</p>
+    <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:.88rem; margin-bottom:14px;">
+      <input type="checkbox" id="cfg-backup-auto-ligado"> Fazer backup automático ao fim das coletas
+    </label>
+    <div id="cfg-backup-auto-status" style="font-family:var(--mono); font-size:.72rem; color:var(--txt3); margin-bottom:14px;">Carregando…</div>
+    <button class="btn-primary" id="cfg-backup-auto-salvar">Salvar</button>`,
   google_conta: `
     <h4 style="margin-bottom:14px; font-size:.9rem;">Conta Google da autorização</h4>
     <p style="color:var(--txt3); font-size:.82rem; margin-bottom:12px;">Quando o AUTO SERE precisa da sua autorização no Google (planilhas, contatos), ele abre um link de login. Aqui você escolhe <b>com qual conta</b> e <b>em qual navegador/perfil</b> esse link abre. No Chrome e no Edge, se algum perfil estiver logado na conta informada, o perfil certo é achado sozinho. Em qualquer caso, a janela de autorização tem o botão <b>Copiar link</b> para colar no navegador que você preferir.</p>
@@ -3618,6 +3626,9 @@ function initConfiguracoes() {
       }
       if (row.dataset.config === "navegador") {
         conectarFormNavegador();
+      }
+      if (row.dataset.config === "backup_automatico") {
+        conectarFormBackupAutomatico();
       }
       if (row.dataset.config === "google_conta") {
         conectarFormGoogleConta();
@@ -3789,6 +3800,40 @@ async function conectarFormNavegador() {
       desenhar(r);
       status.innerHTML = '<span style="color:var(--lime)">✓ ' + escaparHtml(r.mensagem || "Salvo") + "</span>";
       toast(r.mensagem || "Navegador salvo");
+    } catch (e) {
+      toast(e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
+async function conectarFormBackupAutomatico() {
+  const caixa = document.getElementById("cfg-backup-auto-ligado");
+  const status = document.getElementById("cfg-backup-auto-status");
+  const btn = document.getElementById("cfg-backup-auto-salvar");
+  if (!caixa || !status || !btn) return;
+  const mostrar = (d, mensagem) => {
+    caixa.checked = d.escolha !== false;
+    const aviso = d.pelo_ambiente
+      ? '<span style="color:var(--amber)">⚠ A variável AUTO_SERE_BACKUP_AUTO está desligando o backup automático neste computador, acima desta escolha.</span>'
+      : "";
+    const estado = d.ligado ? "Backup automático em vigor: <b>ligado</b>." : "Backup automático em vigor: <b>desligado</b>.";
+    status.innerHTML = [mensagem ? '<span style="color:var(--lime)">✓ ' + escaparHtml(mensagem) + "</span>" : "", estado, aviso]
+      .filter(Boolean).join("<br>");
+  };
+  try {
+    mostrar(await apiGet("/configuracoes/backup-automatico"));
+  } catch (e) {
+    status.textContent = "Não foi possível ler a configuração atual.";
+    return;
+  }
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      const r = await apiPost("/configuracoes/backup-automatico", { ligado: caixa.checked });
+      mostrar(r, r.mensagem);
+      toast(r.mensagem || "Salvo");
     } catch (e) {
       toast(e.message);
     } finally {

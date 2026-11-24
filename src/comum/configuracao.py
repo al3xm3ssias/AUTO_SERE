@@ -69,6 +69,7 @@ _PADRAO: dict[str, Any] = {
     "navegador_scripts": {},              # {chave_do_script: {"mostrar_janela": True/False}}; sem a chave = o padrão do script
     "google_sheets": None,                # {"mapa_abas"} (ver google_sheets_config); as planilhas ficam em planilhas_gerenciador
     "google_oauth": None,                 # {"conta","navegador","perfil","abrir"} — com qual conta/navegador/perfil abrir a autorização do Google (ver google_oauth_preferencias)
+    "backup_automatico": None,            # None = ligado (padrão); False = desligado; True = ligado — ver backup_automatico (backup após as coletas)
 }
 
 
@@ -577,6 +578,25 @@ def definir_mostrar_janela_script(chave: str, mostrar: bool | None) -> None:
         todos[chave] = {"mostrar_janela": bool(mostrar)}
     configuracao["navegador_scripts"] = todos
     _salvar_configuracao(configuracao)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Backup automático após as coletas (item 3b; botão em Configurações, 23/11/2026)
+# ─────────────────────────────────────────────────────────────────────────
+
+def backup_automatico() -> bool:
+    """True (padrão) = cada coleta de turmas, alunos e funcionários termina com um backup. Só False desliga."""
+    return carregar_configuracao().get("backup_automatico") is not False
+
+
+def definir_backup_automatico(ligado) -> bool:
+    """Liga ou desliga o backup automático. ValueError se não for verdadeiro/falso."""
+    if not isinstance(ligado, bool):
+        raise ValueError("Informe verdadeiro (ligar) ou falso (desligar).")
+    configuracao = carregar_configuracao()
+    configuracao["backup_automatico"] = ligado
+    _salvar_configuracao(configuracao)
+    return ligado
 
 
 # ─────────────────────────────────────────────────────────────────────────

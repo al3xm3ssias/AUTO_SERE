@@ -960,7 +960,7 @@ def _extras_avisos() -> list[dict]:
     so = lambda campo, valor: {"campo": campo, "valor": valor}
     marcadores = {
         "escolas": "Marcadores no assunto e na mensagem: " + ", ".join("$" + m for m in av.marcadores_validos("escolas"))
-                   + ". Com $ALUNO, $CGM, $SERIE ou $TURMA o e-mail vai para a escola de ORIGEM de cada aluno que chega.",
+                   + ". Obrigatório usar $ALUNO, $CGM, $SERIE ou $TURMA: o e-mail é sempre um por aluno que chega, para a escola de ORIGEM dele (não existe aviso em massa).",
         "pais": "Marcadores no assunto e na mensagem: " + ", ".join("$" + m for m in av.marcadores_validos("pais")),
         "destino": "Marcadores no assunto e na mensagem: " + ", ".join("$" + m for m in av.marcadores_validos("destino"))
                    + ". Um e-mail por aluno transferido, para a escola para onde ele foi; a guia, o histórico e o parecer seguem em ANEXO.",
@@ -1045,6 +1045,9 @@ def _previa_avisos(p: dict) -> str:
     unidades, fonte = p.get("unidades") or None, p.get("fonte") or "ano"
     texto_do_pedido = f"{p.get('assunto') or ''} {p.get('mensagem') or ''}"
     por_aluno = p["publico"] == "destino" or (p["publico"] == "escolas" and bool(av._marcadores_de_aluno(texto_do_pedido)))
+    if p["publico"] == "escolas" and not por_aluno:
+        return ("Para as escolas o e-mail é sempre um por aluno: use $ALUNO, $CGM, $SERIE ou $TURMA no texto "
+                "(não existe aviso em massa).")
     filtros = (p.get("tipo_escola") or "todas", p.get("filtro_nome") or "", p.get("situacao_pais") or "matriculados", unidades, fonte, por_aluno,
                p.get("alunos") or None)
     if av.teste_com_escola_ficticia(p["publico"], modo):
@@ -1054,7 +1057,7 @@ def _previa_avisos(p: dict) -> str:
             n = len(av.reunir_destinatarios(p["publico"], *filtros)["destinatarios"])
             texto += (f" (o comunicado real iria para {n} e-mail(s) "
                       + ("de escolas de destino, com os documentos em anexo" if p["publico"] == "destino"
-                         else "de escolas de origem" if por_aluno else "de escolas e CMEIs") + ")")
+                         else "de escolas de origem") + ")")
         except ValueError:
             pass                                # sem a lista real o teste funciona do mesmo jeito
         return texto + "."

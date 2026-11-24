@@ -285,3 +285,79 @@ def test_automaticos_tem_retencao_propria_e_nao_empurram_os_manuais(raiz, monkey
     assert motivos.count("manual") == 3                                          # os manuais ficaram, mesmo com 5 automáticos
     assert sum(m.startswith("automático") for m in motivos) == 2                 # e só os 2 automáticos mais recentes
     assert "automático (após a coleta de teste 4)" in motivos and "automático (após a coleta de teste 0)" not in motivos
+
+
+# ───────────────── liga/desliga na tela de Configurações (23/11/2026) ─────────────────
+
+@pytest.fixture()
+def cfg_tela(raiz, monkeypatch):
+    """A configuração do usuário fica na pasta temporária (a mesma que o backup lê)."""
+    from src.comum import configuracao
+    monkeypatch.setattr(configuracao, "CONFIG_DIR", raiz / "config")
+    monkeypatch.setattr(configuracao, "ARQUIVO_CONFIG", raiz / "config" / "config_usuario.json")
+    return configuracao
+
+
+def test_backup_automatico_vem_ligado_por_padrao(cfg_tela):
+    assert cfg_tela.backup_automatico() is True
+    assert backup.automatico_ligado() is True
+
+
+def test_desligar_na_tela_impede_o_backup_e_ligar_volta(cfg_tela):
+    cfg_tela.definir_backup_automatico(False)
+    assert cfg_tela.backup_automatico() is False and backup.automatico_ligado() is False
+    assert backup.backup_apos_coleta("turmas") is None
+    assert _motivos() == []
+    cfg_tela.definir_backup_automatico(True)
+    assert backup.backup_apos_coleta("turmas") is not None
+    assert len(_motivos()) == 1
+
+
+def test_desligar_na_tela_mantem_o_resto_da_configuracao(cfg_tela):
+    cfg_tela.definir_unidade_escolar("Escola X", "Rua 1", "84000000")
+    cfg_tela.definir_backup_automatico(False)
+    assert cfg_tela.carregar_configuracao()["unidade_escolar"]["nome"] == "Escola X"
+
+
+def test_valor_que_nao_e_verdadeiro_ou_falso_e_recusado(cfg_tela):
+    for ruim in (None, "sim", 1, "0"):
+        with pytest.raises(ValueError):
+            cfg_tela.definir_backup_automatico(ruim)
+    assert cfg_tela.backup_automatico() is True
+
+
+def test_variavel_de_ambiente_desliga_por_cima_da_tela(cfg_tela, monkeypatch):
+    cfg_tela.definir_backup_automatico(True)
+    monkeypatch.setenv("AUTO_SERE_BACKUP_AUTO", "0")
+    assert backup.desligado_pelo_ambiente() is True
+    assert backup.automatico_ligado() is False
+    assert backup.backup_apos_coleta("turmas") is None
+
+
+def test_config_ilegivel_nao_desliga_o_backup(cfg_tela, raiz):
+    (raiz / "config" / "config_usuario.json").write_text("{ isto não é json", encoding="utf-8")
+    assert backup.automatico_ligado() is True
+
+
+def test_restaurar_configuracao_antiga_nao_desfaz_a_escolha_do_backup_automatico(cfg_tela, raiz):
+    arquivo = backup.criar_backup("manual")                   # config do backup: sem a chave (= ligado)
+    cfg_tela.definir_backup_automatico(False)                 # depois o usuário desliga na tela
+    backup.restaurar_backup(arquivo, aplicar=True)            # repõe o config_usuario.json antigo
+    assert cfg_tela.backup_automatico() is False
+    assert backup.automatico_ligado() is False
+
+
+def test_rotas_do_backup_automatico(cfg_tela, raiz, monkeypatch):
+    from src.web.app import create_app
+    cli = create_app().test_client()
+    url = "/web/api/configuracoes/backup-automatico"
+    assert cli.get(url).get_json() == {"ligado": True, "escolha": True, "pelo_ambiente": False}
+    r = cli.post(url, json={"ligado": False})
+    assert r.status_code == 200 and r.get_json()["ligado"] is False and "desligado" in r.get_json()["mensagem"]
+    assert cli.get(url).get_json()["ligado"] is False
+    assert cli.post(url, json={"ligado": "talvez"}).status_code == 400
+    assert cli.post(url, json={}).status_code == 400
+    assert cli.get(url).get_json()["ligado"] is False          # recusa não mexe na escolha
+    monkeypatch.setenv("AUTO_SERE_BACKUP_AUTO", "0")
+    r = cli.post(url, json={"ligado": True}).get_json()
+    assert r["ligado"] is False and r["pelo_ambiente"] is True and "AUTO_SERE_BACKUP_AUTO" in r["mensagem"]

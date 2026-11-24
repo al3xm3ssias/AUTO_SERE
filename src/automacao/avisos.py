@@ -9,12 +9,12 @@ letivo quanto na previsão do próximo; envio real liberado, com prévia obrigat
 PÚBLICOS
   escolas   escolas municipais e CMEIs de escolas_completas.json (Coleta e-mails), exceto a própria escola.
             "Quais unidades": nada marcado = todas; ou grupos (@escolas, @cmeis) e/ou escolas pelo nome.
-            Dois jeitos de enviar, decididos pelo TEXTO:
-              - sem marcador de aluno: um e-mail por unidade (e por endereço dela);
-              - com $ALUNO, $CGM, $SERIE ou $TURMA: um e-mail POR ALUNO que chega, para a escola de ORIGEM dele (o vínculo
-                da Base ABC gravado em pre_matricula.json / previsao_alunos_<ano+1>.json). Só entra quem tem vínculo "ok"
-                com CGM e escola, cuja escola está na lista e tem e-mail (vai o primeiro). O resto fica numa lista de
-                "não recebem" (sem vínculo, a verificar, origem fora da lista, já na nossa escola, escola sem e-mail).
+            NÃO EXISTE aviso em massa para escolas (decisão do usuário, 23/11/2026). O texto PRECISA ter $ALUNO, $CGM,
+            $SERIE ou $TURMA, e vira um e-mail POR ALUNO que chega, para a escola de ORIGEM dele (o vínculo da Base ABC
+            gravado em pre_matricula.json / previsao_alunos_<ano+1>.json). Só entra quem tem vínculo "ok" com CGM e
+            escola, cuja escola está na lista e tem e-mail (vai o primeiro). O resto fica numa lista de "não recebem"
+            (sem vínculo, a verificar, origem fora da lista, já na nossa escola, escola sem e-mail). Texto sem esses
+            marcadores é recusado antes de qualquer envio, na simulação, no teste e no envio real.
   destino   escola de DESTINO dos alunos transferidos (2026-11-19): um e-mail por aluno que SAIU, para a escola para onde ele foi
             (vínculo da Base ABC gravado em transferidos.json, ou o destino preenchido à mão na tela de Transferidos),
             avisando que histórico, guia e parecer estão na pasta do aluno e seguem em ANEXO neste e-mail. Só entra quem tem
@@ -230,6 +230,9 @@ def destinatarios_escolas(tipo: str = "todas", filtro_nome: str = "", unidades=N
     {"destinatarios": [{nome, email, contexto}], "sem_email": [nomes], "excluidas": [nomes]}.
     Fora da lista: a própria escola, a que não tem e-mail válido (vai em `sem_email`) e e-mail repetido.
     `unidades`: o que foi marcado em "Quais unidades" (ver normalizar_unidades); vazio = todas.
+
+    SÓ LISTA as escolas com e-mail e filtros. Nenhum envio parte daqui: o aviso para escolas é sempre um e-mail por
+    aluno (ver destinatarios_alunos_origem) e `reunir_destinatarios` recusa o público "escolas" sem marcador de aluno.
     """
     propria = escola.nome()
     escolhidas = normalizar_unidades(unidades)
@@ -677,6 +680,12 @@ def _credenciais_email_ok() -> bool:
             and str(credenciais.EMAIL_SENHA_APP or "") not in ("", "senha_app_email"))
 
 
+MENSAGEM_SEM_MARCADOR_DE_ALUNO = (
+    "O e-mail para as escolas é sempre um por aluno: não existe aviso em massa. Use pelo menos um destes marcadores "
+    "no assunto ou na mensagem: $ALUNO, $CGM, $SERIE ou $TURMA."
+)
+
+
 def _marcadores_de_aluno(texto: str) -> set:
     return {m for m in _RE_MARCADOR.findall(texto or "") if m in MARCADORES_DE_ALUNO}
 
@@ -725,6 +734,8 @@ def validar_pedido(publico, canal, modo, assunto, mensagem, tipo_escola="todas",
     if "ESCOLA" in set(_RE_MARCADOR.findall(assunto)) | set(_RE_MARCADOR.findall(mensagem)) and not escola.nome():
         raise ValueError("O texto usa $ESCOLA, mas o nome da escola ainda não foi informado (Configurações → Dados da escola).")
     por_aluno = publico == "destino" or (publico == "escolas" and bool(_marcadores_de_aluno(assunto + " " + mensagem)))
+    if publico == "escolas" and not por_aluno:
+        raise ValueError(MENSAGEM_SEM_MARCADOR_DE_ALUNO)
     intervalo = _inteiro_entre(intervalo_s, INTERVALO_MIN_S, INTERVALO_MAX_S, INTERVALO_PADRAO_S, "Intervalo entre e-mails (segundos)")
     lote = _inteiro_entre(limite_lote, LOTE_MIN, LOTE_MAX, LOTE_PADRAO, "Máximo de e-mails por execução")
     email_teste = str(email_teste or "").strip().lower()
@@ -797,9 +808,8 @@ def reunir_destinatarios(publico: str, tipo_escola="todas", filtro_nome="", situ
             raise ValueError(_por_que_nao_ha_alunos(r))
         return r
     if publico == "escolas":
-        r = destinatarios_escolas(tipo_escola, filtro_nome, unidades)
-    else:
-        r = destinatarios_pais(situacao_pais, fonte, alunos)
+        raise ValueError(MENSAGEM_SEM_MARCADOR_DE_ALUNO)      # nunca um e-mail igual para todas as escolas
+    r = destinatarios_pais(situacao_pais, fonte, alunos)
     if not r["destinatarios"]:
         raise ValueError("Nenhum destinatário com e-mail válido para este público e estes filtros.")
     return r
@@ -819,6 +829,8 @@ def exemplo_da_mensagem(publico, assunto, mensagem, tipo_escola="todas", filtro_
         conferir_marcadores(assunto, publico, "Assunto")
         conferir_marcadores(mensagem, publico, "Mensagem")
         por_aluno = publico == "destino" or (publico == "escolas" and bool(_marcadores_de_aluno(assunto + " " + mensagem)))
+        if publico == "escolas" and not por_aluno:
+            raise ValueError(MENSAGEM_SEM_MARCADOR_DE_ALUNO)
     except ValueError as exc:
         return {"aviso": str(exc)}
     try:

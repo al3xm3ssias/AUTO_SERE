@@ -34,12 +34,13 @@ BACKUP AUTOMÁTICO (item 3b): ao fim de cada coleta (turmas, alunos, funcionári
 "automático (após a coleta de ...)". Ele nunca derruba a coleta (erro vira aviso) e tem retenção PRÓPRIA — os 7 mais
 recentes (AUTO_SERE_BACKUP_MANTER_AUTO) —, para as coletas diárias não empurrarem para fora os backups manuais e os de
 "antes de restaurar", que seguem com os 10 do limite normal. Coletas seguidas (menos de 30 min) substituem o backup
-automático anterior, que ficaria incompleto. AUTO_SERE_BACKUP_AUTO=0 desliga.
+automático anterior, que ficaria incompleto. Liga/desliga em Configurações → "Backup automático" (chave
+`backup_automatico` do config_usuario.json). A variável AUTO_SERE_BACKUP_AUTO=0, se existir, desliga por cima da tela.
 
 ANOS (24/10/2026): cada backup é de UM ano (o manifesto guarda `ano`) e a restauração repõe os dados na pasta
 desse ano — nunca por cima do ano em uso, se forem diferentes. Cópia de segurança antes de restaurar também é
 do ano que será sobrescrito. A retenção (10 mais recentes) vale por ano, para um backup de 2025 não ser
-apagado por backups novos de 2026. Restaurar a configuração não desfaz o ano letivo escolhido na tela.
+apagado por backups novos de 2026. Restaurar a configuração não desfaz o ano letivo nem o liga/desliga do backup automático escolhidos na tela.
 """
 from __future__ import annotations
 
@@ -355,6 +356,7 @@ def restaurar_backup(arquivo, aplicar: bool = False, so_dados: bool = False) -> 
         origens["dados_ano"] = paths.DADOS_DIR / ano_backup
     seguranca = None
     ano_letivo_anterior = _ler_ano_letivo_configurado()
+    backup_auto_anterior = _ler_backup_automatico_configurado()
     if aplicar:
         try:
             seguranca = criar_backup(motivo="antes_de_restaurar", ano=ano_backup if ano_backup != str(paths.ano_atual()) else None)
@@ -386,6 +388,7 @@ def restaurar_backup(arquivo, aplicar: bool = False, so_dados: bool = False) -> 
                 config_regravada = True
     if config_regravada:
         _regravar_ano_letivo(ano_letivo_anterior)
+        _regravar_backup_automatico(backup_auto_anterior)
     return {
         "aplicado": aplicar,
         "arquivos": len(gravados),
@@ -403,14 +406,55 @@ def _tamanho_legivel(n: int) -> str:
     return f"{n / 1024:.0f} KB" if n < 1024 * 1024 else f"{n / 1024 / 1024:.1f} MB"
 
 
+_VALORES_DESLIGADO = {"0", "nao", "não", "false", "off"}
+
+
+def desligado_pelo_ambiente() -> bool:
+    """AUTO_SERE_BACKUP_AUTO=0 (ou nao/false/off) desliga o backup automático e vale acima da escolha da tela."""
+    return str(os.environ.get("AUTO_SERE_BACKUP_AUTO", "1")).strip().lower() in _VALORES_DESLIGADO
+
+
+def _ler_backup_automatico_configurado() -> bool | None:
+    """Escolha gravada na tela (config_usuario.json): True/False, ou None se nunca foi escolhida ou o arquivo não abre."""
+    try:
+        dados = json.loads(_config_usuario().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    valor = dados.get("backup_automatico") if isinstance(dados, dict) else None
+    return valor if isinstance(valor, bool) else None
+
+
+def automatico_ligado() -> bool:
+    """Vale o ambiente (se desligou), depois a escolha da tela; sem nenhuma das duas, está ligado."""
+    if desligado_pelo_ambiente():
+        return False
+    return _ler_backup_automatico_configurado() is not False
+
+
+def _regravar_backup_automatico(valor: bool | None) -> None:
+    """Depois de restaurar a configuração de um backup antigo, devolve a escolha de backup automático que estava valendo."""
+    caminho = _config_usuario()
+    try:
+        dados = json.loads(caminho.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if not isinstance(dados, dict):
+        return
+    if valor is None:
+        dados.pop("backup_automatico", None)
+    else:
+        dados["backup_automatico"] = valor
+    caminho.write_text(json.dumps(dados, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def backup_apos_coleta(coleta: str, log=print) -> Path | None:
     """
     Backup automático ao fim de uma coleta bem-sucedida (`coleta`: \"turmas\", \"alunos\", \"funcionários\"...).
     NUNCA levanta erro: a coleta já terminou e seus dados estão salvos; se o backup falhar vira só um aviso.
-    Devolve o caminho do zip, ou None se desligado (AUTO_SERE_BACKUP_AUTO=0), sem dados ou com falha.
+    Devolve o caminho do zip, ou None se desligado (tela de Configurações ou AUTO_SERE_BACKUP_AUTO=0), sem dados ou com falha.
     Backups automáticos do mesmo ano criados nos últimos JANELA_SUBSTITUICAO_MIN minutos são substituídos pelo novo.
     """
-    if str(os.environ.get("AUTO_SERE_BACKUP_AUTO", "1")).strip().lower() in {"0", "nao", "não", "false", "off"}:
+    if not automatico_ligado():
         return None
     try:
         novo = criar_backup(motivo=f"{PREFIXO_MOTIVO_AUTOMATICO} (após a coleta de {coleta})")

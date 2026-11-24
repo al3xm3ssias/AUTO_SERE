@@ -5,7 +5,7 @@ Em vez de mandar uma mensagem de cada vez, o usuário põe várias na fila e o s
 parecer envio em massa (o WhatsApp bane números que mandam rápido demais; este é um cliente não oficial).
 
 O que a fila garante:
-  - pausa fixa ENTRE uma mensagem e a seguinte (INTERVALO_MIN_S a INTERVALO_MAX_S segundos);
+  - pausa fixa ENTRE uma mensagem e a seguinte (INTERVALO_MIN_S a INTERVALO_MAX_S segundos); o padrão é de 5 minutos;
   - limite por dia de mensagens de verdade (LIMITE_MIN a LIMITE_MAX). Ao atingi-lo, a fila espera o dia seguinte e
     continua sozinha (se `continuar_no_dia_seguinte`) ou para;
   - Pausar a qualquer momento (termina a mensagem em andamento) e continuar depois; cancelar item a item ou todos os
@@ -31,7 +31,8 @@ from typing import Callable, Optional
 from .base import EnvioNaoAutorizadoError, mascarar_numero, normalizar_numero
 from .gateway_http import envio_real_autorizado
 
-INTERVALO_PADRAO_S, INTERVALO_MIN_S, INTERVALO_MAX_S = 45, 10, 600
+# Padrão de 5 minutos (23/11/2026, pedido do usuário): em comunicado em massa a pausa curta arrisca o bloqueio do número.
+INTERVALO_PADRAO_S, INTERVALO_MIN_S, INTERVALO_MAX_S = 300, 10, 600
 LIMITE_PADRAO, LIMITE_MIN, LIMITE_MAX = 40, 1, 300
 LIMITE_TEXTO = 4000
 FALHAS_SEGUIDAS_MAX = 3

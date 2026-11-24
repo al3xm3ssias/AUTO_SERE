@@ -449,7 +449,7 @@ AUTOMACOES: dict[str, dict] = {
                       "`AVISOS/enviados.json` e o registro da execução (enviados, falhas, os que faltam). O botão **Ver quem já recebeu** mostra esse registro."],
         "cuidados": ["O envio real **não pode ser desfeito** e pede confirmação. Só funciona depois de **Simular** o mesmo texto e os mesmos destinatários (a simulação vale 24 horas).",
                      "Quem já recebeu o mesmo texto não recebe de novo: dá para cancelar e rodar outra vez, que continua de onde parou. Três falhas seguidas (senha errada, sem rede) param o envio.",
-                     "Um texto com **$ALUNO, $CGM, $SERIE ou $TURMA** vira um e-mail por aluno que chega, para a escola de origem dele; sem esses marcadores, é um e-mail por unidade. "
+                     "Para as escolas **não existe aviso em massa**: o texto precisa ter **$ALUNO, $CGM, $SERIE ou $TURMA** e vira um e-mail por aluno que chega, para a escola de origem dele. Sem esses marcadores, o sistema recusa o envio. "
                      "Aluno sem vínculo da Base ABC, com vínculo a verificar ou com escola de origem fora da lista **não recebe** e aparece na lista. "
                      "Se o aluno já entrou na nossa escola, o pedido vai para a escola anterior do histórico.",
                      "**Tipo de mensagem** carrega modelos (o de transferência já vem pronto) e dá para salvar, ajustar e excluir os seus, que ficam em `config/modelos_avisos.json`.",

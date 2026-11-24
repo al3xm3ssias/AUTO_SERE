@@ -45,6 +45,7 @@ from flask import Blueprint, jsonify, request
 from src.comum import paths as _paths
 from src.comum.execucao_gui import ExecucaoEmBackground, StatusExecucao
 from src.comum import alunos_unificados
+from src.comum import backup as _backup
 from src.comum import configuracao as _config
 from src.comum import cep_consulta as _cep
 from src.comum import escola as _escola
@@ -2111,6 +2112,39 @@ def configuracao_navegador_salvar():
         return jsonify({"erro": str(exc)}), 400
     resposta = _estado_navegador_global()
     resposta.update({"status": "ok", "mensagem": "Navegador padrão salvo — vale a partir da próxima execução."})
+    return jsonify(resposta)
+
+
+# ── Backup automático após as coletas: liga/desliga em Configurações ──────────────────────────────────────────────
+
+def _estado_backup_automatico() -> dict:
+    """`ligado` é o que vale de verdade; `pelo_ambiente` = a variável AUTO_SERE_BACKUP_AUTO=0 desliga por cima da tela."""
+    pelo_ambiente = _backup.desligado_pelo_ambiente()
+    return {"ligado": _backup.automatico_ligado(), "escolha": _config.backup_automatico(), "pelo_ambiente": pelo_ambiente}
+
+
+@api_bp.route("/configuracoes/backup-automatico", methods=["GET"])
+def configuracao_backup_automatico_obter():
+    return jsonify(_estado_backup_automatico())
+
+
+@api_bp.route("/configuracoes/backup-automatico", methods=["POST"])
+def configuracao_backup_automatico_salvar():
+    """payload: {"ligado": true|false}."""
+    payload = request.get_json(silent=True) or {}
+    try:
+        _config.definir_backup_automatico(payload.get("ligado"))
+    except ValueError as exc:
+        return jsonify({"erro": str(exc)}), 400
+    resposta = _estado_backup_automatico()
+    if resposta["pelo_ambiente"]:
+        resposta["mensagem"] = ("Escolha salva, mas a variável AUTO_SERE_BACKUP_AUTO está desligando o backup automático "
+                                "neste computador: tire-a para a escolha valer.")
+    elif resposta["ligado"]:
+        resposta["mensagem"] = "Backup automático ligado: cada coleta termina com um backup."
+    else:
+        resposta["mensagem"] = "Backup automático desligado. Os backups manuais continuam em Automações → Backup."
+    resposta["status"] = "ok"
     return jsonify(resposta)
 
 

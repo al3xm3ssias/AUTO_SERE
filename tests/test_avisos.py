@@ -229,7 +229,7 @@ def test_renderizar_troca_so_o_que_conhece():
 # ───────────── validação ─────────────
 
 def _ok(**kw):
-    base = dict(publico="escolas", canal="email", modo="simular", assunto="Aviso $ESCOLA", mensagem="Olá $ESCOLA_DESTINO")
+    base = dict(publico="escolas", canal="email", modo="simular", assunto="Aviso $ESCOLA", mensagem="Olá $ESCOLA_DESTINO, sobre $ALUNO")
     base.update(kw)
     return base
 
@@ -269,7 +269,7 @@ def test_validar_escola_usada_sem_nome_da_escola(amb, monkeypatch):
     monkeypatch.setattr(escola, "nome", lambda: "")
     with pytest.raises(ValueError, match="nome da escola"):
         av.validar_pedido(**_ok())
-    av.validar_pedido(**_ok(assunto="Aviso", mensagem="Olá $ESCOLA_DESTINO"))   # $ESCOLA_DESTINO não é $ESCOLA
+    av.validar_pedido(**_ok(assunto="Aviso", mensagem="Olá $ESCOLA_DESTINO, sobre $ALUNO"))   # $ESCOLA_DESTINO não é $ESCOLA
 
 
 def test_validar_modo_teste(amb, monkeypatch):
@@ -289,8 +289,49 @@ def test_validar_modo_teste(amb, monkeypatch):
 
 
 def test_sem_destinatarios(amb):
-    with pytest.raises(ValueError, match="Nenhum destinatário"):
-        av.reunir_destinatarios("escolas", filtro_nome="inexistente")
+    with pytest.raises(ValueError, match="Nenhum aluno novo"):
+        av.reunir_destinatarios("escolas", filtro_nome="inexistente", por_aluno=True)
+
+
+# ───────────── NÃO existe aviso em massa para escolas (decisão de 23/11/2026) ─────────────
+
+@pytest.mark.parametrize("modo", ["simular", "teste", "enviar"])
+def test_escolas_sem_marcador_de_aluno_nunca_vira_aviso_em_massa(amb, smtp, modo):
+    with pytest.raises(ValueError, match="não existe aviso em massa"):
+        av.executar_avisos(**_args(publico="escolas", modo=modo, assunto="Comunicado", mensagem="Prezada direção da $ESCOLA_DESTINO"))
+    assert smtp == [] and not (paths.dados_ano_atual() / "AVISOS").exists()
+
+
+def test_so_o_marcador_da_escola_nao_basta_para_escolas(amb):
+    for texto in ("Para $ESCOLA_DESTINO", "Aviso de $ESCOLA em $DATA", "Sem marcador nenhum"):
+        with pytest.raises(ValueError, match="um por aluno"):
+            av.validar_pedido(**_ok(assunto="Aviso", mensagem=texto))
+
+
+@pytest.mark.parametrize("marcador", ["$ALUNO", "$CGM", "$SERIE", "$TURMA"])
+def test_cada_marcador_de_aluno_libera_o_texto_para_escolas(amb, marcador):
+    p = av.validar_pedido(**_ok(assunto="Aviso", mensagem=f"Pedido {marcador}"))
+    assert p["por_aluno"] is True
+
+
+def test_escolas_nunca_tem_destinatarios_sem_ser_por_aluno(amb):
+    with pytest.raises(ValueError, match="não existe aviso em massa"):
+        av.reunir_destinatarios("escolas")                                    # a lista real de escolas existe e não é usada
+    with pytest.raises(ValueError, match="não existe aviso em massa"):
+        av.reunir_destinatarios("escolas", unidades=["@todas"], por_aluno=False)
+
+
+def test_exemplo_da_mensagem_de_escolas_sem_marcador_so_avisa(amb):
+    r = av.exemplo_da_mensagem("escolas", "Aviso", "Para $ESCOLA_DESTINO")
+    assert "não existe aviso em massa" in r["aviso"] and "corpo" not in r
+
+
+def test_modelo_para_escolas_exige_marcador_de_aluno(amb, monkeypatch, tmp_path):
+    from src.comum import modelos_avisos as ma
+    with pytest.raises(ValueError, match="aviso em massa"):
+        ma._validar("Meu modelo", "escolas", "Aviso", "Olá $ESCOLA_DESTINO")
+    assert ma._validar("Meu modelo", "escolas", "Aviso", "Olá, $ALUNO")[1] == "escolas"
+    assert ma._validar("Meu modelo", "", "Aviso", "Olá")[1] == ""             # sem público definido: a trava vale na hora de enviar
 
 
 # ───────────── montagem ─────────────
@@ -327,13 +368,6 @@ def test_simular_nao_envia_nada_e_grava_registro(amb, smtp, capsys):
     assert "ANA LIMA e BETO LIMA" in registro["mensagens"][0]["corpo"]
 
 
-def test_simular_escolas(amb, smtp, capsys):
-    r = av.executar_avisos(**_args(publico="escolas", assunto="Comunicado", mensagem="Prezada direção da $ESCOLA_DESTINO"))
-    assert smtp == [] and r["total"] == 4
-    saida = capsys.readouterr().out
-    assert f"Fora da lista (a própria escola): {PROPRIA}" in saida and "Prezada direção da Escola Municipal Ana Néri" in saida
-
-
 def test_teste_envia_um_so_para_o_endereco_de_teste(amb, smtp):
     r = av.executar_avisos(**_args(modo="teste", email_teste="eu@mail.com"))
     assert len(smtp) == 1
@@ -368,9 +402,11 @@ def test_envio_real_sem_simulacao_antes_e_recusado(amb, smtp):
 
 def test_lista_longa_e_resumida_no_log(amb, smtp, capsys):
     dados = paths.dados_ano_atual()
-    escolas = [{"nome": f"Escola Municipal Teste {i:03d}", "email": f"e{i}@pg.gov.br"} for i in range(80)]
-    (dados / "escolas_completas.json").write_text(json.dumps({"escolas-municipais": {"escolas": escolas}}), encoding="utf-8")
-    r = av.executar_avisos(**_args(publico="escolas", assunto="Aviso", mensagem="Oi $ESCOLA_DESTINO"))
+    alunos = [{"cpf": f"9{i:03d}", "nome": f"ALUNO {i:03d}", "situacao": "Matriculado"} for i in range(80)]
+    cadastros = {a["cpf"]: {"nome_responsavel": f"RESP {i:03d}", "email": f"r{i}@x.com"} for i, a in enumerate(alunos)}
+    (dados / "pre_matricula.json").write_text(
+        json.dumps({"turmas_intencao": {"Infantil IV": alunos}, "cadastros": cadastros}), encoding="utf-8")
+    r = av.executar_avisos(**_args(publico="pais", assunto="Aviso", mensagem="Oi $RESPONSAVEL"))
     assert r["total"] == 80
     assert "… e mais 20" in capsys.readouterr().out
     assert len(json.loads(Path(r["registro"]).read_text(encoding="utf-8"))["mensagens"]) == 80   # o registro tem todos
@@ -433,8 +469,10 @@ def test_validar_extras_do_registro(amb):
     v({"publico": "pais", "assunto": "A", "mensagem": "B"})
     with pytest.raises(ValueError, match="assunto"):
         v({"publico": "pais", "mensagem": "B"})
-    with pytest.raises(ValueError, match="Nenhum destinatário"):
+    with pytest.raises(ValueError, match="não existe aviso em massa"):
         v({"publico": "escolas", "assunto": "A", "mensagem": "B", "filtro_nome": "zzz"})
+    with pytest.raises(ValueError, match="Nenhum aluno novo"):
+        v({"publico": "escolas", "assunto": "A $ALUNO", "mensagem": "B", "filtro_nome": "zzz"})
 
 
 def test_cli_simular(amb, capsys):
@@ -463,12 +501,20 @@ def _esperar(web):
 
 def test_web_simula_pelo_botao(web, smtp):
     r = web.post("/web/api/automacoes/avisos/executar", json={
-        "publico": "escolas", "canal": "email", "modo": "simular", "assunto": "Comunicado", "mensagem": "Olá, $ESCOLA_DESTINO"})
+        "publico": "pais", "canal": "email", "modo": "simular", "assunto": "Comunicado", "mensagem": "Olá, $RESPONSAVEL"})
     assert r.status_code == 200
     s = _esperar(web)
     assert s["status"] == "concluido" and smtp == []
-    assert rotas._EXECUCOES["avisos"]["resultado"]["total"] == 4
+    assert rotas._EXECUCOES["avisos"]["resultado"]["total"] == 3
     assert any("SIMULAÇÃO — nada será enviado" in linha for linha in s["logs"])
+
+
+def test_web_escolas_sem_marcador_de_aluno_da_400_e_nao_executa(web, smtp):
+    for modo in ("simular", "teste", "enviar"):
+        r = web.post("/web/api/automacoes/avisos/executar", json={
+            "publico": "escolas", "canal": "email", "modo": modo, "assunto": "Comunicado", "mensagem": "Olá, $ESCOLA_DESTINO"})
+        assert r.status_code == 400 and "não existe aviso em massa" in r.get_json()["mensagem"]
+    assert smtp == []
 
 
 def test_web_pedido_ruim_da_400(web):
@@ -496,21 +542,26 @@ def test_previa_conta_destinatarios_sem_exigir_o_texto(web):
         return web.post("/web/api/automacoes/avisos/previa", json=payload)
     r = previa({})                                                      # ainda sem escolher o público: sem aviso nenhum
     assert r.status_code == 200 and r.get_json()["texto"] is None
-    d = previa({"publico": "escolas"}).get_json()["texto"]
-    assert d.startswith("4 e-mail(s) de escolas e CMEIs; sem e-mail ficariam de fora 2: Escola Municipal Sem Email; Escola Municipal Lixo")
-    assert previa({"publico": "escolas", "tipo_escola": "cmeis"}).get_json()["texto"].startswith("1 e-mail(s)")
-    assert previa({"publico": "escolas", "unidades": ["@cmeis"]}).get_json()["texto"].startswith("1 e-mail(s)")
-    assert previa({"publico": "escolas", "unidades": '["Escola Municipal Ana Néri"]'}).get_json()["texto"].startswith("2 e-mail(s)")
+    d = previa({"publico": "escolas"}).get_json()["texto"]                 # escolas sem texto: nunca conta "todas as escolas"
+    assert "um por aluno" in d and "não existe aviso em massa" in d
+    assert "um por aluno" in previa({"publico": "escolas", "assunto": "Aviso", "mensagem": "Para $ESCOLA_DESTINO"}).get_json()["texto"]
     d = previa({"publico": "pais"}).get_json()["texto"]
     assert d.startswith("3 responsável(is) por e-mail, de 6 aluno(s) novo(s); sem e-mail ficariam de fora 2:")
     assert previa({"publico": "pais", "situacao_pais": "aguardando"}).get_json()["texto"].startswith("1 responsável(is)")
 
 
+def test_previa_das_escolas_conta_um_email_por_aluno(web, chegando):
+    d = web.post("/web/api/automacoes/avisos/previa",
+                 json={"publico": "escolas", "assunto": "Transferência de $ALUNO", "mensagem": "Aluno $ALUNO"}).get_json()["texto"]
+    assert d.startswith("2 e-mail(s) para escolas de origem, um por aluno que chega")
+
+
 def test_previa_avisa_quando_falta_a_lista(web, amb):
     (paths.dados_ano_atual() / "escolas_completas.json").unlink()
-    r = web.post("/web/api/automacoes/avisos/previa", json={"publico": "escolas"})
+    com_texto = {"publico": "escolas", "assunto": "Transferência de $ALUNO", "mensagem": "Aluno $ALUNO"}
+    r = web.post("/web/api/automacoes/avisos/previa", json=com_texto)
     assert r.status_code == 400 and "Coleta e-mails" in r.get_json()["erro"]
-    r = web.post("/web/api/automacoes/avisos/previa", json={"publico": "escolas", "filtro_nome": "zzz"})
+    r = web.post("/web/api/automacoes/avisos/previa", json={**com_texto, "filtro_nome": "zzz"})
     assert r.status_code == 400
 
 
@@ -522,7 +573,7 @@ EMAIL_FICTICIA = "claudioalex16@gmail.com"
 
 def _args_escolas(**kw):
     base = dict(publico="escolas", canal="email", modo="teste", assunto="Comunicado oficial - $ESCOLA",
-                mensagem="Prezada direção da $ESCOLA_DESTINO,\n\nSegue o comunicado oficial da $ESCOLA.")
+                mensagem="Prezada direção da $ESCOLA_DESTINO,\n\nSegue o comunicado oficial da $ESCOLA sobre o aluno $ALUNO.")
     base.update(kw)
     return base
 
@@ -531,7 +582,7 @@ def test_a_escola_ficticia_existe_com_os_dados_pedidos():
     assert av.ESCOLA_TESTE == {"nome": NOME_FICTICIA, "email": EMAIL_FICTICIA}
 
 
-def test_teste_das_escolas_envia_para_a_escola_ficticia(amb, smtp):
+def test_teste_das_escolas_envia_para_a_escola_ficticia(chegando, smtp):
     r = av.executar_avisos(**_args_escolas())
     assert len(smtp) == 1
     e = smtp[0]
@@ -540,10 +591,10 @@ def test_teste_das_escolas_envia_para_a_escola_ficticia(amb, smtp):
     assert e["corpo"].startswith("*** TESTE — esta mensagem NÃO foi enviada aos destinatários reais. ***")
     assert f"Prezada direção da {NOME_FICTICIA}," in e["corpo"]                  # texto como a escola receberia
     assert f"escola fictícia de teste: {NOME_FICTICIA} <{EMAIL_FICTICIA}>" in e["corpo"]
-    assert "iria para 4 destinatário(s) reais" in e["corpo"]
+    assert "iria para 2 destinatário(s) reais" in e["corpo"]
     reais = {d["email"] for d in av.destinatarios_escolas()["destinatarios"]}
     assert e["para"] not in reais and "Escola Municipal Ana Néri" not in e["corpo"]
-    assert r["enviados_teste"] == 1 and r["total"] == 4
+    assert r["enviados_teste"] == 1 and r["total"] == 2
     registro = json.loads(Path(r["registro"]).read_text(encoding="utf-8"))
     assert registro["escola_teste"] == {"nome": NOME_FICTICIA, "email": EMAIL_FICTICIA} and registro["email_teste"] == EMAIL_FICTICIA
 
@@ -569,7 +620,7 @@ def test_teste_das_escolas_com_outro_email_mantem_o_nome_ficticio(amb, smtp):
     assert smtp[0]["para"] == "outro@mail.com" and f"direção da {NOME_FICTICIA}" in smtp[0]["corpo"]
 
 
-def test_a_escola_ficticia_nunca_entra_na_lista_real_nem_na_simulacao(amb, smtp):
+def test_a_escola_ficticia_nunca_entra_na_lista_real_nem_na_simulacao(chegando, smtp):
     emails = {d["email"] for d in av.destinatarios_escolas()["destinatarios"]}
     nomes = {d["nome"] for d in av.destinatarios_escolas()["destinatarios"]}
     assert EMAIL_FICTICIA not in emails and NOME_FICTICIA not in nomes
@@ -579,7 +630,7 @@ def test_a_escola_ficticia_nunca_entra_na_lista_real_nem_na_simulacao(amb, smtp)
     assert smtp == []
 
 
-def test_simular_escolas_avisa_para_onde_iria_o_teste(amb, smtp, capsys):
+def test_simular_escolas_avisa_para_onde_iria_o_teste(chegando, smtp, capsys):
     av.executar_avisos(**_args_escolas(modo="simular"))
     assert f"No modo Teste, o e-mail iria para a escola fictícia {NOME_FICTICIA} <{EMAIL_FICTICIA}>." in capsys.readouterr().out
 
@@ -592,29 +643,30 @@ def test_teste_dos_pais_nao_mudou(amb, smtp):
 def test_validar_extras_do_teste_das_escolas_dispensa_a_lista(amb):
     v = reg.obter("avisos").validar_extras
     (paths.dados_ano_atual() / "escolas_completas.json").unlink()
-    v({"publico": "escolas", "modo": "teste", "assunto": "A", "mensagem": "B"})
+    v({"publico": "escolas", "modo": "teste", "assunto": "A $ALUNO", "mensagem": "B"})
     with pytest.raises(ValueError, match="Coleta e-mails"):
-        v({"publico": "escolas", "modo": "simular", "assunto": "A", "mensagem": "B"})
+        v({"publico": "escolas", "modo": "simular", "assunto": "A $ALUNO", "mensagem": "B"})
 
 
-def test_previa_do_teste_das_escolas(web):
-    d = web.post("/web/api/automacoes/avisos/previa", json={"publico": "escolas", "modo": "teste"}).get_json()["texto"]
+def test_previa_do_teste_das_escolas(web, chegando):
+    texto = {"publico": "escolas", "modo": "teste", "assunto": "Pedido de $ALUNO", "mensagem": "Aluno $ALUNO"}
+    d = web.post("/web/api/automacoes/avisos/previa", json=texto).get_json()["texto"]
     assert d == (f"Teste: 1 e-mail para a escola fictícia {NOME_FICTICIA} <{EMAIL_FICTICIA}> "
-                 "(o comunicado real iria para 4 e-mail(s) de escolas e CMEIs).")
-    d = web.post("/web/api/automacoes/avisos/previa",
-                 json={"publico": "escolas", "modo": "teste", "email_teste": "x@y.com"}).get_json()["texto"]
+                 "(o comunicado real iria para 2 e-mail(s) de escolas de origem).")
+    d = web.post("/web/api/automacoes/avisos/previa", json={**texto, "email_teste": "x@y.com"}).get_json()["texto"]
     assert "<x@y.com>" in d
 
 
 def test_previa_do_teste_das_escolas_sem_a_lista(web):
     (paths.dados_ano_atual() / "escolas_completas.json").unlink()
-    r = web.post("/web/api/automacoes/avisos/previa", json={"publico": "escolas", "modo": "teste"})
+    r = web.post("/web/api/automacoes/avisos/previa",
+                 json={"publico": "escolas", "modo": "teste", "assunto": "Pedido de $ALUNO", "mensagem": "Aluno $ALUNO"})
     assert r.status_code == 200 and r.get_json()["texto"] == f"Teste: 1 e-mail para a escola fictícia {NOME_FICTICIA} <{EMAIL_FICTICIA}>."
 
 
 def test_web_teste_das_escolas_pelo_botao(web, smtp):
     r = web.post("/web/api/automacoes/avisos/executar", json={
-        "publico": "escolas", "canal": "email", "modo": "teste", "assunto": "Comunicado", "mensagem": "Olá, $ESCOLA_DESTINO"})
+        "publico": "escolas", "canal": "email", "modo": "teste", "assunto": "Comunicado", "mensagem": "Olá, $ESCOLA_DESTINO, sobre $ALUNO"})
     assert r.status_code == 200
     s = _esperar(web)
     assert s["status"] == "concluido" and len(smtp) == 1 and smtp[0]["para"] == EMAIL_FICTICIA
@@ -737,9 +789,10 @@ def test_texto_com_marcador_de_aluno_vira_um_email_por_aluno(chegando, smtp, cap
     assert corpo == f"Aluno ANA LIMA, CGM 1000000001, série 5º ano, vai para a turma Infantil IV de {PROPRIA} para Escola Municipal Ana Néri."
 
 
-def test_texto_sem_marcador_de_aluno_segue_um_email_por_escola(chegando):
-    r = av.executar_avisos(**_args(publico="escolas", assunto="Aviso", mensagem="Para $ESCOLA_DESTINO"))
-    assert r["total"] == 4                                                        # 4 e-mails: Ana (2), São José e o CMEI
+def test_texto_sem_marcador_de_aluno_nao_segue_um_email_por_escola(chegando, smtp):
+    with pytest.raises(ValueError, match="não existe aviso em massa"):
+        av.executar_avisos(**_args(publico="escolas", assunto="Aviso", mensagem="Para $ESCOLA_DESTINO"))
+    assert smtp == []
 
 
 def test_teste_por_aluno_monta_o_texto_com_o_primeiro_aluno_real(chegando, smtp):
@@ -857,13 +910,19 @@ def test_limite_por_execucao_e_continua_na_proxima(chegando, smtp, sem_espera):
 
 
 def test_tres_falhas_seguidas_param_o_envio_sem_marcar_como_enviado(chegando, monkeypatch, sem_espera):
-    av.executar_avisos(**_args(publico="escolas", assunto="Aviso", mensagem="Para $ESCOLA_DESTINO"))
+    pre = json.loads((paths.dados_ano_atual() / "pre_matricula.json").read_text(encoding="utf-8"))
+    for cpf, escola_origem, cgm in (("115", "Escola Municipal Rural São José", "1000000015"),
+                                    ("117", "CMEI Pequeno Príncipe", "1000000017"),
+                                    ("118", "ESCOLA MUNICIPAL ANA NERI", "1000000018")):
+        pre["cadastros"][cpf].update(_vinc(escola_origem, cgm=cgm))                 # agora são 5 alunos com escola de origem
+    (paths.dados_ano_atual() / "pre_matricula.json").write_text(json.dumps(pre), encoding="utf-8")
+    av.executar_avisos(**_args(publico="escolas", assunto="Aviso $ALUNO", mensagem="Para $ESCOLA_DESTINO"))
     tentativas = []
     monkeypatch.setattr("src.automacao.envia_email.enviar_email",
                         lambda *a, **k: (tentativas.append(a[0]) or (False, "autenticação recusada")))
     with pytest.raises(RuntimeError, match="3 falhas seguidas.*autenticação recusada"):
-        av.executar_avisos(**_args(publico="escolas", assunto="Aviso", mensagem="Para $ESCOLA_DESTINO", modo="enviar"))
-    assert len(tentativas) == 3                                                     # parou, não insistiu nos 4 destinos
+        av.executar_avisos(**_args(publico="escolas", assunto="Aviso $ALUNO", mensagem="Para $ESCOLA_DESTINO", modo="enviar"))
+    assert len(tentativas) == 3                                                     # parou, não insistiu nos 5 destinos
     pasta = paths.dados_ano_atual() / "AVISOS"
     assert not (pasta / "enviados.json").exists()
     registro = json.loads(next(pasta.glob("*_escolas_enviar.json")).read_text(encoding="utf-8"))
@@ -958,7 +1017,7 @@ def test_envio_real_pede_confirmacao_so_no_modo_enviar(web):
 
 
 def test_plano_leva_unidades_fonte_pausa_limite_e_tipo_de_mensagem(amb):
-    p = {"publico": "escolas", "assunto": "A", "mensagem": "B", "modo": "enviar", "unidades": '["@cmeis"]', "fonte": "ambas",
+    p = {"publico": "escolas", "assunto": "A $ALUNO", "mensagem": "B", "modo": "enviar", "unidades": '["@cmeis"]', "fonte": "ambas",
          "intervalo_s": "20", "limite_lote": "25", "tipo_mensagem": "transferencia"}
     k = reg.obter("avisos").planejar(Opcoes(), p, {}, {}).kwargs
     assert (k["unidades"], k["fonte"], k["intervalo_s"], k["limite_lote"], k["modelo"]) == ('["@cmeis"]', "ambas", "20", "25", "transferencia")

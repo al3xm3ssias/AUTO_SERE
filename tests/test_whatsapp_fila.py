@@ -316,3 +316,10 @@ def test_modo_consulta_bloqueia_escrita_da_fila(cli, monkeypatch):
     monkeypatch.setattr(paths, "somente_consulta", lambda: True)
     assert cli.post("/web/api/whatsapp/fila/iniciar", json={}).status_code == 403
     assert cli.get("/web/api/whatsapp/fila").status_code == 200
+
+
+def test_pausa_padrao_entre_mensagens_e_de_5_minutos(amb):
+    """Comunicado em massa: sem ajuste salvo, a pausa é de 5 minutos (pedido do usuário, 23/11/2026)."""
+    from src.servicos.whatsapp import fila as modulo
+    assert modulo.INTERVALO_PADRAO_S == 300
+    assert _fila(Prov()).resumo()["config"]["intervalo_s"] == 300

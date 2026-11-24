@@ -1,0 +1,927 @@
+diff -ruN -x logs -x __pycache__ -x .pytest_cache a/pendencias.md b/pendencias.md
+--- a/pendencias.md	2026-11-23 17:57:14.000000000 +0000
++++ b/pendencias.md	2026-11-24 08:37:09.549207754 +0000
+@@ -2,7 +2,7 @@
+ 
+ Lista curta do que ainda falta. O detalhe e o histórico estão em [`PROXIMAS_ETAPAS.md`](PROXIMAS_ETAPAS.md) (os números, como 3b e 11q, são os mesmos) e os bugs em [`BUGS_CONHECIDOS.md`](BUGS_CONHECIDOS.md).
+ 
+-Atualizado em 2026-11-23 (nova seção 2c: segurança dos dados, com exportação de credenciais criptografada, criptografia dos dados salvos e tela de login; decisão sobre a cópia da `chave_qr.key`). Antes, em 2026-11-20 (destino dos transferidos e aviso à escola de destino; ID da matrícula em Transferidos, Base ABC e pré-matrícula; o resto segue como em 18/11). Legenda: `[ ]` pendente · `[!]` depende de ambiente real ou de decisão · `[x]` decidido/feito.
++Atualizado em 2026-11-23 (fim do aviso em massa para escolas, botão do backup automático em Configurações, pausa padrão de 5 min na fila do WhatsApp e decisões sobre a paginação da Base ABC, `Data Matricula` e termos de ciência; nova seção 2c: segurança dos dados, com exportação de credenciais criptografada, criptografia dos dados salvos e tela de login; decisão sobre a cópia da `chave_qr.key`). Antes, em 2026-11-20 (destino dos transferidos e aviso à escola de destino; ID da matrícula em Transferidos, Base ABC e pré-matrícula; o resto segue como em 18/11). Legenda: `[ ]` pendente · `[!]` depende de ambiente real ou de decisão · `[x]` decidido/feito.
+ 
+ ---
+ 
+@@ -64,10 +64,11 @@
+ - [x] **Chamar os pais por turma e faixa de posição (2026-11-21):** no público "pais", a lista de alunos mostra a posição de cada um na turma (`pos` da pré-matrícula) e ganhou a barra **"Marcar por posição"** (turma + "do __ ao __"; "todas as turmas" marca o mesmo intervalo em cada uma). Só marca; o envio segue com prévia, simulação e confirmação. Modelo pronto **"Chamada para matrícula (pais de aluno novo)"**. Quem fica do N-ésimo em diante continua na fila e não é chamado. Use a situação **"Aguardando vaga"** (a padrão é "Matriculados"). A barra só aparece se a coleta trouxe `pos` (confirmar no real, principalmente na coleta pelo relatório .xlsx)
+ - [x] **Botão "Ver quem já recebeu" (2026-11-22)** na tela "Mandar avisos": lista o `AVISOS/enviados.json` (quando, para quem, aluno, assunto, anexos), mais recente primeiro, com busca. Só leitura (`GET /web/api/avisos/enviados`); os envios novos passam a guardar também o público (os antigos aparecem sem ele, exceto escola de destino). Validado no Chromium (22/11/2026) com registros gerados pelo próprio envio real e um registro no formato antigo: lista, ordem (mais recente primeiro), busca sem acento, "Atualizar" com envio novo, registro vazio e registro corrompido; o arquivo não é alterado (`tests/test_ui_avisos_enviados.py`). **Falta só olhar o seu `enviados.json` real**
+ - [~] Outros canais: **SERE descartado** (não é canal de comunicação); o WhatsApp é o item 7b (fila de envio), logo abaixo
+-- [x] Público em massa "todas as escolas/CMEIs": **sem utilidade** (2026-11-21). Falta decidir se o texto sem marcadores de aluno, que hoje vai para todas, deve ser removido da tela
++- [x] Público em massa "todas as escolas/CMEIs": **sem utilidade** (2026-11-21). **Feito (2026-11-23): não existe mais aviso em massa para escolas.** O texto precisa ter `$ALUNO`, `$CGM`, `$SERIE` ou `$TURMA` (só `$ESCOLA_DESTINO`, `$ESCOLA` ou `$DATA` não basta) e vira sempre um e-mail por aluno, para a escola de origem dele. Sem marcador, o pedido é recusado na simulação, no teste e no envio real (`validar_pedido` e `reunir_destinatarios` em `avisos.py`); a prévia da tela avisa em vez de contar escolas; salvar um modelo para escolas sem marcador também é recusado. A função `destinatarios_escolas` ficou só como lista de escolas com e-mail (nenhum envio parte dela). Testes em `tests/test_avisos.py`
+ 
+ ### WhatsApp
+ - [x] **7b: fila de envio (2026-11-22)** — cartão "Fila de envio" na tela WhatsApp (`src/servicos/whatsapp/fila.py`, rotas `/web/api/whatsapp/fila/*`, modelos em `config/modelos_whatsapp.json`): pausa entre mensagens (10 s a 10 min), limite por dia (1 a 300; retoma sozinha no dia seguinte se marcado), Pausar/Continuar, cancelar item ou todos os pendentes, "pôr na fila de novo", histórico, não repete o mesmo texto para o mesmo número, 3 falhas seguidas pausam, envio real só com a permissão e o WhatsApp conectado, e põe na fila direto os alunos da pré-matrícula (comunicado oficial ou modelo). Dados em `<ano>/WHATSAPP/fila.json`. **Falta validar com o WhatsApp real** (whatsplay no Windows e gateway Docker)
++  - [x] **Pausa padrão de 5 minutos (2026-11-23)** entre mensagens, para comunicado em massa não levar ao bloqueio do número (`INTERVALO_PADRAO_S = 300` em `fila.py`). Vale para quem ainda não salvou ajuste; quem já salvou outro valor em "Pausa entre mensagens" mantém o seu. As opções de 10 s a 10 min continuam na tela
+   - [ ] Opcional, não pedido: variação aleatória na pausa (hoje é fixa), janela de horário (ex.: só 8h–18h) e canal WhatsApp dentro de "Mandar avisos"
+ 
+ ### Escola de destino dos transferidos (2026-11-19/20)
+@@ -78,11 +79,11 @@
+ - [x] **Ciclos anteriores na tela Transferidos** (2026-11-21): quem saiu, voltou e saiu de novo ganha, sob o nome, o botão "↺ N saída(s) anterior(es)". Ele abre uma janela só de leitura com cada saída anterior (data de saída, data em que voltou, turma, ID da matrícula, selos de guia/histórico/parecer, escola de destino e o nome dos PDFs renomeados). A linha da tabela continua sendo a saída ATUAL (o status e os cartões não mudam). `/transferidos/lista` devolve `ciclos_anteriores` e `n_ciclos` por aluno; a exportação ganhou a coluna "Saídas anteriores"; ajuda F1 atualizada. Teste em `tests/test_telas_dados.py`. Janela e botão conferidos no Chromium (`tests/test_ui_tabelas.py`)
+ 
+ ### Backup
+-- [x] **3b** (2026-11-14): backup automático ao fim das coletas de turmas, alunos (`alunos.py` e `alunos_completo.py`) e funcionários (`servidores.py`, `funcionarios.py`), por `backup.backup_apos_coleta()`. Motivo "automático (após a coleta de …)"; **retenção própria** de 7 (`AUTO_SERE_BACKUP_MANTER_AUTO`), para as coletas diárias não empurrarem os manuais e os de "antes de restaurar" (10 de cada ano); coletas seguidas (< 30 min) trocam o automático anterior; nunca derruba a coleta (erro vira aviso no log); `AUTO_SERE_BACKUP_AUTO=0` desliga. Testes em `tests/test_backup.py`. ⚠️ Falta decidir se vale um botão em Configurações para ligar/desligar (hoje só por variável de ambiente)
++- [x] **3b** (2026-11-14): backup automático ao fim das coletas de turmas, alunos (`alunos.py` e `alunos_completo.py`) e funcionários (`servidores.py`, `funcionarios.py`), por `backup.backup_apos_coleta()`. Motivo "automático (após a coleta de …)"; **retenção própria** de 7 (`AUTO_SERE_BACKUP_MANTER_AUTO`), para as coletas diárias não empurrarem os manuais e os de "antes de restaurar" (10 de cada ano); coletas seguidas (< 30 min) trocam o automático anterior; nunca derruba a coleta (erro vira aviso no log); `AUTO_SERE_BACKUP_AUTO=0` desliga. Testes em `tests/test_backup.py`. **Botão em Configurações → "Backup automático" feito (2026-11-23)**: liga/desliga (`backup_automatico` em `config_usuario.json`, rotas `/web/api/configuracoes/backup-automatico`); a variável `AUTO_SERE_BACKUP_AUTO=0`, se existir, continua desligando por cima da tela e o painel avisa; restaurar um backup antigo não desfaz a escolha. Testes em `tests/test_backup.py`. ⚠️ O painel ainda não foi aberto no navegador
+ 
+ ### Funcionários
+ - [x] Modo completo: **retoma de onde parou** (2026-11-14). Cada cadastro coletado leva `coletado_em`; se a última coleta completa foi interrompida há menos de 3 dias (`funcionarios_completo_progresso.json` com `completa: false`), a nova rodada só consulta quem faltou e mantém o `iniciado_em` original. Caixa **"Recomeçar do zero"** na tela de Funcionários força todos de novo; interrupção antiga demais ou coleta que terminou não é retomada; quem saiu da lista não fica no arquivo. Testes em `tests/test_funcionarios_completo_parcial.py`
+-- [!] Decidir se os termos de ciência pulam quem tem `na_escola = false`
++- [~] Decidir se os termos de ciência pulam quem tem `na_escola = false`: **deixado de lado por enquanto** (2026-11-23)
+ 
+ ### Transferidos
+ - [x] **Aluno que sai duas vezes no mesmo ano** (2026-11-18): regra do usuário: saiu, foi processado, voltou e saiu de novo → a 2ª saída tem guia, histórico e parecer próprios. O registro da 1ª vai para `ciclos_anteriores` em `transferidos.json`, os PDFs dela são renomeados `<nome> (saída dd-mm-aaaa).pdf` (se não der para renomear, nada é alterado) e o processo refaz tudo. Corrigido junto o pré-corte, que preenchia como pronto o registro da 2ª saída quando a 1ª foi antes do corte. Testes em `tests/test_fluxo_transferidos.py`. ⚠️ Falta ver como fica o parecer da 2ª saída (`PARECERES/<turma>/NN-NOME.pdf` pode ter o mesmo nome do da 1ª) e mostrar os ciclos anteriores na tela Transferidos. `deteccao_transferidos.py` (módulo antigo, só `detectar_mudancas` é usado) tem a mesma trava e não foi alterado
+@@ -101,7 +102,7 @@
+ - [x] Entrada em linha (`Nome 12/03/2015 mãe: Fulana`, ou `Nome; data; mãe`, ou CGM), homônimos separados por data + mãe, ambíguo nunca escolhido (registra os candidatos), registro "encontrado" nunca apagado por busca que não achou: coberto por teste com navegador de mentira
+ - [!] **Validar no SERE real** (o formulário da Base ABC não foi visto): campos Nome, Data de nascimento e Nome da mãe do formulário (`CAMPOS_NOME`, `CAMPOS_NASCIMENTO`, `CAMPOS_MAE`); se a tabela de resultados mostra a data; rótulos do cadastro (`ROTULOS_*`) para Nome, CGM, Data de nascimento e Nome da mãe. Campo Nome não achado: a execução para e lista os campos da página (mande a lista para ajustar)
+ - [!] Rode primeiro com "Mostrar o navegador" e o modo de teste (só o 1º aluno)
+-- [x] **Sem limite de candidatos (2026-11-22)**: o `LIMITE_VERIFICAR` (5) saiu; com nome comum, todos os resultados que a tabela traz na página são conferidos (abrindo o cadastro quando a tabela não mostra data/mãe). Teste `test_confere_todos_os_resultados_da_pagina_sem_limite`. [!] Se a Base ABC dividir os resultados em **várias páginas**, só a 1ª é lida (não há paginação no código): confirmar no SERE real
++- [x] **Sem limite de candidatos (2026-11-22)**: o `LIMITE_VERIFICAR` (5) saiu; com nome comum, todos os resultados que a tabela traz na página são conferidos (abrindo o cadastro quando a tabela não mostra data/mãe). Teste `test_confere_todos_os_resultados_da_pagina_sem_limite`. [~] Paginação da Base ABC **descartada** (2026-11-23): a busca é progressiva (nome, depois nome + nascimento, a mãe como filtro) e já estreita os resultados, então não precisa ler várias páginas
+ - [ ] **Vínculo CGM + aluno + turma de origem (2026-11-12)**: além de `buscas_base.json`, o vínculo é gravado em `vinculo_base_abc` dentro de `pre_matricula.json` (regra do ano vigente: Matriculado/Transferido) e de `previsao_alunos_<ano+1>.json` (regra da pré-matrícula: + Desistente/Reprovado), em `cadastros[cpf]` ou, para quem só está na fila, no item de `turmas_intencao`. A Base ABC passou a ler os DOIS arquivos. Campos: periodo, ano_referencia, nome, cgm, turma (origem), escola, situacao, status ("ok"|"verificar"), motivo, consultado_em. Fora da regra, sem linha do ano, duas matrículas em curso ou sem CGM: grava e marca "verificar". `pre_matricula.py` preserva `vinculo_base_abc` ao recoletar. Base do módulo "Previsão <ano+1>" (feito em 2026-11-13, ver abaixo). ⚠️ Validar no SERE real os textos de "Resultado" (Desistente/Reprovado/Aprovado) em `SITUACOES_VINCULO`.
+ - [x] **Previsão do próximo ano (2026-11-13)**: o arquivo da coleta do alvo "proximo" passou de `pre_matricula_<ano+1>.json` para `previsao_alunos_<ano+1>.json` (o `pre_matricula.json` do ano em uso não muda). Um `pre_matricula_<ano+1>.json` já gravado é **renomeado sozinho** na primeira leitura (`os.replace`, conteúdo intacto; se os dois existirem, vale o novo e o antigo fica para conferência). Novo módulo **Previsão <ano+1>** (menu lateral, `previsao.html` + `previsao.js`, rota `GET /web/api/previsao`, regra em `src/comum/previsao.py`): lista os **rematriculados** (`rematriculas_sucesso.json`) + os **alunos novos da pré-matrícula** (matriculados e pendentes; cancelados, cadastro refeito em outra escola e tentativas substituídas ficam de fora). Quem está nas duas fontes conta uma vez, como rematriculado (CGM ou nome + nascimento). Testes em `tests/test_previsao.py`. ⚠️ Falta validar com dados reais do SERE/pré-matrícula; a turma exibida é a de origem (rematriculado) ou a pretendida (novo): o sistema **não calcula** a turma de destino do rematriculado.
+ - [x] **Lista da pré-matrícula** (2026-11-08): campo "Incluir alunos da pré-matrícula" (matriculados, aguardando, os dois ou todos) lê `pre_matricula.json` e soma ao que foi digitado. ⚠️ Cadastro da pré-matrícula coletado **antes de 2026-11-14** não tem o nome da mãe (e o de antes da Previsão pode não ter a data): a busca é por nome (+ o responsável só desempata homônimos, quando é a mãe no cadastro da Base ABC). Recoletar a etapa 2 traz a data e, se o portal mostrar, a mãe. `conferido_por` diz o quanto cada aluno foi confirmado; confira à mão os "só o nome"
+@@ -134,7 +135,7 @@
+   - [ ] **Validar no SERE real:** o aluno que volta recebe mesmo uma nova `Data Matricula`? Transferidos continuam aparecendo no `turmas.json`? Antes da 1ª coleta com o código novo, rodar `python -m src.comum.matriculas --semear` e ver quantos ficam `verificar`.
+   - [ ] Quem já estava Transferido quando a ponte nasceu fica com `data_matricula: null` (o SERE não informa); `--semear` recupera o que os backups ainda tiverem.
+   - [x] **Transferidos e Base ABC usam o ID (2026-11-20):** cada registro de `transferidos.json` guarda `id_matricula` (o período da saída). Com ID dos dois lados o ID decide: igual = mesma saída (data corrigida no SERE não refaz nada); diferente e data mais nova = nova saída (novo ciclo, sem exigir a saída anterior na fila); diferente com a mesma data = ponte refeita (adota o ID novo, guarda o antigo em `id_matricula_anterior`, não cria ciclo). Registro antigo sem ID adota o ID na primeira coleta. O ciclo anterior guarda `id_matricula` e `arquivos` (nomes dos PDFs renomeados). A Consulta na Base ABC dos transferidos leva o ID e **só grava o vínculo se o registro ainda for da mesma saída**; o aviso à escola de destino também guarda o ID (o "aviso enviado" resiste a data corrigida). Ficou como estava: os PDFs continuam renomeados `<nome> (saída dd-mm-aaaa).pdf` e os pareceres continuam em `PARECERES/<turma>/NN-NOME.ext`
+-  - [ ] Avaliar trocar o significado de `Data Matricula` por um auxiliar `data_movimentacao()` (só agora faz sentido; 12 arquivos do `src` e 22 de testes a leem)
++  - [~] Trocar o significado de `Data Matricula` por `data_movimentacao()`: **descartado** (2026-11-23). `Data Matricula` fica sendo a data da matrícula; a de saída continua em `Data Transferência` (uma data de movimentação misturaria as duas)
+   - [x] **Aluno da pré-matrícula ligado ao ID quando ganha CGM (2026-11-20):** `matriculas.ligar_pre_matricula` (roda ao fim da coleta de turmas e ao fim de cada Consulta na Base ABC; também `python -m src.comum.matriculas --ligar-pre-matricula`). Para cada cadastro/item de `pre_matricula.json` e `previsao_alunos_<ano>.json` com vínculo da Base ABC **ok** e CGM que já tem matrícula na ponte, grava `id_matricula` no cadastro e `pre_matricula: {arquivo, ligado_em}` no período da ponte (o CPF nunca vai para a ponte). Vínculo a verificar não liga; ligação válida nunca é trocada; CGM com mais de um período liga o **mais antigo** e é contado no log; arquivo ilegível nunca é sobrescrito. A coleta da pré-matrícula preserva `id_matricula`. ⚠️ Linhas do `turmas.json` sem CGM continuam fora da ponte
+   - [!] Validar no real: o aluno da pré-matrícula que entra na escola aparece com o mesmo CGM do vínculo da Base ABC, e a ligação cai no período certo
+   - [ ] Opcional: registrar a conferência como automação na tela (hoje é por linha de comando).
+diff -ruN -x logs -x __pycache__ -x .pytest_cache a/src/automacao/avisos.py b/src/automacao/avisos.py
+--- a/src/automacao/avisos.py	2026-11-22 22:04:04.000000000 +0000
++++ b/src/automacao/avisos.py	2026-11-23 23:59:16.255094510 +0000
+@@ -9,12 +9,12 @@
+ PÚBLICOS
+   escolas   escolas municipais e CMEIs de escolas_completas.json (Coleta e-mails), exceto a própria escola.
+             "Quais unidades": nada marcado = todas; ou grupos (@escolas, @cmeis) e/ou escolas pelo nome.
+-            Dois jeitos de enviar, decididos pelo TEXTO:
+-              - sem marcador de aluno: um e-mail por unidade (e por endereço dela);
+-              - com $ALUNO, $CGM, $SERIE ou $TURMA: um e-mail POR ALUNO que chega, para a escola de ORIGEM dele (o vínculo
+-                da Base ABC gravado em pre_matricula.json / previsao_alunos_<ano+1>.json). Só entra quem tem vínculo "ok"
+-                com CGM e escola, cuja escola está na lista e tem e-mail (vai o primeiro). O resto fica numa lista de
+-                "não recebem" (sem vínculo, a verificar, origem fora da lista, já na nossa escola, escola sem e-mail).
++            NÃO EXISTE aviso em massa para escolas (decisão do usuário, 23/11/2026). O texto PRECISA ter $ALUNO, $CGM,
++            $SERIE ou $TURMA, e vira um e-mail POR ALUNO que chega, para a escola de ORIGEM dele (o vínculo da Base ABC
++            gravado em pre_matricula.json / previsao_alunos_<ano+1>.json). Só entra quem tem vínculo "ok" com CGM e
++            escola, cuja escola está na lista e tem e-mail (vai o primeiro). O resto fica numa lista de "não recebem"
++            (sem vínculo, a verificar, origem fora da lista, já na nossa escola, escola sem e-mail). Texto sem esses
++            marcadores é recusado antes de qualquer envio, na simulação, no teste e no envio real.
+   destino   escola de DESTINO dos alunos transferidos (2026-11-19): um e-mail por aluno que SAIU, para a escola para onde ele foi
+             (vínculo da Base ABC gravado em transferidos.json, ou o destino preenchido à mão na tela de Transferidos),
+             avisando que histórico, guia e parecer estão na pasta do aluno e seguem em ANEXO neste e-mail. Só entra quem tem
+@@ -230,6 +230,9 @@
+     {"destinatarios": [{nome, email, contexto}], "sem_email": [nomes], "excluidas": [nomes]}.
+     Fora da lista: a própria escola, a que não tem e-mail válido (vai em `sem_email`) e e-mail repetido.
+     `unidades`: o que foi marcado em "Quais unidades" (ver normalizar_unidades); vazio = todas.
++
++    SÓ LISTA as escolas com e-mail e filtros. Nenhum envio parte daqui: o aviso para escolas é sempre um e-mail por
++    aluno (ver destinatarios_alunos_origem) e `reunir_destinatarios` recusa o público "escolas" sem marcador de aluno.
+     """
+     propria = escola.nome()
+     escolhidas = normalizar_unidades(unidades)
+@@ -677,6 +680,12 @@
+             and str(credenciais.EMAIL_SENHA_APP or "") not in ("", "senha_app_email"))
+ 
+ 
++MENSAGEM_SEM_MARCADOR_DE_ALUNO = (
++    "O e-mail para as escolas é sempre um por aluno: não existe aviso em massa. Use pelo menos um destes marcadores "
++    "no assunto ou na mensagem: $ALUNO, $CGM, $SERIE ou $TURMA."
++)
++
++
+ def _marcadores_de_aluno(texto: str) -> set:
+     return {m for m in _RE_MARCADOR.findall(texto or "") if m in MARCADORES_DE_ALUNO}
+ 
+@@ -725,6 +734,8 @@
+     if "ESCOLA" in set(_RE_MARCADOR.findall(assunto)) | set(_RE_MARCADOR.findall(mensagem)) and not escola.nome():
+         raise ValueError("O texto usa $ESCOLA, mas o nome da escola ainda não foi informado (Configurações → Dados da escola).")
+     por_aluno = publico == "destino" or (publico == "escolas" and bool(_marcadores_de_aluno(assunto + " " + mensagem)))
++    if publico == "escolas" and not por_aluno:
++        raise ValueError(MENSAGEM_SEM_MARCADOR_DE_ALUNO)
+     intervalo = _inteiro_entre(intervalo_s, INTERVALO_MIN_S, INTERVALO_MAX_S, INTERVALO_PADRAO_S, "Intervalo entre e-mails (segundos)")
+     lote = _inteiro_entre(limite_lote, LOTE_MIN, LOTE_MAX, LOTE_PADRAO, "Máximo de e-mails por execução")
+     email_teste = str(email_teste or "").strip().lower()
+@@ -797,9 +808,8 @@
+             raise ValueError(_por_que_nao_ha_alunos(r))
+         return r
+     if publico == "escolas":
+-        r = destinatarios_escolas(tipo_escola, filtro_nome, unidades)
+-    else:
+-        r = destinatarios_pais(situacao_pais, fonte, alunos)
++        raise ValueError(MENSAGEM_SEM_MARCADOR_DE_ALUNO)      # nunca um e-mail igual para todas as escolas
++    r = destinatarios_pais(situacao_pais, fonte, alunos)
+     if not r["destinatarios"]:
+         raise ValueError("Nenhum destinatário com e-mail válido para este público e estes filtros.")
+     return r
+@@ -819,6 +829,8 @@
+         conferir_marcadores(assunto, publico, "Assunto")
+         conferir_marcadores(mensagem, publico, "Mensagem")
+         por_aluno = publico == "destino" or (publico == "escolas" and bool(_marcadores_de_aluno(assunto + " " + mensagem)))
++        if publico == "escolas" and not por_aluno:
++            raise ValueError(MENSAGEM_SEM_MARCADOR_DE_ALUNO)
+     except ValueError as exc:
+         return {"aviso": str(exc)}
+     try:
+diff -ruN -x logs -x __pycache__ -x .pytest_cache a/src/comum/ajuda_automacoes.py b/src/comum/ajuda_automacoes.py
+--- a/src/comum/ajuda_automacoes.py	2026-11-22 22:04:04.000000000 +0000
++++ b/src/comum/ajuda_automacoes.py	2026-11-23 23:59:37.194161158 +0000
+@@ -449,7 +449,7 @@
+                       "`AVISOS/enviados.json` e o registro da execução (enviados, falhas, os que faltam). O botão **Ver quem já recebeu** mostra esse registro."],
+         "cuidados": ["O envio real **não pode ser desfeito** e pede confirmação. Só funciona depois de **Simular** o mesmo texto e os mesmos destinatários (a simulação vale 24 horas).",
+                      "Quem já recebeu o mesmo texto não recebe de novo: dá para cancelar e rodar outra vez, que continua de onde parou. Três falhas seguidas (senha errada, sem rede) param o envio.",
+-                     "Um texto com **$ALUNO, $CGM, $SERIE ou $TURMA** vira um e-mail por aluno que chega, para a escola de origem dele; sem esses marcadores, é um e-mail por unidade. "
++                     "Para as escolas **não existe aviso em massa**: o texto precisa ter **$ALUNO, $CGM, $SERIE ou $TURMA** e vira um e-mail por aluno que chega, para a escola de origem dele. Sem esses marcadores, o sistema recusa o envio. "
+                      "Aluno sem vínculo da Base ABC, com vínculo a verificar ou com escola de origem fora da lista **não recebe** e aparece na lista. "
+                      "Se o aluno já entrou na nossa escola, o pedido vai para a escola anterior do histórico.",
+                      "**Tipo de mensagem** carrega modelos (o de transferência já vem pronto) e dá para salvar, ajustar e excluir os seus, que ficam em `config/modelos_avisos.json`.",
+diff -ruN -x logs -x __pycache__ -x .pytest_cache a/src/comum/ajuda_conteudo.py b/src/comum/ajuda_conteudo.py
+--- a/src/comum/ajuda_conteudo.py	2026-11-22 22:04:04.000000000 +0000
++++ b/src/comum/ajuda_conteudo.py	2026-11-23 22:50:16.045481612 +0000
+@@ -834,6 +834,28 @@
+         "cuidados": ["O script do RCO precisa do Chrome e ignora esta escolha."],
+     },
+ 
++    "backup_automatico": {
++        "titulo": "Painel: Backup automático", "icone": "database",
++        "resumo": "Liga ou desliga o backup que o sistema faz sozinho ao fim das coletas de turmas, alunos e funcionários.",
++        "passos": [
++            "Marque **Fazer backup automático ao fim das coletas** para ligar, ou desmarque para desligar.",
++            "Clique em **Salvar**. Vale a partir da próxima coleta.",
++        ],
++        "elementos": [
++            E("Fazer backup automático", "Marcado = cada coleta termina com um backup dos dados do ano.", "#cfg-backup-auto-ligado"),
++            E("Situação", "Mostra se o backup automático está ligado de verdade e avisa se algo o está desligando por fora.", "#cfg-backup-auto-status"),
++            E("Salvar", "Grava a escolha.", "#cfg-backup-auto-salvar"),
++        ],
++        "dicas": [
++            "Ficam os 7 backups automáticos mais recentes; eles não empurram para fora os backups manuais.",
++            "Coletas seguidas (menos de 30 minutos) trocam o automático anterior pelo novo.",
++        ],
++        "cuidados": [
++            "Desligar não apaga os backups que já existem. O backup manual (Automações → Backup) continua funcionando.",
++            "Se a variável de ambiente AUTO_SERE_BACKUP_AUTO estiver em 0 no computador, ela desliga o backup acima desta escolha, e o painel avisa.",
++        ],
++    },
++
+     "google_conta": {
+         "titulo": "Painel: Conta Google da autorização", "icone": "lock",
+         "resumo": "Define com qual conta, em qual navegador e em qual perfil abre o link de autorização do Google (planilhas e contatos).",
+diff -ruN -x logs -x __pycache__ -x .pytest_cache a/src/comum/backup.py b/src/comum/backup.py
+--- a/src/comum/backup.py	2026-11-22 22:04:04.000000000 +0000
++++ b/src/comum/backup.py	2026-11-23 22:49:46.897844426 +0000
+@@ -34,12 +34,13 @@
+ "automático (após a coleta de ...)". Ele nunca derruba a coleta (erro vira aviso) e tem retenção PRÓPRIA — os 7 mais
+ recentes (AUTO_SERE_BACKUP_MANTER_AUTO) —, para as coletas diárias não empurrarem para fora os backups manuais e os de
+ "antes de restaurar", que seguem com os 10 do limite normal. Coletas seguidas (menos de 30 min) substituem o backup
+-automático anterior, que ficaria incompleto. AUTO_SERE_BACKUP_AUTO=0 desliga.
++automático anterior, que ficaria incompleto. Liga/desliga em Configurações → "Backup automático" (chave
++`backup_automatico` do config_usuario.json). A variável AUTO_SERE_BACKUP_AUTO=0, se existir, desliga por cima da tela.
+ 
+ ANOS (24/10/2026): cada backup é de UM ano (o manifesto guarda `ano`) e a restauração repõe os dados na pasta
+ desse ano — nunca por cima do ano em uso, se forem diferentes. Cópia de segurança antes de restaurar também é
+ do ano que será sobrescrito. A retenção (10 mais recentes) vale por ano, para um backup de 2025 não ser
+-apagado por backups novos de 2026. Restaurar a configuração não desfaz o ano letivo escolhido na tela.
++apagado por backups novos de 2026. Restaurar a configuração não desfaz o ano letivo nem o liga/desliga do backup automático escolhidos na tela.
+ """
+ from __future__ import annotations
+ 
+@@ -355,6 +356,7 @@
+         origens["dados_ano"] = paths.DADOS_DIR / ano_backup
+     seguranca = None
+     ano_letivo_anterior = _ler_ano_letivo_configurado()
++    backup_auto_anterior = _ler_backup_automatico_configurado()
+     if aplicar:
+         try:
+             seguranca = criar_backup(motivo="antes_de_restaurar", ano=ano_backup if ano_backup != str(paths.ano_atual()) else None)
+@@ -386,6 +388,7 @@
+                 config_regravada = True
+     if config_regravada:
+         _regravar_ano_letivo(ano_letivo_anterior)
++        _regravar_backup_automatico(backup_auto_anterior)
+     return {
+         "aplicado": aplicar,
+         "arquivos": len(gravados),
+@@ -403,14 +406,55 @@
+     return f"{n / 1024:.0f} KB" if n < 1024 * 1024 else f"{n / 1024 / 1024:.1f} MB"
+ 
+ 
++_VALORES_DESLIGADO = {"0", "nao", "não", "false", "off"}
++
++
++def desligado_pelo_ambiente() -> bool:
++    """AUTO_SERE_BACKUP_AUTO=0 (ou nao/false/off) desliga o backup automático e vale acima da escolha da tela."""
++    return str(os.environ.get("AUTO_SERE_BACKUP_AUTO", "1")).strip().lower() in _VALORES_DESLIGADO
++
++
++def _ler_backup_automatico_configurado() -> bool | None:
++    """Escolha gravada na tela (config_usuario.json): True/False, ou None se nunca foi escolhida ou o arquivo não abre."""
++    try:
++        dados = json.loads(_config_usuario().read_text(encoding="utf-8"))
++    except (OSError, ValueError):
++        return None
++    valor = dados.get("backup_automatico") if isinstance(dados, dict) else None
++    return valor if isinstance(valor, bool) else None
++
++
++def automatico_ligado() -> bool:
++    """Vale o ambiente (se desligou), depois a escolha da tela; sem nenhuma das duas, está ligado."""
++    if desligado_pelo_ambiente():
++        return False
++    return _ler_backup_automatico_configurado() is not False
++
++
++def _regravar_backup_automatico(valor: bool | None) -> None:
++    """Depois de restaurar a configuração de um backup antigo, devolve a escolha de backup automático que estava valendo."""
++    caminho = _config_usuario()
++    try:
++        dados = json.loads(caminho.read_text(encoding="utf-8"))
++    except (OSError, ValueError):
++        return
++    if not isinstance(dados, dict):
++        return
++    if valor is None:
++        dados.pop("backup_automatico", None)
++    else:
++        dados["backup_automatico"] = valor
++    caminho.write_text(json.dumps(dados, ensure_ascii=False, indent=2), encoding="utf-8")
++
++
+ def backup_apos_coleta(coleta: str, log=print) -> Path | None:
+     """
+     Backup automático ao fim de uma coleta bem-sucedida (`coleta`: \"turmas\", \"alunos\", \"funcionários\"...).
+     NUNCA levanta erro: a coleta já terminou e seus dados estão salvos; se o backup falhar vira só um aviso.
+-    Devolve o caminho do zip, ou None se desligado (AUTO_SERE_BACKUP_AUTO=0), sem dados ou com falha.
++    Devolve o caminho do zip, ou None se desligado (tela de Configurações ou AUTO_SERE_BACKUP_AUTO=0), sem dados ou com falha.
+     Backups automáticos do mesmo ano criados nos últimos JANELA_SUBSTITUICAO_MIN minutos são substituídos pelo novo.
+     """
+-    if str(os.environ.get("AUTO_SERE_BACKUP_AUTO", "1")).strip().lower() in {"0", "nao", "não", "false", "off"}:
++    if not automatico_ligado():
+         return None
+     try:
+         novo = criar_backup(motivo=f"{PREFIXO_MOTIVO_AUTOMATICO} (após a coleta de {coleta})")
+diff -ruN -x logs -x __pycache__ -x .pytest_cache a/src/comum/configuracao.py b/src/comum/configuracao.py
+--- a/src/comum/configuracao.py	2026-11-22 22:04:04.000000000 +0000
++++ b/src/comum/configuracao.py	2026-11-23 22:49:46.897391243 +0000
+@@ -69,6 +69,7 @@
+     "navegador_scripts": {},              # {chave_do_script: {"mostrar_janela": True/False}}; sem a chave = o padrão do script
+     "google_sheets": None,                # {"mapa_abas"} (ver google_sheets_config); as planilhas ficam em planilhas_gerenciador
+     "google_oauth": None,                 # {"conta","navegador","perfil","abrir"} — com qual conta/navegador/perfil abrir a autorização do Google (ver google_oauth_preferencias)
++    "backup_automatico": None,            # None = ligado (padrão); False = desligado; True = ligado — ver backup_automatico (backup após as coletas)
+ }
+ 
+ 
+@@ -580,6 +581,25 @@
+ 
+ 
+ # ─────────────────────────────────────────────────────────────────────────
++# Backup automático após as coletas (item 3b; botão em Configurações, 23/11/2026)
++# ─────────────────────────────────────────────────────────────────────────
++
++def backup_automatico() -> bool:
++    """True (padrão) = cada coleta de turmas, alunos e funcionários termina com um backup. Só False desliga."""
++    return carregar_configuracao().get("backup_automatico") is not False
++
++
++def definir_backup_automatico(ligado) -> bool:
++    """Liga ou desliga o backup automático. ValueError se não for verdadeiro/falso."""
++    if not isinstance(ligado, bool):
++        raise ValueError("Informe verdadeiro (ligar) ou falso (desligar).")
++    configuracao = carregar_configuracao()
++    configuracao["backup_automatico"] = ligado
++    _salvar_configuracao(configuracao)
++    return ligado
++
++
++# ─────────────────────────────────────────────────────────────────────────
+ # Autorização do Google: conta, navegador e perfil em que o link abre
+ # ─────────────────────────────────────────────────────────────────────────
+ 
+diff -ruN -x logs -x __pycache__ -x .pytest_cache a/src/comum/modelos_avisos.py b/src/comum/modelos_avisos.py
+--- a/src/comum/modelos_avisos.py	2026-11-22 22:04:04.000000000 +0000
++++ b/src/comum/modelos_avisos.py	2026-11-23 23:59:37.193088401 +0000
+@@ -143,6 +143,9 @@
+         raise ValueError("Escreva a mensagem do modelo.")
+     if len(mensagem) > LIMITE_MENSAGEM:
+         raise ValueError(f"A mensagem passa de {LIMITE_MENSAGEM} caracteres.")
++    if publico == "escolas" and not re.search(r"\$(?:ALUNO|CGM|SERIE|TURMA)\b", assunto + " " + mensagem):
++        raise ValueError("Modelo para escolas precisa de $ALUNO, $CGM, $SERIE ou $TURMA: o e-mail é sempre um por aluno, "
++                         "não existe aviso em massa para escolas.")
+     return nome, publico, assunto, mensagem
+ 
+ 
+diff -ruN -x logs -x __pycache__ -x .pytest_cache a/src/comum/registro_scripts.py b/src/comum/registro_scripts.py
+--- a/src/comum/registro_scripts.py	2026-11-22 22:04:04.000000000 +0000
++++ b/src/comum/registro_scripts.py	2026-11-24 00:01:47.832486843 +0000
+@@ -960,7 +960,7 @@
+     so = lambda campo, valor: {"campo": campo, "valor": valor}
+     marcadores = {
+         "escolas": "Marcadores no assunto e na mensagem: " + ", ".join("$" + m for m in av.marcadores_validos("escolas"))
+-                   + ". Com $ALUNO, $CGM, $SERIE ou $TURMA o e-mail vai para a escola de ORIGEM de cada aluno que chega.",
++                   + ". Obrigatório usar $ALUNO, $CGM, $SERIE ou $TURMA: o e-mail é sempre um por aluno que chega, para a escola de ORIGEM dele (não existe aviso em massa).",
+         "pais": "Marcadores no assunto e na mensagem: " + ", ".join("$" + m for m in av.marcadores_validos("pais")),
+         "destino": "Marcadores no assunto e na mensagem: " + ", ".join("$" + m for m in av.marcadores_validos("destino"))
+                    + ". Um e-mail por aluno transferido, para a escola para onde ele foi; a guia, o histórico e o parecer seguem em ANEXO.",
+@@ -1045,6 +1045,9 @@
+     unidades, fonte = p.get("unidades") or None, p.get("fonte") or "ano"
+     texto_do_pedido = f"{p.get('assunto') or ''} {p.get('mensagem') or ''}"
+     por_aluno = p["publico"] == "destino" or (p["publico"] == "escolas" and bool(av._marcadores_de_aluno(texto_do_pedido)))
++    if p["publico"] == "escolas" and not por_aluno:
++        return ("Para as escolas o e-mail é sempre um por aluno: use $ALUNO, $CGM, $SERIE ou $TURMA no texto "
++                "(não existe aviso em massa).")
+     filtros = (p.get("tipo_escola") or "todas", p.get("filtro_nome") or "", p.get("situacao_pais") or "matriculados", unidades, fonte, por_aluno,
+                p.get("alunos") or None)
+     if av.teste_com_escola_ficticia(p["publico"], modo):
+@@ -1054,7 +1057,7 @@
+             n = len(av.reunir_destinatarios(p["publico"], *filtros)["destinatarios"])
+             texto += (f" (o comunicado real iria para {n} e-mail(s) "
+                       + ("de escolas de destino, com os documentos em anexo" if p["publico"] == "destino"
+-                         else "de escolas de origem" if por_aluno else "de escolas e CMEIs") + ")")
++                         else "de escolas de origem") + ")")
+         except ValueError:
+             pass                                # sem a lista real o teste funciona do mesmo jeito
+         return texto + "."
+diff -ruN -x logs -x __pycache__ -x .pytest_cache a/src/servicos/whatsapp/fila.py b/src/servicos/whatsapp/fila.py
+--- a/src/servicos/whatsapp/fila.py	2026-11-22 22:04:04.000000000 +0000
++++ b/src/servicos/whatsapp/fila.py	2026-11-23 22:59:24.650702294 +0000
+@@ -5,7 +5,7 @@
+ parecer envio em massa (o WhatsApp bane números que mandam rápido demais; este é um cliente não oficial).
+ 
+ O que a fila garante:
+-  - pausa fixa ENTRE uma mensagem e a seguinte (INTERVALO_MIN_S a INTERVALO_MAX_S segundos);
++  - pausa fixa ENTRE uma mensagem e a seguinte (INTERVALO_MIN_S a INTERVALO_MAX_S segundos); o padrão é de 5 minutos;
+   - limite por dia de mensagens de verdade (LIMITE_MIN a LIMITE_MAX). Ao atingi-lo, a fila espera o dia seguinte e
+     continua sozinha (se `continuar_no_dia_seguinte`) ou para;
+   - Pausar a qualquer momento (termina a mensagem em andamento) e continuar depois; cancelar item a item ou todos os
+@@ -31,7 +31,8 @@
+ from .base import EnvioNaoAutorizadoError, mascarar_numero, normalizar_numero
+ from .gateway_http import envio_real_autorizado
+ 
+-INTERVALO_PADRAO_S, INTERVALO_MIN_S, INTERVALO_MAX_S = 45, 10, 600
++# Padrão de 5 minutos (23/11/2026, pedido do usuário): em comunicado em massa a pausa curta arrisca o bloqueio do número.
++INTERVALO_PADRAO_S, INTERVALO_MIN_S, INTERVALO_MAX_S = 300, 10, 600
+ LIMITE_PADRAO, LIMITE_MIN, LIMITE_MAX = 40, 1, 300
+ LIMITE_TEXTO = 4000
+ FALHAS_SEGUIDAS_MAX = 3
+diff -ruN -x logs -x __pycache__ -x .pytest_cache a/src/web/api/rotas.py b/src/web/api/rotas.py
+--- a/src/web/api/rotas.py	2026-11-22 22:04:04.000000000 +0000
++++ b/src/web/api/rotas.py	2026-11-23 22:49:56.857550232 +0000
+@@ -45,6 +45,7 @@
+ from src.comum import paths as _paths
+ from src.comum.execucao_gui import ExecucaoEmBackground, StatusExecucao
+ from src.comum import alunos_unificados
++from src.comum import backup as _backup
+ from src.comum import configuracao as _config
+ from src.comum import cep_consulta as _cep
+ from src.comum import escola as _escola
+@@ -2114,6 +2115,39 @@
+     return jsonify(resposta)
+ 
+ 
++# ── Backup automático após as coletas: liga/desliga em Configurações ──────────────────────────────────────────────
++
++def _estado_backup_automatico() -> dict:
++    """`ligado` é o que vale de verdade; `pelo_ambiente` = a variável AUTO_SERE_BACKUP_AUTO=0 desliga por cima da tela."""
++    pelo_ambiente = _backup.desligado_pelo_ambiente()
++    return {"ligado": _backup.automatico_ligado(), "escolha": _config.backup_automatico(), "pelo_ambiente": pelo_ambiente}
++
++
++@api_bp.route("/configuracoes/backup-automatico", methods=["GET"])
++def configuracao_backup_automatico_obter():
++    return jsonify(_estado_backup_automatico())
++
++
++@api_bp.route("/configuracoes/backup-automatico", methods=["POST"])
++def configuracao_backup_automatico_salvar():
++    """payload: {"ligado": true|false}."""
++    payload = request.get_json(silent=True) or {}
++    try:
++        _config.definir_backup_automatico(payload.get("ligado"))
++    except ValueError as exc:
++        return jsonify({"erro": str(exc)}), 400
++    resposta = _estado_backup_automatico()
++    if resposta["pelo_ambiente"]:
++        resposta["mensagem"] = ("Escolha salva, mas a variável AUTO_SERE_BACKUP_AUTO está desligando o backup automático "
++                                "neste computador: tire-a para a escolha valer.")
++    elif resposta["ligado"]:
++        resposta["mensagem"] = "Backup automático ligado: cada coleta termina com um backup."
++    else:
++        resposta["mensagem"] = "Backup automático desligado. Os backups manuais continuam em Automações → Backup."
++    resposta["status"] = "ok"
++    return jsonify(resposta)
++
++
+ # ── Autorização do Google: link para copiar e conta/navegador/perfil em que ele abre ────────────────────────────────
+ 
+ def _estado_google_conta() -> dict:
+diff -ruN -x logs -x __pycache__ -x .pytest_cache a/src/web/static/js/app.js b/src/web/static/js/app.js
+--- a/src/web/static/js/app.js	2026-11-22 22:04:04.000000000 +0000
++++ b/src/web/static/js/app.js	2026-11-23 22:50:10.064613328 +0000
+@@ -3495,6 +3495,14 @@
+     <div id="cfg-nav-opcoes" style="display:flex; flex-direction:column; gap:10px; margin-bottom:14px;">Carregando…</div>
+     <div id="cfg-nav-status" style="font-family:var(--mono); font-size:.72rem; color:var(--txt3); margin-bottom:14px;"></div>
+     <button class="btn-primary" id="cfg-nav-salvar">Salvar navegador</button>`,
++  backup_automatico: `
++    <h4 style="margin-bottom:14px; font-size:.9rem;">Backup automático</h4>
++    <p style="color:var(--txt3); font-size:.82rem; margin-bottom:12px;">Ao fim de cada coleta de <b>turmas</b>, <b>alunos</b> e <b>funcionários</b> (inclusive nas rotinas diárias), o sistema guarda uma cópia dos dados do ano. Ficam os <b>7 mais recentes</b> desse tipo, sem empurrar para fora os backups manuais. Desligar não apaga nada do que já existe, e o backup manual (Automações → Backup) continua funcionando.</p>
++    <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:.88rem; margin-bottom:14px;">
++      <input type="checkbox" id="cfg-backup-auto-ligado"> Fazer backup automático ao fim das coletas
++    </label>
++    <div id="cfg-backup-auto-status" style="font-family:var(--mono); font-size:.72rem; color:var(--txt3); margin-bottom:14px;">Carregando…</div>
++    <button class="btn-primary" id="cfg-backup-auto-salvar">Salvar</button>`,
+   google_conta: `
+     <h4 style="margin-bottom:14px; font-size:.9rem;">Conta Google da autorização</h4>
+     <p style="color:var(--txt3); font-size:.82rem; margin-bottom:12px;">Quando o AUTO SERE precisa da sua autorização no Google (planilhas, contatos), ele abre um link de login. Aqui você escolhe <b>com qual conta</b> e <b>em qual navegador/perfil</b> esse link abre. No Chrome e no Edge, se algum perfil estiver logado na conta informada, o perfil certo é achado sozinho. Em qualquer caso, a janela de autorização tem o botão <b>Copiar link</b> para colar no navegador que você preferir.</p>
+@@ -3619,6 +3627,9 @@
+       if (row.dataset.config === "navegador") {
+         conectarFormNavegador();
+       }
++      if (row.dataset.config === "backup_automatico") {
++        conectarFormBackupAutomatico();
++      }
+       if (row.dataset.config === "google_conta") {
+         conectarFormGoogleConta();
+       }
+@@ -3792,6 +3803,40 @@
+     } catch (e) {
+       toast(e.message);
+     } finally {
++      btn.disabled = false;
++    }
++  });
++}
++
++async function conectarFormBackupAutomatico() {
++  const caixa = document.getElementById("cfg-backup-auto-ligado");
++  const status = document.getElementById("cfg-backup-auto-status");
++  const btn = document.getElementById("cfg-backup-auto-salvar");
++  if (!caixa || !status || !btn) return;
++  const mostrar = (d, mensagem) => {
++    caixa.checked = d.escolha !== false;
++    const aviso = d.pelo_ambiente
++      ? '<span style="color:var(--amber)">⚠ A variável AUTO_SERE_BACKUP_AUTO está desligando o backup automático neste computador, acima desta escolha.</span>'
++      : "";
++    const estado = d.ligado ? "Backup automático em vigor: <b>ligado</b>." : "Backup automático em vigor: <b>desligado</b>.";
++    status.innerHTML = [mensagem ? '<span style="color:var(--lime)">✓ ' + escaparHtml(mensagem) + "</span>" : "", estado, aviso]
++      .filter(Boolean).join("<br>");
++  };
++  try {
++    mostrar(await apiGet("/configuracoes/backup-automatico"));
++  } catch (e) {
++    status.textContent = "Não foi possível ler a configuração atual.";
++    return;
++  }
++  btn.addEventListener("click", async () => {
++    btn.disabled = true;
++    try {
++      const r = await apiPost("/configuracoes/backup-automatico", { ligado: caixa.checked });
++      mostrar(r, r.mensagem);
++      toast(r.mensagem || "Salvo");
++    } catch (e) {
++      toast(e.message);
++    } finally {
+       btn.disabled = false;
+     }
+   });
+diff -ruN -x logs -x __pycache__ -x .pytest_cache a/src/web/templates/configuracoes.html b/src/web/templates/configuracoes.html
+--- a/src/web/templates/configuracoes.html	2026-11-22 22:04:04.000000000 +0000
++++ b/src/web/templates/configuracoes.html	2026-11-23 22:50:10.042064941 +0000
+@@ -51,6 +51,14 @@
+       </div>
+     </div>
+ 
++    <div class="config-row" data-config="backup_automatico">
++      <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="database"></span></div>
++      <div class="txt">
++        <div class="name">Backup automático</div>
++        <div class="desc">Liga ou desliga o backup que o sistema faz ao fim das coletas de turmas, alunos e funcionários.</div>
++      </div>
++    </div>
++
+   </div>
+ 
+   <div class="sec-hdr" style="margin-top:32px;"><span class="sec-ttl">Credenciais e integrações</span></div>
+diff -ruN -x logs -x __pycache__ -x .pytest_cache a/src/web/templates/whatsapp.html b/src/web/templates/whatsapp.html
+--- a/src/web/templates/whatsapp.html	2026-11-22 22:04:04.000000000 +0000
++++ b/src/web/templates/whatsapp.html	2026-11-23 22:59:24.651068095 +0000
+@@ -120,7 +120,7 @@
+         <label class="comp-check" style="margin:0"><input type="checkbox" id="wa-fila-amanha"><span>Continuar sozinha no dia seguinte</span></label>
+         <button class="btn-sm" id="wa-fila-salvar-config">Salvar ajustes</button>
+       </div>
+-      <p class="campo-ajuda">Para não parecer envio em massa, use pausas longas e um limite baixo por dia. O envio real precisa estar
++      <p class="campo-ajuda">Para comunicados em massa, mantenha a pausa em <b>5 minutos</b> (é o padrão) e um limite baixo por dia: pausa curta pode fazer o WhatsApp bloquear o número. O envio real precisa estar
+       permitido (cartão "Mensagem de teste") e o WhatsApp conectado. Com 3 falhas seguidas a fila pausa sozinha.
+       A pausa só vale enquanto o AUTO SERE está aberto; ao reabrir, a fila fica parada até você iniciar.</p>
+ 
+diff -ruN -x logs -x __pycache__ -x .pytest_cache a/tests/test_avisos.py b/tests/test_avisos.py
+--- a/tests/test_avisos.py	2026-11-22 22:04:04.000000000 +0000
++++ b/tests/test_avisos.py	2026-11-24 00:02:19.451844774 +0000
+@@ -229,7 +229,7 @@
+ # ───────────── validação ─────────────
+ 
+ def _ok(**kw):
+-    base = dict(publico="escolas", canal="email", modo="simular", assunto="Aviso $ESCOLA", mensagem="Olá $ESCOLA_DESTINO")
++    base = dict(publico="escolas", canal="email", modo="simular", assunto="Aviso $ESCOLA", mensagem="Olá $ESCOLA_DESTINO, sobre $ALUNO")
+     base.update(kw)
+     return base
+ 
+@@ -269,7 +269,7 @@
+     monkeypatch.setattr(escola, "nome", lambda: "")
+     with pytest.raises(ValueError, match="nome da escola"):
+         av.validar_pedido(**_ok())
+-    av.validar_pedido(**_ok(assunto="Aviso", mensagem="Olá $ESCOLA_DESTINO"))   # $ESCOLA_DESTINO não é $ESCOLA
++    av.validar_pedido(**_ok(assunto="Aviso", mensagem="Olá $ESCOLA_DESTINO, sobre $ALUNO"))   # $ESCOLA_DESTINO não é $ESCOLA
+ 
+ 
+ def test_validar_modo_teste(amb, monkeypatch):
+@@ -289,8 +289,49 @@
+ 
+ 
+ def test_sem_destinatarios(amb):
+-    with pytest.raises(ValueError, match="Nenhum destinatário"):
+-        av.reunir_destinatarios("escolas", filtro_nome="inexistente")
++    with pytest.raises(ValueError, match="Nenhum aluno novo"):
++        av.reunir_destinatarios("escolas", filtro_nome="inexistente", por_aluno=True)
++
++
++# ───────────── NÃO existe aviso em massa para escolas (decisão de 23/11/2026) ─────────────
++
++@pytest.mark.parametrize("modo", ["simular", "teste", "enviar"])
++def test_escolas_sem_marcador_de_aluno_nunca_vira_aviso_em_massa(amb, smtp, modo):
++    with pytest.raises(ValueError, match="não existe aviso em massa"):
++        av.executar_avisos(**_args(publico="escolas", modo=modo, assunto="Comunicado", mensagem="Prezada direção da $ESCOLA_DESTINO"))
++    assert smtp == [] and not (paths.dados_ano_atual() / "AVISOS").exists()
++
++
++def test_so_o_marcador_da_escola_nao_basta_para_escolas(amb):
++    for texto in ("Para $ESCOLA_DESTINO", "Aviso de $ESCOLA em $DATA", "Sem marcador nenhum"):
++        with pytest.raises(ValueError, match="um por aluno"):
++            av.validar_pedido(**_ok(assunto="Aviso", mensagem=texto))
++
++
++@pytest.mark.parametrize("marcador", ["$ALUNO", "$CGM", "$SERIE", "$TURMA"])
++def test_cada_marcador_de_aluno_libera_o_texto_para_escolas(amb, marcador):
++    p = av.validar_pedido(**_ok(assunto="Aviso", mensagem=f"Pedido {marcador}"))
++    assert p["por_aluno"] is True
++
++
++def test_escolas_nunca_tem_destinatarios_sem_ser_por_aluno(amb):
++    with pytest.raises(ValueError, match="não existe aviso em massa"):
++        av.reunir_destinatarios("escolas")                                    # a lista real de escolas existe e não é usada
++    with pytest.raises(ValueError, match="não existe aviso em massa"):
++        av.reunir_destinatarios("escolas", unidades=["@todas"], por_aluno=False)
++
++
++def test_exemplo_da_mensagem_de_escolas_sem_marcador_so_avisa(amb):
++    r = av.exemplo_da_mensagem("escolas", "Aviso", "Para $ESCOLA_DESTINO")
++    assert "não existe aviso em massa" in r["aviso"] and "corpo" not in r
++
++
++def test_modelo_para_escolas_exige_marcador_de_aluno(amb, monkeypatch, tmp_path):
++    from src.comum import modelos_avisos as ma
++    with pytest.raises(ValueError, match="aviso em massa"):
++        ma._validar("Meu modelo", "escolas", "Aviso", "Olá $ESCOLA_DESTINO")
++    assert ma._validar("Meu modelo", "escolas", "Aviso", "Olá, $ALUNO")[1] == "escolas"
++    assert ma._validar("Meu modelo", "", "Aviso", "Olá")[1] == ""             # sem público definido: a trava vale na hora de enviar
+ 
+ 
+ # ───────────── montagem ─────────────
+@@ -327,13 +368,6 @@
+     assert "ANA LIMA e BETO LIMA" in registro["mensagens"][0]["corpo"]
+ 
+ 
+-def test_simular_escolas(amb, smtp, capsys):
+-    r = av.executar_avisos(**_args(publico="escolas", assunto="Comunicado", mensagem="Prezada direção da $ESCOLA_DESTINO"))
+-    assert smtp == [] and r["total"] == 4
+-    saida = capsys.readouterr().out
+-    assert f"Fora da lista (a própria escola): {PROPRIA}" in saida and "Prezada direção da Escola Municipal Ana Néri" in saida
+-
+-
+ def test_teste_envia_um_so_para_o_endereco_de_teste(amb, smtp):
+     r = av.executar_avisos(**_args(modo="teste", email_teste="eu@mail.com"))
+     assert len(smtp) == 1
+@@ -368,9 +402,11 @@
+ 
+ def test_lista_longa_e_resumida_no_log(amb, smtp, capsys):
+     dados = paths.dados_ano_atual()
+-    escolas = [{"nome": f"Escola Municipal Teste {i:03d}", "email": f"e{i}@pg.gov.br"} for i in range(80)]
+-    (dados / "escolas_completas.json").write_text(json.dumps({"escolas-municipais": {"escolas": escolas}}), encoding="utf-8")
+-    r = av.executar_avisos(**_args(publico="escolas", assunto="Aviso", mensagem="Oi $ESCOLA_DESTINO"))
++    alunos = [{"cpf": f"9{i:03d}", "nome": f"ALUNO {i:03d}", "situacao": "Matriculado"} for i in range(80)]
++    cadastros = {a["cpf"]: {"nome_responsavel": f"RESP {i:03d}", "email": f"r{i}@x.com"} for i, a in enumerate(alunos)}
++    (dados / "pre_matricula.json").write_text(
++        json.dumps({"turmas_intencao": {"Infantil IV": alunos}, "cadastros": cadastros}), encoding="utf-8")
++    r = av.executar_avisos(**_args(publico="pais", assunto="Aviso", mensagem="Oi $RESPONSAVEL"))
+     assert r["total"] == 80
+     assert "… e mais 20" in capsys.readouterr().out
+     assert len(json.loads(Path(r["registro"]).read_text(encoding="utf-8"))["mensagens"]) == 80   # o registro tem todos
+@@ -433,8 +469,10 @@
+     v({"publico": "pais", "assunto": "A", "mensagem": "B"})
+     with pytest.raises(ValueError, match="assunto"):
+         v({"publico": "pais", "mensagem": "B"})
+-    with pytest.raises(ValueError, match="Nenhum destinatário"):
++    with pytest.raises(ValueError, match="não existe aviso em massa"):
+         v({"publico": "escolas", "assunto": "A", "mensagem": "B", "filtro_nome": "zzz"})
++    with pytest.raises(ValueError, match="Nenhum aluno novo"):
++        v({"publico": "escolas", "assunto": "A $ALUNO", "mensagem": "B", "filtro_nome": "zzz"})
+ 
+ 
+ def test_cli_simular(amb, capsys):
+@@ -463,14 +501,22 @@
+ 
+ def test_web_simula_pelo_botao(web, smtp):
+     r = web.post("/web/api/automacoes/avisos/executar", json={
+-        "publico": "escolas", "canal": "email", "modo": "simular", "assunto": "Comunicado", "mensagem": "Olá, $ESCOLA_DESTINO"})
++        "publico": "pais", "canal": "email", "modo": "simular", "assunto": "Comunicado", "mensagem": "Olá, $RESPONSAVEL"})
+     assert r.status_code == 200
+     s = _esperar(web)
+     assert s["status"] == "concluido" and smtp == []
+-    assert rotas._EXECUCOES["avisos"]["resultado"]["total"] == 4
++    assert rotas._EXECUCOES["avisos"]["resultado"]["total"] == 3
+     assert any("SIMULAÇÃO — nada será enviado" in linha for linha in s["logs"])
+ 
+ 
++def test_web_escolas_sem_marcador_de_aluno_da_400_e_nao_executa(web, smtp):
++    for modo in ("simular", "teste", "enviar"):
++        r = web.post("/web/api/automacoes/avisos/executar", json={
++            "publico": "escolas", "canal": "email", "modo": modo, "assunto": "Comunicado", "mensagem": "Olá, $ESCOLA_DESTINO"})
++        assert r.status_code == 400 and "não existe aviso em massa" in r.get_json()["mensagem"]
++    assert smtp == []
++
++
+ def test_web_pedido_ruim_da_400(web):
+     r = web.post("/web/api/automacoes/avisos/executar", json={"publico": "pais", "assunto": "", "mensagem": "x"})
+     assert r.status_code == 400 and "assunto" in r.get_json()["mensagem"]
+@@ -496,21 +542,26 @@
+         return web.post("/web/api/automacoes/avisos/previa", json=payload)
+     r = previa({})                                                      # ainda sem escolher o público: sem aviso nenhum
+     assert r.status_code == 200 and r.get_json()["texto"] is None
+-    d = previa({"publico": "escolas"}).get_json()["texto"]
+-    assert d.startswith("4 e-mail(s) de escolas e CMEIs; sem e-mail ficariam de fora 2: Escola Municipal Sem Email; Escola Municipal Lixo")
+-    assert previa({"publico": "escolas", "tipo_escola": "cmeis"}).get_json()["texto"].startswith("1 e-mail(s)")
+-    assert previa({"publico": "escolas", "unidades": ["@cmeis"]}).get_json()["texto"].startswith("1 e-mail(s)")
+-    assert previa({"publico": "escolas", "unidades": '["Escola Municipal Ana Néri"]'}).get_json()["texto"].startswith("2 e-mail(s)")
++    d = previa({"publico": "escolas"}).get_json()["texto"]                 # escolas sem texto: nunca conta "todas as escolas"
++    assert "um por aluno" in d and "não existe aviso em massa" in d
++    assert "um por aluno" in previa({"publico": "escolas", "assunto": "Aviso", "mensagem": "Para $ESCOLA_DESTINO"}).get_json()["texto"]
+     d = previa({"publico": "pais"}).get_json()["texto"]
+     assert d.startswith("3 responsável(is) por e-mail, de 6 aluno(s) novo(s); sem e-mail ficariam de fora 2:")
+     assert previa({"publico": "pais", "situacao_pais": "aguardando"}).get_json()["texto"].startswith("1 responsável(is)")
+ 
+ 
++def test_previa_das_escolas_conta_um_email_por_aluno(web, chegando):
++    d = web.post("/web/api/automacoes/avisos/previa",
++                 json={"publico": "escolas", "assunto": "Transferência de $ALUNO", "mensagem": "Aluno $ALUNO"}).get_json()["texto"]
++    assert d.startswith("2 e-mail(s) para escolas de origem, um por aluno que chega")
++
++
+ def test_previa_avisa_quando_falta_a_lista(web, amb):
+     (paths.dados_ano_atual() / "escolas_completas.json").unlink()
+-    r = web.post("/web/api/automacoes/avisos/previa", json={"publico": "escolas"})
++    com_texto = {"publico": "escolas", "assunto": "Transferência de $ALUNO", "mensagem": "Aluno $ALUNO"}
++    r = web.post("/web/api/automacoes/avisos/previa", json=com_texto)
+     assert r.status_code == 400 and "Coleta e-mails" in r.get_json()["erro"]
+-    r = web.post("/web/api/automacoes/avisos/previa", json={"publico": "escolas", "filtro_nome": "zzz"})
++    r = web.post("/web/api/automacoes/avisos/previa", json={**com_texto, "filtro_nome": "zzz"})
+     assert r.status_code == 400
+ 
+ 
+@@ -522,7 +573,7 @@
+ 
+ def _args_escolas(**kw):
+     base = dict(publico="escolas", canal="email", modo="teste", assunto="Comunicado oficial - $ESCOLA",
+-                mensagem="Prezada direção da $ESCOLA_DESTINO,\n\nSegue o comunicado oficial da $ESCOLA.")
++                mensagem="Prezada direção da $ESCOLA_DESTINO,\n\nSegue o comunicado oficial da $ESCOLA sobre o aluno $ALUNO.")
+     base.update(kw)
+     return base
+ 
+@@ -531,7 +582,7 @@
+     assert av.ESCOLA_TESTE == {"nome": NOME_FICTICIA, "email": EMAIL_FICTICIA}
+ 
+ 
+-def test_teste_das_escolas_envia_para_a_escola_ficticia(amb, smtp):
++def test_teste_das_escolas_envia_para_a_escola_ficticia(chegando, smtp):
+     r = av.executar_avisos(**_args_escolas())
+     assert len(smtp) == 1
+     e = smtp[0]
+@@ -540,10 +591,10 @@
+     assert e["corpo"].startswith("*** TESTE — esta mensagem NÃO foi enviada aos destinatários reais. ***")
+     assert f"Prezada direção da {NOME_FICTICIA}," in e["corpo"]                  # texto como a escola receberia
+     assert f"escola fictícia de teste: {NOME_FICTICIA} <{EMAIL_FICTICIA}>" in e["corpo"]
+-    assert "iria para 4 destinatário(s) reais" in e["corpo"]
++    assert "iria para 2 destinatário(s) reais" in e["corpo"]
+     reais = {d["email"] for d in av.destinatarios_escolas()["destinatarios"]}
+     assert e["para"] not in reais and "Escola Municipal Ana Néri" not in e["corpo"]
+-    assert r["enviados_teste"] == 1 and r["total"] == 4
++    assert r["enviados_teste"] == 1 and r["total"] == 2
+     registro = json.loads(Path(r["registro"]).read_text(encoding="utf-8"))
+     assert registro["escola_teste"] == {"nome": NOME_FICTICIA, "email": EMAIL_FICTICIA} and registro["email_teste"] == EMAIL_FICTICIA
+ 
+@@ -569,7 +620,7 @@
+     assert smtp[0]["para"] == "outro@mail.com" and f"direção da {NOME_FICTICIA}" in smtp[0]["corpo"]
+ 
+ 
+-def test_a_escola_ficticia_nunca_entra_na_lista_real_nem_na_simulacao(amb, smtp):
++def test_a_escola_ficticia_nunca_entra_na_lista_real_nem_na_simulacao(chegando, smtp):
+     emails = {d["email"] for d in av.destinatarios_escolas()["destinatarios"]}
+     nomes = {d["nome"] for d in av.destinatarios_escolas()["destinatarios"]}
+     assert EMAIL_FICTICIA not in emails and NOME_FICTICIA not in nomes
+@@ -579,7 +630,7 @@
+     assert smtp == []
+ 
+ 
+-def test_simular_escolas_avisa_para_onde_iria_o_teste(amb, smtp, capsys):
++def test_simular_escolas_avisa_para_onde_iria_o_teste(chegando, smtp, capsys):
+     av.executar_avisos(**_args_escolas(modo="simular"))
+     assert f"No modo Teste, o e-mail iria para a escola fictícia {NOME_FICTICIA} <{EMAIL_FICTICIA}>." in capsys.readouterr().out
+ 
+@@ -592,29 +643,30 @@
+ def test_validar_extras_do_teste_das_escolas_dispensa_a_lista(amb):
+     v = reg.obter("avisos").validar_extras
+     (paths.dados_ano_atual() / "escolas_completas.json").unlink()
+-    v({"publico": "escolas", "modo": "teste", "assunto": "A", "mensagem": "B"})
++    v({"publico": "escolas", "modo": "teste", "assunto": "A $ALUNO", "mensagem": "B"})
+     with pytest.raises(ValueError, match="Coleta e-mails"):
+-        v({"publico": "escolas", "modo": "simular", "assunto": "A", "mensagem": "B"})
++        v({"publico": "escolas", "modo": "simular", "assunto": "A $ALUNO", "mensagem": "B"})
+ 
+ 
+-def test_previa_do_teste_das_escolas(web):
+-    d = web.post("/web/api/automacoes/avisos/previa", json={"publico": "escolas", "modo": "teste"}).get_json()["texto"]
++def test_previa_do_teste_das_escolas(web, chegando):
++    texto = {"publico": "escolas", "modo": "teste", "assunto": "Pedido de $ALUNO", "mensagem": "Aluno $ALUNO"}
++    d = web.post("/web/api/automacoes/avisos/previa", json=texto).get_json()["texto"]
+     assert d == (f"Teste: 1 e-mail para a escola fictícia {NOME_FICTICIA} <{EMAIL_FICTICIA}> "
+-                 "(o comunicado real iria para 4 e-mail(s) de escolas e CMEIs).")
+-    d = web.post("/web/api/automacoes/avisos/previa",
+-                 json={"publico": "escolas", "modo": "teste", "email_teste": "x@y.com"}).get_json()["texto"]
++                 "(o comunicado real iria para 2 e-mail(s) de escolas de origem).")
++    d = web.post("/web/api/automacoes/avisos/previa", json={**texto, "email_teste": "x@y.com"}).get_json()["texto"]
+     assert "<x@y.com>" in d
+ 
+ 
+ def test_previa_do_teste_das_escolas_sem_a_lista(web):
+     (paths.dados_ano_atual() / "escolas_completas.json").unlink()
+-    r = web.post("/web/api/automacoes/avisos/previa", json={"publico": "escolas", "modo": "teste"})
++    r = web.post("/web/api/automacoes/avisos/previa",
++                 json={"publico": "escolas", "modo": "teste", "assunto": "Pedido de $ALUNO", "mensagem": "Aluno $ALUNO"})
+     assert r.status_code == 200 and r.get_json()["texto"] == f"Teste: 1 e-mail para a escola fictícia {NOME_FICTICIA} <{EMAIL_FICTICIA}>."
+ 
+ 
+ def test_web_teste_das_escolas_pelo_botao(web, smtp):
+     r = web.post("/web/api/automacoes/avisos/executar", json={
+-        "publico": "escolas", "canal": "email", "modo": "teste", "assunto": "Comunicado", "mensagem": "Olá, $ESCOLA_DESTINO"})
++        "publico": "escolas", "canal": "email", "modo": "teste", "assunto": "Comunicado", "mensagem": "Olá, $ESCOLA_DESTINO, sobre $ALUNO"})
+     assert r.status_code == 200
+     s = _esperar(web)
+     assert s["status"] == "concluido" and len(smtp) == 1 and smtp[0]["para"] == EMAIL_FICTICIA
+@@ -737,9 +789,10 @@
+     assert corpo == f"Aluno ANA LIMA, CGM 1000000001, série 5º ano, vai para a turma Infantil IV de {PROPRIA} para Escola Municipal Ana Néri."
+ 
+ 
+-def test_texto_sem_marcador_de_aluno_segue_um_email_por_escola(chegando):
+-    r = av.executar_avisos(**_args(publico="escolas", assunto="Aviso", mensagem="Para $ESCOLA_DESTINO"))
+-    assert r["total"] == 4                                                        # 4 e-mails: Ana (2), São José e o CMEI
++def test_texto_sem_marcador_de_aluno_nao_segue_um_email_por_escola(chegando, smtp):
++    with pytest.raises(ValueError, match="não existe aviso em massa"):
++        av.executar_avisos(**_args(publico="escolas", assunto="Aviso", mensagem="Para $ESCOLA_DESTINO"))
++    assert smtp == []
+ 
+ 
+ def test_teste_por_aluno_monta_o_texto_com_o_primeiro_aluno_real(chegando, smtp):
+@@ -857,13 +910,19 @@
+ 
+ 
+ def test_tres_falhas_seguidas_param_o_envio_sem_marcar_como_enviado(chegando, monkeypatch, sem_espera):
+-    av.executar_avisos(**_args(publico="escolas", assunto="Aviso", mensagem="Para $ESCOLA_DESTINO"))
++    pre = json.loads((paths.dados_ano_atual() / "pre_matricula.json").read_text(encoding="utf-8"))
++    for cpf, escola_origem, cgm in (("115", "Escola Municipal Rural São José", "1000000015"),
++                                    ("117", "CMEI Pequeno Príncipe", "1000000017"),
++                                    ("118", "ESCOLA MUNICIPAL ANA NERI", "1000000018")):
++        pre["cadastros"][cpf].update(_vinc(escola_origem, cgm=cgm))                 # agora são 5 alunos com escola de origem
++    (paths.dados_ano_atual() / "pre_matricula.json").write_text(json.dumps(pre), encoding="utf-8")
++    av.executar_avisos(**_args(publico="escolas", assunto="Aviso $ALUNO", mensagem="Para $ESCOLA_DESTINO"))
+     tentativas = []
+     monkeypatch.setattr("src.automacao.envia_email.enviar_email",
+                         lambda *a, **k: (tentativas.append(a[0]) or (False, "autenticação recusada")))
+     with pytest.raises(RuntimeError, match="3 falhas seguidas.*autenticação recusada"):
+-        av.executar_avisos(**_args(publico="escolas", assunto="Aviso", mensagem="Para $ESCOLA_DESTINO", modo="enviar"))
+-    assert len(tentativas) == 3                                                     # parou, não insistiu nos 4 destinos
++        av.executar_avisos(**_args(publico="escolas", assunto="Aviso $ALUNO", mensagem="Para $ESCOLA_DESTINO", modo="enviar"))
++    assert len(tentativas) == 3                                                     # parou, não insistiu nos 5 destinos
+     pasta = paths.dados_ano_atual() / "AVISOS"
+     assert not (pasta / "enviados.json").exists()
+     registro = json.loads(next(pasta.glob("*_escolas_enviar.json")).read_text(encoding="utf-8"))
+@@ -958,7 +1017,7 @@
+ 
+ 
+ def test_plano_leva_unidades_fonte_pausa_limite_e_tipo_de_mensagem(amb):
+-    p = {"publico": "escolas", "assunto": "A", "mensagem": "B", "modo": "enviar", "unidades": '["@cmeis"]', "fonte": "ambas",
++    p = {"publico": "escolas", "assunto": "A $ALUNO", "mensagem": "B", "modo": "enviar", "unidades": '["@cmeis"]', "fonte": "ambas",
+          "intervalo_s": "20", "limite_lote": "25", "tipo_mensagem": "transferencia"}
+     k = reg.obter("avisos").planejar(Opcoes(), p, {}, {}).kwargs
+     assert (k["unidades"], k["fonte"], k["intervalo_s"], k["limite_lote"], k["modelo"]) == ('["@cmeis"]', "ambas", "20", "25", "transferencia")
+diff -ruN -x logs -x __pycache__ -x .pytest_cache a/tests/test_backup.py b/tests/test_backup.py
+--- a/tests/test_backup.py	2026-11-22 22:04:04.000000000 +0000
++++ b/tests/test_backup.py	2026-11-23 22:50:26.227551580 +0000
+@@ -285,3 +285,79 @@
+     assert motivos.count("manual") == 3                                          # os manuais ficaram, mesmo com 5 automáticos
+     assert sum(m.startswith("automático") for m in motivos) == 2                 # e só os 2 automáticos mais recentes
+     assert "automático (após a coleta de teste 4)" in motivos and "automático (após a coleta de teste 0)" not in motivos
++
++
++# ───────────────── liga/desliga na tela de Configurações (23/11/2026) ─────────────────
++
++@pytest.fixture()
++def cfg_tela(raiz, monkeypatch):
++    """A configuração do usuário fica na pasta temporária (a mesma que o backup lê)."""
++    from src.comum import configuracao
++    monkeypatch.setattr(configuracao, "CONFIG_DIR", raiz / "config")
++    monkeypatch.setattr(configuracao, "ARQUIVO_CONFIG", raiz / "config" / "config_usuario.json")
++    return configuracao
++
++
++def test_backup_automatico_vem_ligado_por_padrao(cfg_tela):
++    assert cfg_tela.backup_automatico() is True
++    assert backup.automatico_ligado() is True
++
++
++def test_desligar_na_tela_impede_o_backup_e_ligar_volta(cfg_tela):
++    cfg_tela.definir_backup_automatico(False)
++    assert cfg_tela.backup_automatico() is False and backup.automatico_ligado() is False
++    assert backup.backup_apos_coleta("turmas") is None
++    assert _motivos() == []
++    cfg_tela.definir_backup_automatico(True)
++    assert backup.backup_apos_coleta("turmas") is not None
++    assert len(_motivos()) == 1
++
++
++def test_desligar_na_tela_mantem_o_resto_da_configuracao(cfg_tela):
++    cfg_tela.definir_unidade_escolar("Escola X", "Rua 1", "84000000")
++    cfg_tela.definir_backup_automatico(False)
++    assert cfg_tela.carregar_configuracao()["unidade_escolar"]["nome"] == "Escola X"
++
++
++def test_valor_que_nao_e_verdadeiro_ou_falso_e_recusado(cfg_tela):
++    for ruim in (None, "sim", 1, "0"):
++        with pytest.raises(ValueError):
++            cfg_tela.definir_backup_automatico(ruim)
++    assert cfg_tela.backup_automatico() is True
++
++
++def test_variavel_de_ambiente_desliga_por_cima_da_tela(cfg_tela, monkeypatch):
++    cfg_tela.definir_backup_automatico(True)
++    monkeypatch.setenv("AUTO_SERE_BACKUP_AUTO", "0")
++    assert backup.desligado_pelo_ambiente() is True
++    assert backup.automatico_ligado() is False
++    assert backup.backup_apos_coleta("turmas") is None
++
++
++def test_config_ilegivel_nao_desliga_o_backup(cfg_tela, raiz):
++    (raiz / "config" / "config_usuario.json").write_text("{ isto não é json", encoding="utf-8")
++    assert backup.automatico_ligado() is True
++
++
++def test_restaurar_configuracao_antiga_nao_desfaz_a_escolha_do_backup_automatico(cfg_tela, raiz):
++    arquivo = backup.criar_backup("manual")                   # config do backup: sem a chave (= ligado)
++    cfg_tela.definir_backup_automatico(False)                 # depois o usuário desliga na tela
++    backup.restaurar_backup(arquivo, aplicar=True)            # repõe o config_usuario.json antigo
++    assert cfg_tela.backup_automatico() is False
++    assert backup.automatico_ligado() is False
++
++
++def test_rotas_do_backup_automatico(cfg_tela, raiz, monkeypatch):
++    from src.web.app import create_app
++    cli = create_app().test_client()
++    url = "/web/api/configuracoes/backup-automatico"
++    assert cli.get(url).get_json() == {"ligado": True, "escolha": True, "pelo_ambiente": False}
++    r = cli.post(url, json={"ligado": False})
++    assert r.status_code == 200 and r.get_json()["ligado"] is False and "desligado" in r.get_json()["mensagem"]
++    assert cli.get(url).get_json()["ligado"] is False
++    assert cli.post(url, json={"ligado": "talvez"}).status_code == 400
++    assert cli.post(url, json={}).status_code == 400
++    assert cli.get(url).get_json()["ligado"] is False          # recusa não mexe na escolha
++    monkeypatch.setenv("AUTO_SERE_BACKUP_AUTO", "0")
++    r = cli.post(url, json={"ligado": True}).get_json()
++    assert r["ligado"] is False and r["pelo_ambiente"] is True and "AUTO_SERE_BACKUP_AUTO" in r["mensagem"]
+diff -ruN -x logs -x __pycache__ -x .pytest_cache a/tests/test_whatsapp_fila.py b/tests/test_whatsapp_fila.py
+--- a/tests/test_whatsapp_fila.py	2026-11-22 22:04:04.000000000 +0000
++++ b/tests/test_whatsapp_fila.py	2026-11-23 22:59:24.651287063 +0000
+@@ -316,3 +316,10 @@
+     monkeypatch.setattr(paths, "somente_consulta", lambda: True)
+     assert cli.post("/web/api/whatsapp/fila/iniciar", json={}).status_code == 403
+     assert cli.get("/web/api/whatsapp/fila").status_code == 200
++
++
++def test_pausa_padrao_entre_mensagens_e_de_5_minutos(amb):
++    """Comunicado em massa: sem ajuste salvo, a pausa é de 5 minutos (pedido do usuário, 23/11/2026)."""
++    from src.servicos.whatsapp import fila as modulo
++    assert modulo.INTERVALO_PADRAO_S == 300
++    assert _fila(Prov()).resumo()["config"]["intervalo_s"] == 300
