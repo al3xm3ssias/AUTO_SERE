@@ -43,3 +43,14 @@ def _preservar_modulos_que_fixam_o_ano():
 @pytest.fixture(autouse=True)
 def _sem_backup_automatico(monkeypatch):
     monkeypatch.setenv("AUTO_SERE_BACKUP_AUTO", "0")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Segurança (login). Os testes antigos conversam com as rotas sem entrar no sistema, então o guarda de login fica DESLIGADO por
+# padrão nos testes — por um atributo do módulo, que o código de produção nunca altera (não há variável de ambiente nem
+# arquivo de configuração que o desligue). Os testes de segurança (test_seguranca_*.py) usam a fixture `seguranca_ligada`.
+# ─────────────────────────────────────────────────────────────────────────────
+@pytest.fixture(autouse=True)
+def _sem_guarda_de_login(monkeypatch):
+    from src.seguranca import web as seg_web
+    monkeypatch.setattr(seg_web, "ATIVA", False)

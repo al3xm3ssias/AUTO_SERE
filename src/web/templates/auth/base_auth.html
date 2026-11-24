@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="escuro">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{% block titulo %}Auto SERE{% endblock %} · Auto SERE</title>
+  <meta name="theme-color" content="#161b27">
+  {% if csrf_token %}<meta name="csrf-token" content="{{ csrf_token }}">{% endif %}
+  <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('web.static', filename='img/favicon-32.png') }}">
+  <link rel="stylesheet" href="{{ url_for('web.static', filename='css/styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('web.static', filename='css/auth.css') }}">
+</head>
+<body class="auth-body">
+  <main class="auth-card" aria-labelledby="auth-titulo">
+    <div class="auth-marca">
+      <img src="{{ url_for('web.static', filename='img/logo-branco-192.png') }}" alt="" width="44" height="44">
+      <div><strong>Auto SERE</strong><span>Automação escolar</span></div>
+    </div>
+    {% block corpo %}{% endblock %}
+  </main>
+  <script src="{{ url_for('web.static', filename='js/entrar.js') }}"></script>
+</body>
+</html>

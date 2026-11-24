@@ -1,0 +1,60 @@
+/* auth.css — telas de entrada (entrar, criar administrador, trocar senha). Usa as variáveis de cor do styles.css. */
+.auth-body { min-height: 100vh; margin: 0; display: flex; align-items: center; justify-content: center; padding: 24px;
+  background: var(--bg); color: var(--txt); font-family: var(--sans); }
+.auth-card { width: 100%; max-width: 420px; background: var(--card-bg); border: 1px solid var(--card-brd);
+  border-radius: var(--radius-lg); padding: 28px 28px 22px; box-shadow: var(--shadow-lg); }
+.auth-marca { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.auth-marca strong { display: block; font-size: 1.05rem; letter-spacing: .01em; }
+.auth-marca span { display: block; font-size: .72rem; color: var(--txt2); }
+.auth-card h1 { font-size: 1.25rem; margin: 0 0 6px; }
+.auth-sub { color: var(--txt2); font-size: .84rem; margin: 0 0 18px; line-height: 1.5; }
+.auth-aviso { background: var(--badge-amber-bg); border: 1px solid var(--badge-amber-brd); color: var(--txt);
+  border-radius: var(--radius); padding: 10px 12px; font-size: .8rem; line-height: 1.5; margin: 0 0 16px; }
+.auth-erro { background: var(--badge-rose-bg); border: 1px solid var(--badge-rose-brd); color: var(--txt);
+  border-radius: var(--radius); padding: 10px 12px; font-size: .82rem; line-height: 1.5; margin: 0 0 14px; }
+.auth-erro ul { margin: 6px 0 0 18px; padding: 0; }
+.auth-dica { display: block; margin-top: 4px; color: var(--txt3); font-size: .72rem; }
+.auth-senha-linha { display: flex; gap: 8px; }
+.auth-senha-linha input { flex: 1; min-width: 0; }
+.auth-olho { background: var(--surface2); color: var(--txt2); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0 12px; font-size: .75rem; cursor: pointer; }
+.auth-olho:hover { color: var(--txt); border-color: var(--border2); }
+.auth-regras { list-style: none; margin: 8px 0 0; padding: 0; font-size: .75rem; color: var(--txt3); }
+.auth-regras li::before { content: "○ "; }
+.auth-regras li.ok { color: var(--lime); }
+.auth-regras li.ok::before { content: "● "; }
+.auth-botao { width: 100%; justify-content: center; margin-top: 4px; }
+.auth-botao[disabled] { opacity: .6; cursor: wait; }
+.auth-rodape { margin: 16px 0 0; font-size: .72rem; color: var(--txt3); line-height: 1.5; }
+.auth-link { display: inline-block; margin-top: 14px; color: var(--cyan); font-size: .8rem; }
+.auth-body .field input[type=text], .auth-body .field input[type=password] { width: 100%; box-sizing: border-box; }
+.auth-senha-linha input[type=password] { width: auto; }
+
+/* barra do usuário no topo do sistema (preenchida por seguranca.js) */
+.topbar-user.logado { display: flex; align-items: center; gap: 8px; cursor: pointer; padding-right: 10px; width: auto; }
+.topbar-user-nome { font-size: .75rem; line-height: 1.15; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-user-nome small { display: block; color: var(--txt3); font-size: .65rem; }
+.topbar-sair { background: transparent; border: 1px solid var(--border); color: var(--txt2); border-radius: var(--radius);
+  padding: 5px 10px; font-size: .72rem; cursor: pointer; margin-left: 6px; }
+.topbar-sair:hover { color: var(--txt); border-color: var(--border2); }
+body.perfil-consulta [data-requer="operador"], body.perfil-consulta [data-requer="admin"],
+body.perfil-operador [data-requer="admin"] { display: none !important; }
+
+/* painel Usuários (Configurações) */
+.usr-tabela { width: 100%; border-collapse: collapse; font-size: .8rem; margin: 10px 0 16px; }
+.usr-tabela th, .usr-tabela td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.usr-tabela th { color: var(--txt2); font-weight: 500; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; }
+.usr-acoes { display: flex; flex-wrap: wrap; gap: 6px; }
+.usr-acoes button, .usr-btn { background: var(--surface2); color: var(--txt); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 4px 10px; font-size: .72rem; cursor: pointer; }
+.usr-acoes button:hover, .usr-btn:hover { border-color: var(--border2); }
+.usr-perigo { color: var(--rose) !important; }
+.usr-selo { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .68rem; border: 1px solid var(--border); color: var(--txt2); }
+.usr-selo.admin { background: var(--badge-violet-bg); border-color: var(--badge-violet-brd); color: var(--violet); }
+.usr-selo.operador { background: var(--badge-cyan-bg); border-color: var(--badge-cyan-brd); color: var(--cyan); }
+.usr-selo.ruim { background: var(--badge-rose-bg); border-color: var(--badge-rose-brd); color: var(--rose); }
+.usr-segredo { font-family: var(--mono); font-size: .95rem; background: var(--bg); border: 1px dashed var(--border2); border-radius: var(--radius);
+  padding: 10px 12px; margin: 8px 0; user-select: all; word-break: break-all; }
+.usr-linha-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; align-items: end; }
+.usr-audit { max-height: 260px; overflow: auto; font-family: var(--mono); font-size: .7rem; color: var(--txt2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 8px 10px; background: var(--bg); }

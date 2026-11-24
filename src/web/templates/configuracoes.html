@@ -8,7 +8,28 @@
     </div>
   </div>
 
-  <div class="sec-hdr"><span class="sec-ttl">Escola</span></div>
+  <div class="sec-hdr"><span class="sec-ttl">Acesso e segurança</span></div>
+  <div class="config-grid">
+
+    <div class="config-row" data-config="minha_conta">
+      <div class="ic" style="background:var(--badge-lime-bg); color:var(--lime);"><span data-icon="userCircle"></span></div>
+      <div class="txt">
+        <div class="name">Minha conta</div>
+        <div class="desc">Quem está logado, trocar a minha senha e sair do sistema.</div>
+      </div>
+    </div>
+
+    <div class="config-row" data-config="usuarios" data-requer="admin">
+      <div class="ic" style="background:var(--badge-violet-bg); color:var(--violet);"><span data-icon="key"></span></div>
+      <div class="txt">
+        <div class="name">Usuários e segurança</div>
+        <div class="desc">Cadastre usuários, defina perfis, redefina senhas, desbloqueie contas e veja o registro de segurança.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="sec-hdr" style="margin-top:32px;"><span class="sec-ttl">Escola</span></div>
   <div class="config-grid">
 
     <div class="config-row" data-config="escola">
@@ -27,7 +48,7 @@
       </div>
     </div>
 
-    <div class="config-row" data-config="data_corte_transferidos">
+    <div class="config-row" data-config="data_corte_transferidos" data-requer="admin">
       <div class="ic" style="background:var(--badge-amber-bg); color:var(--amber);"><span data-icon="calendar"></span></div>
       <div class="txt">
         <div class="name">Data de corte dos transferidos</div>
@@ -64,7 +85,7 @@
   <div class="sec-hdr" style="margin-top:32px;"><span class="sec-ttl">Credenciais e integrações</span></div>
   <div class="config-grid">
 
-    <div class="config-row" data-config="senha_sere">
+    <div class="config-row" data-config="senha_sere" data-requer="admin">
       <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="lock"></span></div>
       <div class="txt">
         <div class="name">Salvar senha do SERE</div>
@@ -72,7 +93,7 @@
       </div>
     </div>
 
-    <div class="config-row" data-config="senha_prematricula">
+    <div class="config-row" data-config="senha_prematricula" data-requer="admin">
       <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="lock"></span></div>
       <div class="txt">
         <div class="name">Salvar senha da Pré-matrícula</div>
@@ -80,7 +101,7 @@
       </div>
     </div>
 
-    <div class="config-row" data-config="senha_rco">
+    <div class="config-row" data-config="senha_rco" data-requer="admin">
       <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="lock"></span></div>
       <div class="txt">
         <div class="name">Salvar senha do RCO</div>
@@ -88,7 +109,7 @@
       </div>
     </div>
 
-    <div class="config-row" data-config="google_conta">
+    <div class="config-row" data-config="google_conta" data-requer="admin">
       <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="lock"></span></div>
       <div class="txt">
         <div class="name">Conta Google da autorização</div>
@@ -96,7 +117,7 @@
       </div>
     </div>
 
-    <div class="config-row" data-config="chave_gmail">
+    <div class="config-row" data-config="chave_gmail" data-requer="admin">
       <div class="ic" style="background:var(--badge-rose-bg); color:var(--rose);"><span data-icon="mail"></span></div>
       <div class="txt">
         <div class="name">Salvar senha do Gmail</div>
@@ -112,7 +133,7 @@
       </div>
     </div>
 
-    <div class="config-row" data-config="outras_credenciais">
+    <div class="config-row" data-config="outras_credenciais" data-requer="admin">
       <div class="ic" style="background:var(--badge-violet-bg); color:var(--violet);"><span data-icon="key"></span></div>
       <div class="txt">
         <div class="name">Outras credenciais</div>
@@ -141,7 +162,7 @@
   <div class="sec-hdr" style="margin-top:32px;"><span class="sec-ttl">Pastas</span></div>
   <div class="config-grid">
 
-    <div class="config-row" data-config="pasta_digitalizacao">
+    <div class="config-row" data-config="pasta_digitalizacao" data-requer="admin">
       <div class="ic" style="background:var(--badge-blue-bg); color:var(--blue);"><span data-icon="folder"></span></div>
       <div class="txt">
         <div class="name">Pasta de digitalização</div>
@@ -149,7 +170,7 @@
       </div>
     </div>
 
-    <div class="config-row" data-config="modelos_parecer">
+    <div class="config-row" data-config="modelos_parecer" data-requer="admin">
       <div class="ic" style="background:var(--badge-violet-bg); color:var(--violet);"><span data-icon="files"></span></div>
       <div class="txt">
         <div class="name">Modelos de parecer</div>

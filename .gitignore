@@ -13,6 +13,9 @@ runtime/
 # ==== Credenciais e segredos (NUNCA versionar) ====
 credenciais/credenciais.py
 credenciais/*.env
+# Usuários, hashes de senha e a chave (pimenta) que protege os hashes
+credenciais/usuarios.json*
+credenciais/seguranca/
 # Google (Sheets): chave OAuth/conta de serviço e token de acesso (equivalem a senha)
 credenciais/google_*.json
 credenciais/*token*.json

@@ -50,7 +50,9 @@ def test_service_worker_na_raiz_sem_cache(cliente):
 def test_pagina_principal_referencia_manifest_e_sw(cliente):
     html = cliente.get("/web").get_data(as_text=True)
     assert 'rel="manifest"' in html
-    assert "serviceWorker" in html
+    # o registro do service worker saiu do HTML para js/sw-registro.js (a política de segurança não aceita script inline)
+    assert 'js/sw-registro.js" data-sw="/sw.js"' in html
+    assert "serviceWorker" in cliente.get("/web/static/js/sw-registro.js").get_data(as_text=True)
 
 
 # ── host/porta ──────────────────────────────────────────────────────────────

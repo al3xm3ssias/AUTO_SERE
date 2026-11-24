@@ -2,7 +2,7 @@
 
 Lista curta do que ainda falta. O detalhe e o histórico estão em [`PROXIMAS_ETAPAS.md`](PROXIMAS_ETAPAS.md) (os números, como 3b e 11q, são os mesmos) e os bugs em [`BUGS_CONHECIDOS.md`](BUGS_CONHECIDOS.md).
 
-Atualizado em 2026-11-23 (fim do aviso em massa para escolas, botão do backup automático em Configurações, pausa padrão de 5 min na fila do WhatsApp e decisões sobre a paginação da Base ABC, `Data Matricula` e termos de ciência; nova seção 2c: segurança dos dados, com exportação de credenciais criptografada, criptografia dos dados salvos e tela de login; decisão sobre a cópia da `chave_qr.key`). Antes, em 2026-11-20 (destino dos transferidos e aviso à escola de destino; ID da matrícula em Transferidos, Base ABC e pré-matrícula; o resto segue como em 18/11). Legenda: `[ ]` pendente · `[!]` depende de ambiente real ou de decisão · `[x]` decidido/feito.
+Atualizado em 2026-11-24 (2c-3 feito: login, usuários e proteção da interface, ver `documentacao/Seguranca.md`). Antes, em 2026-11-23 (fim do aviso em massa para escolas, botão do backup automático em Configurações, pausa padrão de 5 min na fila do WhatsApp e decisões sobre a paginação da Base ABC, `Data Matricula` e termos de ciência; nova seção 2c: segurança dos dados, com exportação de credenciais criptografada, criptografia dos dados salvos e tela de login; decisão sobre a cópia da `chave_qr.key`). Antes, em 2026-11-20 (destino dos transferidos e aviso à escola de destino; ID da matrícula em Transferidos, Base ABC e pré-matrícula; o resto segue como em 18/11). Legenda: `[ ]` pendente · `[!]` depende de ambiente real ou de decisão · `[x]` decidido/feito.
 
 ---
 
@@ -192,12 +192,15 @@ Adaptação do script antigo `consulta_transferidos_ano_anterior.py`: automaçã
 - [ ] **BitLocker** (disco inteiro) no PC da escola e no servidor, em paralelo: cobre JSONs, PDFs, logs e backups sem mexer no código. É PC de domínio: combinar com o setor de TI da prefeitura
 - [!] **Decidir: automações agendadas (rotina diária, coletas) rodam sem ninguém logado.** Opção A: chave protegida pelo Windows (**DPAPI**), ligada ao usuário (protege contra roubo do disco, não contra quem já está logado como o usuário). Opção B: a rotina só roda com o sistema destravado pelo usuário. **Sem decisão**
 
-### 2c-3. Tela de login com senha criptografada (médio)
-- [ ] Senha guardada só como **hash** (Argon2 ou scrypt, com sal); sessão assinada; **bloqueio após tentativas erradas**; bloqueio por inatividade
-- [ ] Servidor escutando só em `127.0.0.1`, a menos que haja necessidade de acessar de outra máquina da rede (hoje o programa roda na porta 8000: conferir)
-- [ ] Ligar a senha à chave que destrava os dados (2c-2); sem isso o login só protege a interface
-- [ ] Proteção contra CSRF nas rotas de escrita; trocar e redefinir a senha (a redefinição depende da frase de recuperação, ver 2c-1)
-- [ ] Ajuda F1 e `tests/test_ajuda.py` atualizados para a tela de login e o bloqueio
+### 2c-3. Tela de login com senha criptografada (médio) — FEITO em 2026-11-24, detalhes em `documentacao/Seguranca.md`
+- [x] Senha guardada só como **hash Argon2id** com sal e "pimenta" local (DPAPI no Windows); sessão no servidor; **bloqueio após tentativas erradas** (5 erros, 15 min, dobrando até 24 h); bloqueio por inatividade
+- [x] Primeiro usuário = administrador, criado **na instalação** (passo 6/7 do instalador) ou, se não foi, na tela "Criar o administrador" do primeiro acesso; perfis administrador, operador e consulta; tela "Usuários e segurança" em Configurações; auditoria encadeada em `logs/auditoria.log`
+- [x] Servidor escutando só em `127.0.0.1` (conferido: já era o padrão); validação de Host/Origem; Content-Security-Policy estrita (os `onclick` e o script inline foram removidos)
+- [x] Proteção contra CSRF nas rotas de escrita; trocar senha (própria e redefinição por administrador); recuperação pela linha de comando (`python -m src.seguranca redefinir-senha`)
+- [x] Ajuda F1 e `tests/test_ajuda.py` atualizados (painéis "Minha conta" e "Usuários e segurança"); testes em `test_seguranca_nucleo.py` e `test_seguranca_web.py`
+- [!] **Validar no Windows real**: o passo do instalador, a proteção DPAPI da pimenta, o `icacls` da pasta `credenciais\` e as telas no Chrome (foi testado só em Linux e sem navegador; a política CSP pode bloquear algum recurso que ninguém exercitou)
+- [ ] Ligar a senha à chave que destrava os dados (2c-2); sem isso o login só protege a interface. A redefinição por linha de comando passará a depender da frase de recuperação (2c-1)
+- [ ] Opcional: segundo fator (TOTP); cifrar `credenciais/.env` valor a valor com DPAPI
 
 **Ordem proposta (2026-11-23):** 2c-1 → camada de armazenamento e cifra de `credenciais/` e da chave do QR → 2c-3 ligado à chave de dados → migrar os JSONs sensíveis um por um com testes → BitLocker em paralelo. O 2c-1 não depende dos demais e pode ser feito antes de qualquer outro item desta seção.
 

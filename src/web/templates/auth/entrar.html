@@ -1,0 +1,24 @@
+{% extends "auth/base_auth.html" %}
+{% block titulo %}Entrar{% endblock %}
+{% block corpo %}
+<h1 id="auth-titulo">Entrar</h1>
+<p class="auth-sub">Use o usuário e a senha do AUTO SERE (não são os do SERE).</p>
+{% if motivo == "inatividade" %}<p class="auth-aviso" role="status">Sua sessão foi encerrada por falta de uso. Entre de novo para continuar.</p>{% endif %}
+<form id="auth-form" data-modo="entrar" data-url="{{ url_for('seguranca_paginas.entrar') }}" autocomplete="on" novalidate>
+  <input type="hidden" id="auth-proximo" value="{{ proximo }}">
+  <div class="field">
+    <label for="auth-usuario">Usuário</label>
+    <input type="text" id="auth-usuario" name="usuario" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus>
+  </div>
+  <div class="field">
+    <label for="auth-senha">Senha</label>
+    <div class="auth-senha-linha">
+      <input type="password" id="auth-senha" name="senha" autocomplete="current-password" required>
+      <button type="button" class="auth-olho" data-alvo="auth-senha" aria-label="Mostrar ou esconder a senha">Mostrar</button>
+    </div>
+  </div>
+  <p class="auth-erro" id="auth-erro" role="alert" hidden></p>
+  <button class="btn-primary auth-botao" type="submit" id="auth-enviar">Entrar</button>
+</form>
+<p class="auth-rodape">Esqueceu a senha? Peça a um administrador para redefinir. Se você é o único administrador, a recuperação é feita no computador onde o sistema está instalado (veja <code>documentacao/Seguranca.md</code>).</p>
+{% endblock %}

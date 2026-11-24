@@ -5,7 +5,8 @@
 # 3. Prepara um Python PRÓPRIO do projeto em <pasta>\runtime\python (versão
 #    portátil do python.org: só extrai um zip, sem instalador e sem registro no
 #    Windows; não depende do Python do sistema), as bibliotecas e os navegadores.
-# 4. Cria o atalho "AUTO SERE" e abre o sistema. Os dados da escola (nome, CEP,
+# 4. Pede a criação do ADMINISTRADOR do sistema (usuário e senha; só o hash da senha é guardado).
+# 5. Cria o atalho "AUTO SERE" e abre o sistema. Os dados da escola (nome, CEP,
 #    endereço) são pedidos pelo assistente que abre dentro do próprio sistema.
 #
 # Pode ser executado de novo sem problema: se a pasta já tiver o AUTO SERE,
@@ -211,7 +212,7 @@ function Baixar($url, $arquivo, $minimoBytes) {
 # ---------------------------------------------------------------- 1. copiar o programa
 
 if ($origem.TrimEnd('\') -ine $raiz) {
-    Titulo "[1/6] Copiando o programa para $raiz ..."
+    Titulo "[1/7] Copiando o programa para $raiz ..."
     $atualizando = Test-Path (Join-Path $raiz "src")
     $excluirPastas = @("runtime", "__pycache__", ".git", ".venv")
     $excluirArquivos = @()
@@ -225,7 +226,7 @@ if ($origem.TrimEnd('\') -ine $raiz) {
     & robocopy @opcoesCopia | Out-Null
     if ($LASTEXITCODE -ge 8) { Falha "Falha ao copiar os arquivos (robocopy código $LASTEXITCODE)." }
 } else {
-    Titulo "[1/6] Instalando na própria pasta do pacote."
+    Titulo "[1/7] Instalando na própria pasta do pacote."
 }
 Set-Location $raiz
 
@@ -236,9 +237,9 @@ Set-Location $raiz
 # do Visual C++. Funciona igual com ou sem Python instalado no computador, e um
 # Python quebrado do sistema não atrapalha.
 if (Python-Ok $pyExe) {
-    Titulo "[2/6] Python local já pronto em runtime\python."
+    Titulo "[2/7] Python local já pronto em runtime\python."
 } else {
-    Titulo "[2/6] Preparando Python local em runtime\python ..."
+    Titulo "[2/7] Preparando Python local em runtime\python ..."
     New-Item -ItemType Directory -Force -Path $runtime | Out-Null
     if (Test-Path $pyDir) { Remove-Item -Recurse -Force $pyDir }   # restos de tentativa anterior
 
@@ -280,7 +281,7 @@ if (Python-Ok $pyExe) {
 
 # ---------------------------------------------------------------- 3. bibliotecas
 
-Titulo "[3/6] Instalando bibliotecas (pode levar alguns minutos) ..."
+Titulo "[3/7] Instalando bibliotecas (pode levar alguns minutos) ..."
 & $pyExe -m pip install --upgrade pip --no-warn-script-location
 if ($LASTEXITCODE -ne 0) { Falha "Não foi possível atualizar o pip." }
 & $pyExe -m pip install -r (Join-Path $raiz "requirements.txt") --no-warn-script-location
@@ -288,20 +289,42 @@ if ($LASTEXITCODE -ne 0) { Falha "Falha ao instalar as bibliotecas do requiremen
 
 # ---------------------------------------------------------------- 4. navegadores
 
-Titulo "[4/6] Instalando navegadores do Playwright (chromium e firefox) ..."
+Titulo "[4/7] Instalando navegadores do Playwright (chromium e firefox) ..."
 $env:PLAYWRIGHT_BROWSERS_PATH = $navegs
 & $pyExe -m playwright install chromium firefox
 if ($LASTEXITCODE -ne 0) { Falha "Falha ao instalar os navegadores do Playwright." }
 
 # ---------------------------------------------------------------- 5. pastas de trabalho
 
-Titulo "[5/6] Criando pastas de trabalho ..."
+Titulo "[5/7] Criando pastas de trabalho ..."
 & $pyExe -c "from src.comum import paths; paths.garantir_diretorios_runtime()"
 if ($LASTEXITCODE -ne 0) { Falha "Falha ao criar as pastas de trabalho." }
 
-# ---------------------------------------------------------------- 6. atalho e abertura
+# ---------------------------------------------------------------- 6. administrador do sistema
 
-Titulo "[6/6] Criando atalho AUTO SERE ..."
+# O 1º usuário é o ADMINISTRADOR. A senha é digitada aqui, no terminal (sem aparecer na tela e sem passar como argumento de
+# comando), e só o hash Argon2id dela é guardado. Reexecutar a instalação NÃO pede de novo se já houver usuários.
+Titulo "[6/7] Segurança: criando o administrador do sistema ..."
+& $pyExe -m src.seguranca existe
+$estadoUsuarios = $LASTEXITCODE
+if ($estadoUsuarios -eq 0) {
+    Write-Host "O sistema já tem usuários cadastrados: nada a criar."
+} elseif ($estadoUsuarios -eq 3) {
+    Write-Host "ATENÇÃO: o cadastro de usuários está ilegível. Veja documentacao\Seguranca.md antes de usar o sistema." -ForegroundColor Yellow
+} elseif ($Silencioso) {
+    Write-Host "Instalação sem janela: o administrador será criado no primeiro acesso (tela 'Criar o administrador')."
+} else {
+    & $pyExe -m src.seguranca criar-admin
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "O administrador não foi criado agora. O sistema vai pedir isso no primeiro acesso." -ForegroundColor Yellow
+    }
+}
+# Só o usuário atual do Windows (e administradores) enxerga credenciais\ (usuários, hashes, senhas das integrações).
+& $pyExe -m src.seguranca proteger-pasta | Out-Null
+
+# ---------------------------------------------------------------- 7. atalho e abertura
+
+Titulo "[7/7] Criando atalho AUTO SERE ..."
 & (Join-Path $raiz "scripts\windows\criar_atalho.ps1")
 
 Write-Host ""

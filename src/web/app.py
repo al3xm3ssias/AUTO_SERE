@@ -15,13 +15,13 @@ usa src.launcher: sobe este servidor uma única vez e abre o Chrome em modo
 aplicativo. Host e porta vêm de src.comum.servidor (padrão 127.0.0.1:8000).
 """
 
-import os
 import re
 
 from flask import Flask, Blueprint, jsonify, render_template, request, send_from_directory
 
 from src.comum import paths as _paths
 from src.comum import servidor as _servidor
+from src.seguranca import web as _seguranca
 
 from src.web.api.ajuda import ajuda_bp
 from src.web.api.calendario import calendario_bp
@@ -50,7 +50,7 @@ def index():
 @web_bp.route("/web/api/ping")
 def ping():
     """Usado pelo launcher para saber se JÁ existe um AUTO SERE rodando."""
-    return jsonify({"app": "auto-sere", "ok": True, "pid": os.getpid()})
+    return jsonify({"app": "auto-sere", "ok": True})     # sem PID: esta rota é pública (o launcher a usa antes do login)
 
 
 @web_bp.route("/manifest.webmanifest")
@@ -96,6 +96,7 @@ _RE_PERMITIDAS_EM_CONSULTA = (
     re.compile(r"^/web/api/automacoes/[^/]+/(previa|cancelar)$"),  # prévia só lê; cancelar só encerra
     re.compile(r"^/web/api/whatsapp/webhook$"),                    # evento que o gateway manda para cá (não é ação do usuário)
     re.compile(r"^/web/api/planilhas(/\d+)?$"),                    # cadastro de planilhas: atravessa os anos letivos, não é dado de um ano
+    re.compile(r"^/web/api/seguranca/"),                           # usuários e senhas não são dado de um ano letivo (administrar usuários vale em qualquer ano)
     re.compile(r"^/web/api/google/autorizacao/(abrir|colar)$"),    # só mexe na tentativa de login do Google em andamento (uma prévia pode pedi-la); não grava dado do ano
 )
 _METODOS_DE_LEITURA = ("GET", "HEAD", "OPTIONS")
@@ -133,6 +134,7 @@ def _instalar_guarda_somente_consulta(app: Flask) -> None:
 
 def create_app() -> Flask:
     app = Flask(__name__)
+    _seguranca.instalar(app)                  # PRIMEIRO: login, perfis, CSRF e cabeçalhos valem antes de qualquer outra regra
     _instalar_guarda_somente_consulta(app)
 
     app.register_blueprint(web_bp)
@@ -151,6 +153,10 @@ if __name__ == "__main__":
     # Sem debug/reloader por padrão: o reloader sobe o processo duas vezes e
     # quebraria o launcher ("não abrir várias instâncias"). Para desenvolver
     # com auto-reload, defina AUTO_SERE_DEBUG=1.
+    # Não anuncia "Werkzeug/x.y Python/x.y" em cada resposta (ajuda quem procura versões com falhas conhecidas).
+    from werkzeug.serving import WSGIRequestHandler
+    WSGIRequestHandler.server_version = "AUTO-SERE"
+    WSGIRequestHandler.sys_version = ""
     _debug = _servidor.modo_debug()
     app.run(
         host=_servidor.servidor_host(),

@@ -10,6 +10,7 @@ pandas>=2.0.0
 reportlab>=4.0.0
 qrcode>=7.4.0
 cryptography>=41.0.0     # QR criptografado dos pareceres (src/comum/qr_seguro.py)
+argon2-cffi>=23.1.0      # hash das senhas de login (src/seguranca/senhas.py). Sem ele cai para scrypt, que é refeito em Argon2id depois
 Pillow>=10.0.0
 # Compressão de PDF (src/comum/compressao.py). Versão fixada; se faltar, o próprio sistema instala sozinho na 1ª vez.
 pypdf==5.9.0

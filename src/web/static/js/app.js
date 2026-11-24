@@ -663,7 +663,7 @@ function renderCardsTurmas(turmas) {
 
     return `
       <div class="turma-block">
-        <div class="turma-hdr" onclick="this.classList.toggle('open'); this.nextElementSibling.classList.toggle('open')">
+        <div class="turma-hdr" data-alterna-turma="1">
           <span class="turma-nm"><span data-icon="users" style="margin-right:6px"></span>${t.nome}</span>
           <div class="turma-badges">
             ${badge(t.matriculados + " matr.", "bg-cyan")}
@@ -5417,7 +5417,7 @@ function _docRenderAnalise() {
       <td class="td-num v-cyan">${r.docs_sere_total || 0}</td>
       <td><div class="slot-grid">${pend || traco}</div></td>
       <td><div class="slot-grid">${anex}${soSere}${aus}</div></td>
-      <td><button class="cruz-expand-btn" onclick="toggleCruzDetail('${rowId}', this)">▾ ver</button></td>
+      <td><button class="cruz-expand-btn" data-cruz-linha="${rowId}">▾ ver</button></td>
     </tr>`);
 
     const docs = a.Documentos || {};
@@ -5471,4 +5471,17 @@ document.addEventListener("DOMContentLoaded", () => {
   iniciarContextoAno();
   abrirAssistenteSeNecessario();
   iniciarMonitorAutorizacaoGoogle();
+});
+
+/* Cliques delegados no lugar dos antigos handlers escritos dentro do HTML (a política de segurança do sistema não aceita
+   código inline). Funcionam para qualquer linha criada depois, porque o ouvinte está no documento. */
+document.addEventListener("click", (ev) => {
+  const cab = ev.target.closest("[data-alterna-turma]");
+  if (cab) {
+    cab.classList.toggle("open");
+    if (cab.nextElementSibling) cab.nextElementSibling.classList.toggle("open");
+    return;
+  }
+  const btn = ev.target.closest("[data-cruz-linha]");
+  if (btn) toggleCruzDetail(btn.dataset.cruzLinha, btn);
 });

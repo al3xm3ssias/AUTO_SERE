@@ -1,0 +1,33 @@
+{% extends "auth/base_auth.html" %}
+{% block titulo %}Trocar a senha{% endblock %}
+{% block corpo %}
+<h1 id="auth-titulo">Trocar a senha</h1>
+{% if obrigatoria %}<p class="auth-aviso" role="status">Sua senha é temporária. Escolha uma senha só sua para continuar.</p>
+{% else %}<p class="auth-sub">Ao trocar, todas as outras sessões abertas com a sua conta são encerradas.</p>{% endif %}
+<form id="auth-form" data-modo="trocar" data-url="/web/api/seguranca/trocar-senha" autocomplete="off" novalidate>
+  <input type="hidden" id="auth-usuario" value="{{ usuario_atual.usuario if usuario_atual else '' }}">
+  <div class="field">
+    <label for="auth-atual">Senha atual</label>
+    <input type="password" id="auth-atual" name="atual" autocomplete="current-password" required autofocus>
+  </div>
+  <div class="field">
+    <label for="auth-senha">Senha nova</label>
+    <div class="auth-senha-linha">
+      <input type="password" id="auth-senha" name="nova" autocomplete="new-password" required aria-describedby="auth-regras">
+      <button type="button" class="auth-olho" data-alvo="auth-senha" aria-label="Mostrar ou esconder a senha">Mostrar</button>
+    </div>
+    <ul class="auth-regras" id="auth-regras" aria-live="polite">
+      <li data-regra="tamanho">Pelo menos 12 caracteres</li>
+      <li data-regra="mistura">3 tipos entre minúsculas, MAIÚSCULAS, números e símbolos (ou 16+ caracteres)</li>
+      <li data-regra="sem-usuario">Sem o nome de usuário</li>
+    </ul>
+  </div>
+  <div class="field">
+    <label for="auth-confirmacao">Repita a senha nova</label>
+    <input type="password" id="auth-confirmacao" name="confirmacao" autocomplete="new-password" required>
+  </div>
+  <p class="auth-erro" id="auth-erro" role="alert" hidden></p>
+  <button class="btn-primary auth-botao" type="submit" id="auth-enviar">Trocar a senha</button>
+  {% if not obrigatoria %}<a class="auth-link" href="/web">Voltar ao sistema</a>{% endif %}
+</form>
+{% endblock %}

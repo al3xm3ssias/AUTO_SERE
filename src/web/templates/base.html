@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Auto SERE</title>
+  {% if csrf_token %}<meta name="csrf-token" content="{{ csrf_token }}">
+  <meta name="auto-sere-inatividade" content="{{ inatividade_cliente_s }}">{% endif %}
   <!-- PWA: permite instalar como aplicativo no Chrome (janela própria, sem barra de endereço) -->
   <link rel="manifest" href="{{ url_for('web.manifest') }}">
   <meta name="theme-color" content="#161b27">
@@ -17,7 +19,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('web.static', filename='css/styles.css') }}">
 </head>
-<body class="{{ 'modo-consulta' if somente_consulta else '' }}" data-ano-letivo="{{ ano_letivo }}">
+<body class="{{ 'modo-consulta' if somente_consulta else '' }}" data-ano-letivo="{{ ano_letivo }}"{% if usuario_atual %} data-perfil="{{ usuario_atual.perfil }}" data-perfil-rotulo="{{ usuario_atual.perfil_rotulo }}" data-usuario-nome="{{ usuario_atual.nome }}" data-usuario-login="{{ usuario_atual.usuario }}"{% endif %}>
 
 <div id="app" style="position:relative; min-height:100vh;">
 
@@ -373,9 +375,10 @@
     <button class="topbar-help" id="btn-ajuda-f1" type="button" title="Ajuda desta tela (F1)" aria-label="Ajuda desta tela">
       <span data-icon="help"></span><kbd>F1</kbd>
     </button>
-    <div class="topbar-user" title="Perfil (ainda não configurado)" data-goto="configuracoes" id="topbar-user">
+    <div class="topbar-user" title="Minha conta" data-goto="configuracoes" id="topbar-user">
       <span data-icon="userPlain"></span>
     </div>
+    {% if usuario_atual %}<button class="topbar-sair" id="btn-sair" type="button" title="Encerrar a sessão">Sair</button>{% endif %}
   </header>
 
   <div class="main-wrapper" id="main-wrapper">
@@ -425,7 +428,9 @@
 </div>
 
 <script src="{{ url_for('web.static', filename='js/icons.js') }}"></script>
+<script src="{{ url_for('web.static', filename='js/seguranca.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('web.static', filename='js/usuarios.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/calendario.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/planilhas.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/vendor/jspdf.umd.min.js') }}"></script>
@@ -433,11 +438,6 @@
 <script src="{{ url_for('web.static', filename='js/previsao.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/whatsapp.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/ajuda.js') }}"></script>
-<script>
-  // Service worker (necessário para o Chrome oferecer "Instalar"). Falha silenciosa.
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register("{{ url_for('web.service_worker') }}", { scope: '/' }).catch(function () {});
-  }
-</script>
+<script src="{{ url_for('web.static', filename='js/sw-registro.js') }}" data-sw="{{ url_for('web.service_worker') }}"></script>
 </body>
 </html>

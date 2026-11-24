@@ -734,6 +734,47 @@ CONFIGURACOES: dict[str, dict] = {
         "veja_tambem": [R("automacao", "pareceres_transferidos"), R("configuracao", "data_corte_transferidos"), R("tela", "transferidos")],
     },
 
+    "minha_conta": {
+        "titulo": "Painel: Minha conta", "icone": "userCircle",
+        "resumo": "Mostra quem está logado no AUTO SERE, deixa trocar a **sua** senha e sair do sistema. Vale para todos os perfis.",
+        "passos": [
+            "Clique em **Trocar a minha senha**, digite a senha atual e a nova duas vezes.",
+            "Use **Sair do sistema** ao terminar, principalmente em computador usado por mais de uma pessoa.",
+        ],
+        "elementos": [
+            E("Trocar a minha senha", "Abre a tela de troca de senha. Ao trocar, todas as outras sessões abertas com a sua conta são encerradas.", "#cfg-minha-conta"),
+        ],
+        "dicas": ["Uma boa senha tem 12 caracteres ou mais, misturando letras maiúsculas, minúsculas, números e símbolos; ou uma frase longa de 16+ caracteres."],
+        "cuidados": [
+            "A senha do AUTO SERE é só sua e **não** é a do SERE. O sistema guarda apenas uma \"impressão digital\" dela (hash), por isso não consegue mostrá-la nem recuperá-la.",
+            "Sem uso do mouse ou teclado por cerca de 28 minutos o sistema encerra a sessão sozinho.",
+        ],
+        "veja_tambem": [R("configuracao", "usuarios")],
+    },
+
+    "usuarios": {
+        "titulo": "Painel: Usuários e segurança", "icone": "key",
+        "resumo": "Só para o **administrador**: cadastra quem pode usar o AUTO SERE, define o perfil de cada um, redefine senhas, desbloqueia contas e mostra o registro de segurança.",
+        "passos": [
+            "Em **Novo usuário**, escreva o usuário, o nome e o perfil e clique em **Criar usuário**.",
+            "O sistema mostra uma **senha temporária** uma única vez. Anote e entregue à pessoa: no primeiro acesso ela é obrigada a trocá-la.",
+            "Na tabela, mude o **Perfil**, **Redefina a senha**, **Desbloqueie**, **Desative** ou **Apague** um usuário.",
+            "Confira o **Registro de segurança** para ver entradas, tentativas recusadas, bloqueios e mudanças.",
+        ],
+        "elementos": [
+            E("Perfis", "**Administrador**: tudo, inclusive usuários e senhas das integrações. **Operador**: executa as automações e edita registros. **Consulta**: só vê as telas.", "#cfg-usuarios"),
+            E("Redefinir senha", "Gera uma senha temporária nova e encerra as sessões daquela pessoa.", "#cfg-usuarios"),
+            E("Desbloquear", "Remove o bloqueio que aparece após 5 senhas erradas seguidas (15 minutos, dobrando a cada novo bloqueio).", "#cfg-usuarios"),
+            E("Registro de segurança", "Lista os últimos eventos. A mensagem de \"registro íntegro\" confirma que ninguém apagou ou alterou linhas do meio do arquivo.", "#cfg-usuarios"),
+        ],
+        "dicas": ["Tenha pelo menos **dois administradores**: se um esquecer a senha, o outro redefine. O sistema não deixa apagar, desativar ou rebaixar o último administrador ativo."],
+        "cuidados": [
+            "Mudar o perfil, desativar ou apagar um usuário encerra a sessão dele na hora.",
+            "Se o único administrador esquecer a senha, a recuperação é feita no computador do sistema: `python -m src.seguranca redefinir-senha` (veja documentacao/Seguranca.md).",
+        ],
+        "veja_tambem": [R("configuracao", "minha_conta")],
+    },
+
     "senha_sere": {
         "titulo": "Painel: Salvar senha do SERE", "icone": "lock",
         "resumo": "Guarda o usuário e a senha do SERE, usados por todas as automações que entram no sistema.",

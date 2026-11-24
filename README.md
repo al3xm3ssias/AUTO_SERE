@@ -146,3 +146,7 @@ Os testes de interface usam o Chromium do Playwright e são pulados se ele não 
 ## Compatibilidade
 
 Windows (uso principal, com Python embutido), Linux e WSL. O Chrome é necessário no Windows para o modo aplicativo; sem ele o sistema usa o Edge ou o navegador padrão.
+
+## Segurança e acesso
+
+O sistema exige login. O primeiro usuário (administrador) é criado na instalação; depois o administrador cadastra os demais em Configurações → Usuários e segurança. Como a senha é guardada, os perfis, o que fazer ao esquecer a senha e os limites da proteção estão em [`documentacao/Seguranca.md`](documentacao/Seguranca.md).

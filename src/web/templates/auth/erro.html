@@ -1,0 +1,7 @@
+{% extends "auth/base_auth.html" %}
+{% block titulo %}{{ titulo }}{% endblock %}
+{% block corpo %}
+<h1 id="auth-titulo">{{ titulo }}</h1>
+<p class="auth-sub">{{ texto }}</p>
+<a class="auth-link" href="/web/entrar">Ir para a entrada</a>
+{% endblock %}
