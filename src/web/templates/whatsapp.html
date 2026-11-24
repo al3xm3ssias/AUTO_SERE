@@ -145,14 +145,21 @@
           </div>
           <p class="campo-ajuda" id="wa-fila-marcadores"></p>
 
-          <strong style="display:block;margin-top:16px">Alunos da pré-matrícula (quem ainda está na fila de chamada)</strong>
+          <strong style="display:block;margin-top:16px">Alunos da pré-matrícula do próximo ano letivo (matrícula aprovada)</strong>
           <div class="wa-acoes" style="margin-top:8px">
             <div class="field" style="margin:0;max-width:320px"><label for="wa-fila-pm-modelo">Mensagem</label>
               <select id="wa-fila-pm-modelo"></select></div>
             <button class="btn-sm" id="wa-fila-pm-carregar">Carregar alunos</button>
-            <button class="btn-sm" id="wa-fila-pm-todos" hidden>Marcar todos com telefone</button>
+            <button class="btn-sm" id="wa-fila-pm-todos" hidden>Marcar os da lista com telefone</button>
             <button class="btn-primary" id="wa-fila-pm-por" hidden>Pôr marcados na fila</button>
           </div>
+          <div id="wa-fila-pm-filtros" hidden><div class="wa-acoes" style="margin-top:8px">
+            <div class="field" style="margin:0;max-width:260px"><label for="wa-fila-pm-turma">Turma</label>
+              <select id="wa-fila-pm-turma"></select></div>
+            <div class="field" style="margin:0;max-width:200px"><label for="wa-fila-pm-ate">Até a posição (vazio = todos)</label>
+              <input type="number" id="wa-fila-pm-ate" min="1" step="1" placeholder="ex.: 5" autocomplete="off"></div>
+          </div></div>
+          <p class="campo-ajuda" id="wa-fila-pm-info" style="margin:6px 0 0"></p>
           <div class="checklist" id="wa-fila-pm-lista" style="margin-top:8px;max-height:240px;overflow:auto"></div>
         </div>
       </details>

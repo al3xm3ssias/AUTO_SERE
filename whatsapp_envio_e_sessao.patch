@@ -1,0 +1,393 @@
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/seguranca/politica.py b/src/seguranca/politica.py
+--- a/src/seguranca/politica.py
++++ b/src/seguranca/politica.py
+@@ -21,7 +21,7 @@
+ # (método ou None = qualquer, expressão, perfil mínimo). A ORDEM IMPORTA: a primeira que casa vale.
+ _TABELA: list[tuple[tuple[str, ...] | None, re.Pattern, str]] = [
+     # a própria conta: qualquer usuário entrado
+-    (None, re.compile(r"^/web/api/seguranca/(sessao|sair|trocar-senha)$"), "consulta"),
++    (None, re.compile(r"^/web/api/seguranca/(sessao|estender|sair|trocar-senha)$"), "consulta"),
+     (None, re.compile(r"^/web/(sair|trocar-senha)$"), "consulta"),
+     # administração
+     (None, re.compile(r"^/web/api/seguranca/(usuarios|auditoria)(/.*)?$"), "admin"),
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/seguranca/web.py b/src/seguranca/web.py
+--- a/src/seguranca/web.py
++++ b/src/seguranca/web.py
+@@ -299,12 +299,40 @@
+ 
+ # ───────────────────────────── API ─────────────────────────────
+ 
++def tarefas_em_andamento() -> list[str]:
++    """O que o sistema está fazendo agora (automações do SERE, fila do WhatsApp). Enquanto houver algo, a tela NÃO sai sozinha por
++    falta de uso: ela pergunta "Estender essa sessão?"."""
++    nomes: list[str] = []
++    try:
++        from src.web.api import rotas
++        nomes += [str(k) for k in rotas._automacoes_rodando()]
++    except Exception:                                              # noqa: BLE001 — nunca derruba a consulta de sessão
++        pass
++    try:
++        from src.servicos.whatsapp.fila import obter_fila
++        if obter_fila().em_andamento():
++            nomes.append("fila de WhatsApp")
++    except Exception:                                              # noqa: BLE001
++        pass
++    return nomes
++
++
+ @api_seg_bp.route("/sessao", methods=["GET"])
+ def sessao_atual():
+     u, s = usuario_atual(), getattr(g, "sessao", None)
+     if not u or not s:
+         return _resposta_erro(401, "Sem sessão.", autenticacao=True)
+-    return jsonify({"usuario": u.publico(), "csrf": s.csrf, "inatividade_s": _sessoes.inatividade_s()})
++    return jsonify({"usuario": u.publico(), "csrf": s.csrf, "inatividade_s": _sessoes.inatividade_s(),
++                    "ocupado": tarefas_em_andamento()})
++
++
++@api_seg_bp.route("/estender", methods=["POST"])
++def estender_sessao():
++    """O usuário respondeu "sim" a "Estender essa sessão?". O guarda já renovou a inatividade ao receber o pedido."""
++    u, s = usuario_atual(), getattr(g, "sessao", None)
++    if not u or not s:
++        return _resposta_erro(401, "Sem sessão.", autenticacao=True)
++    return jsonify({"ok": True, "inatividade_s": _sessoes.inatividade_s(), "ocupado": tarefas_em_andamento()})
+ 
+ 
+ @api_seg_bp.route("/sair", methods=["POST"])
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/servicos/whatsapp/base.py b/src/servicos/whatsapp/base.py
+--- a/src/servicos/whatsapp/base.py
++++ b/src/servicos/whatsapp/base.py
+@@ -41,6 +41,9 @@
+     simulado: bool
+     id_mensagem: Optional[str] = None
+     erro: Optional[str] = None
++    # Saiu (ok=True), mas o provedor não conseguiu ver a confirmação (tique) a tempo. Não é falha: a fila não conta isso
++    # para pausar, só mostra o aviso no item.
++    aviso: Optional[str] = None
+ 
+ 
+ @dataclass(frozen=True)
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/servicos/whatsapp/fila.py b/src/servicos/whatsapp/fila.py
+--- a/src/servicos/whatsapp/fila.py
++++ b/src/servicos/whatsapp/fila.py
+@@ -13,6 +13,8 @@
+   - histórico: cada item guarda o resultado (enviado, simulado, falhou, cancelado) e a hora;
+   - nada se repete: o mesmo texto para o mesmo número, se já está na fila ou já foi enviado, não entra de novo;
+   - envio real só com WHATSAPP_ENVIO_REAL=1 (a fila pausa e avisa se estiver bloqueado) e só com o WhatsApp conectado;
++  - "enviada, sem confirmação do tique" (o WhatsApp Web não mostrou o visto a tempo) NÃO é falha: o item fica "enviado" com um
++    aviso e não conta para pausar;
+   - 3 falhas seguidas pausam a fila; uma mensagem que ficou "enviando" quando o programa caiu vira "falhou" (confira no
+     WhatsApp se saiu antes de tentar de novo, para não mandar duas vezes).
+ No provedor SIMULADO a fila roda (sem pausas longas) mas nada sai: os itens ficam "simulado" e podem voltar à fila.
+@@ -97,6 +99,10 @@
+     def _rodando(self) -> bool:
+         return bool(self._thread and self._thread.is_alive())
+ 
++    def em_andamento(self) -> bool:
++        """A fila está enviando (ou esperando a próxima mensagem / o dia seguinte) agora."""
++        return self._rodando()
++
+     @staticmethod
+     def _config(dados: dict) -> dict:
+         c = dados.get("config") or {}
+@@ -119,7 +125,7 @@
+                 contagem[i.get("status", PENDENTE)] = contagem.get(i.get("status", PENDENTE), 0) + 1
+             hoje = self._enviados_hoje(dados)
+             itens = [{"id": i["id"], "nome": i.get("nome", ""), "numero": mascarar_numero(i.get("numero")), "texto": i.get("texto", ""),
+-                      "origem": i.get("origem", ""), "status": i.get("status", PENDENTE), "erro": i.get("erro", ""),
++                      "origem": i.get("origem", ""), "status": i.get("status", PENDENTE), "erro": i.get("erro", ""), "aviso": i.get("aviso", ""),
+                       "criado_em": i.get("criado_em", ""), "enviado_em": i.get("enviado_em", ""), "tentativas": i.get("tentativas", 0)}
+                      for i in dados["itens"]]
+             return {"estado": self._estado if self._rodando() or self._estado != RODANDO else PARADA, "mensagem": self._mensagem,
+@@ -293,16 +299,16 @@
+                     continue
+                 try:
+                     r = prov.enviar(item["numero"], item["texto"])
+-                    ok, simulado, erro, id_msg = r.ok, bool(r.simulado), r.erro, r.id_mensagem
++                    ok, simulado, erro, id_msg, aviso = r.ok, bool(r.simulado), r.erro, r.id_mensagem, getattr(r, "aviso", None) or ""
+                 except EnvioNaoAutorizadoError:
+                     self._devolver(item["id"], PENDENTE, "")
+                     self._terminar(PAUSADA, "Pausada: o envio real foi bloqueado.")
+                     return
+                 except Exception as exc:                       # noqa: BLE001 — qualquer falha do provedor vira "falhou"
+-                    ok, simulado, erro, id_msg = False, False, f"{type(exc).__name__}: {exc}", None
++                    ok, simulado, erro, id_msg, aviso = False, False, f"{type(exc).__name__}: {exc}", None, ""
+                 if ok:
+                     falhas_seguidas = 0
+-                    self._registrar(item["id"], SIMULADO if simulado else ENVIADO, "", simulado, id_msg)
++                    self._registrar(item["id"], SIMULADO if simulado else ENVIADO, "", simulado, id_msg, aviso)
+                 else:
+                     falhas_seguidas += 1
+                     self._registrar(item["id"], FALHOU, str(erro or "Falha desconhecida."), False, None)
+@@ -317,12 +323,12 @@
+         except Exception as exc:                               # noqa: BLE001 — a thread nunca morre calada
+             self._terminar(PAUSADA, f"Pausada por erro: {exc}")
+ 
+-    def _registrar(self, id_item: str, status: str, erro: str, simulado: bool, id_mensagem) -> None:
++    def _registrar(self, id_item: str, status: str, erro: str, simulado: bool, id_mensagem, aviso: str = "") -> None:
+         with self._trava:
+             dados = self._ler()
+             for i in dados["itens"]:
+                 if i["id"] == id_item:
+-                    i.update(status=status, erro=erro, simulado=simulado, id_mensagem=id_mensagem)
++                    i.update(status=status, erro=erro, simulado=simulado, id_mensagem=id_mensagem, aviso=aviso)
+                     if status in (ENVIADO, SIMULADO):
+                         i["enviado_em"] = self._agora().isoformat(timespec="seconds")
+             self._gravar(dados)
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/servicos/whatsapp/provedor_whatsplay.py b/src/servicos/whatsapp/provedor_whatsplay.py
+--- a/src/servicos/whatsapp/provedor_whatsplay.py
++++ b/src/servicos/whatsapp/provedor_whatsplay.py
+@@ -47,6 +47,8 @@
+ SEM_CARREGAR_APOS_S = 120.0       # sem estado reconhecido por tanto tempo → orienta a olhar a janela
+ TIMEOUT_ENVIO_S = 180.0
+ TIMEOUT_PARADA_S = 20.0
++AVISO_SEM_CONFIRMACAO = ("Enviada, mas o WhatsApp Web não mostrou o tique de confirmação a tempo. "
++                         "Se quiser ter certeza, confira a conversa.")
+ INTERVALO_MIN_ENVIO_S = 3.0       # espaçamento mínimo entre mensagens (estabilidade e menor risco de bloqueio)
+ 
+ _NUMEROS = re.compile(r"\d{8,15}")
+@@ -309,12 +311,20 @@
+         if falta > 0:
+             self._dormir(falta)
+ 
++    def _resultado_texto_falso(self) -> ResultadoEnvio:
++        """A whatsplay devolveu False. Com erro registrado (on_error) é falha de verdade; SEM erro, a mensagem foi digitada e
++        enviada (Enter) e só o tique de confirmação não apareceu a tempo: isso é "enviada, sem confirmação", não falha."""
++        erro = self.sessao.ultimo_erro()
++        if not erro:
++            return ResultadoEnvio(True, False, aviso=AVISO_SEM_CONFIRMACAO)
++        return ResultadoEnvio(False, False, erro=self._traduzir_falha())
++
+     def _traduzir_falha(self) -> str:
+         erro = self.sessao.ultimo_erro()
+         if "Could not open chat" in erro:
+             return "O WhatsApp não abriu a conversa: número sem WhatsApp ou inválido."
+-        return ("Não consegui confirmar o envio. A mensagem pode ou não ter saído: confira no WhatsApp antes de "
+-                "reenviar." + (f" ({erro})" if erro else ""))
++        return ("Não consegui enviar. A mensagem provavelmente não saiu: confira no WhatsApp antes de reenviar."
++                + (f" ({erro})" if erro else ""))
+ 
+     def enviar(self, numero: str, texto: str) -> ResultadoEnvio:
+         self._exigir_autorizacao()
+@@ -334,7 +344,7 @@
+                 return ResultadoEnvio(False, False, erro=f"Falha ao enviar ({type(exc).__name__}).")
+             finally:
+                 self._ultimo_envio = self._relogio()
+-        return ResultadoEnvio(True, False) if ok else ResultadoEnvio(False, False, erro=self._traduzir_falha())
++        return ResultadoEnvio(True, False) if ok else self._resultado_texto_falso()
+ 
+     def enviar_midia(self, numero: str, tipo: str, dados: bytes, *, nome_arquivo: Optional[str] = None,
+                      mimetype: Optional[str] = None, legenda: Optional[str] = None, voz: bool = False) -> ResultadoEnvio:
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/web/static/js/seguranca.js b/src/web/static/js/seguranca.js
+--- a/src/web/static/js/seguranca.js
++++ b/src/web/static/js/seguranca.js
+@@ -1,7 +1,8 @@
+ /* seguranca.js — a parte do navegador da segurança (carregado ANTES do app.js).
+    1. Põe o token CSRF em todo fetch de escrita para o próprio sistema.
+    2. Sessão vencida (401): volta para a tela de entrada, em vez de mostrar erros soltos.
+-   3. Bloqueio por inatividade: sem mexer no sistema por N minutos, sai sozinho (mesmo com a tela fazendo consultas em segundo plano).
++   3. Inatividade: sem mexer no sistema por N minutos, pergunta "Estender essa sessão?". Sem nada rodando e sem resposta em 60 s, sai;
++      com automação/fila rodando, não sai sozinho (só a pergunta fica até alguém responder).
+    4. Topo: nome e perfil de quem entrou e o botão Sair; esconde o que o perfil não pode usar (o servidor confere de qualquer jeito). */
+ (function () {
+   "use strict";
+@@ -59,7 +60,91 @@
+     var agora = Date.now();
+     if (agora - ultimoMove > 5000) { ultimoMove = agora; ultimo = agora; }
+   }, { passive: true });
+-  setInterval(function () { if (!saindo && Date.now() - ultimo > limite) { sair("inatividade"); } }, 15000);
++  // Passou do limite: em vez de sair de repente, PERGUNTA "Estender essa sessão?".
++  //  - com tarefa em andamento (automação do SERE, fila do WhatsApp): nunca sai sozinho; a pergunta fica até alguém responder;
++  //  - sem nada rodando: dá 60 s para responder e, sem resposta, sai (como antes).
++  var ESPERA_S = 60;
++  var aviso = null;
++  function rotulo(nomes) { return nomes.length ? nomes.join(", ") : ""; }
++  function consultarSessao() {
++    return originalFetch("/web/api/seguranca/sessao", { credentials: "same-origin" })
++      .then(function (r) {
++        if (r.status === 401) { sairParaEntrada("inatividade"); return null; }
++        return r.ok ? r.json() : { ocupado: [] };
++      })
++      .catch(function () { return { ocupado: [] }; });
++  }
++  function fecharPergunta() {
++    if (!aviso) { return; }
++    clearInterval(aviso.timer);
++    aviso.caixa.remove();
++    aviso = null;
++    ultimo = Date.now();
++  }
++  function estender() {
++    originalFetch("/web/api/seguranca/estender", { method: "POST", headers: { "X-CSRF-Token": csrf }, credentials: "same-origin" })
++      .then(function (r) { if (r.status === 401) { sairParaEntrada("inatividade"); } })
++      .catch(function () { /* sem resposta: a próxima consulta decide */ })
++      .then(fecharPergunta);
++  }
++  function perguntar() {
++    if (aviso || saindo) { return; }
++    var caixa = document.createElement("div");
++    caixa.setAttribute("role", "alertdialog");
++    caixa.setAttribute("aria-live", "assertive");
++    caixa.style.cssText = "position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55)";
++    var painel = document.createElement("div");
++    painel.style.cssText = "max-width:440px;margin:16px;padding:20px 22px;border-radius:12px;background:var(--surface,#161b26);color:var(--text,#e8ecf4);border:1px solid var(--border,#2a3142);box-shadow:0 12px 40px rgba(0,0,0,.5)";
++    var titulo = document.createElement("h3");
++    titulo.textContent = "Estender essa sessão?";
++    titulo.style.margin = "0 0 8px";
++    var texto = document.createElement("p");
++    texto.style.cssText = "margin:0 0 14px;line-height:1.45";
++    var botoes = document.createElement("div");
++    botoes.style.cssText = "display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap";
++    var bSair = document.createElement("button");
++    bSair.type = "button"; bSair.className = "btn"; bSair.textContent = "Sair agora";
++    var bSim = document.createElement("button");
++    bSim.type = "button"; bSim.className = "btn btn-primary"; bSim.textContent = "Estender sessão";
++    botoes.appendChild(bSair); botoes.appendChild(bSim);
++    painel.appendChild(titulo); painel.appendChild(texto); painel.appendChild(botoes);
++    caixa.appendChild(painel);
++    document.body.appendChild(caixa);
++    aviso = { caixa: caixa, fim: null, ocupado: [], timer: null, consultando: false };
++    bSim.addEventListener("click", estender);
++    bSair.addEventListener("click", function () { sair("manual"); });
++    bSim.focus();
++
++    function desenhar() {
++      if (!aviso) { return; }
++      if (aviso.ocupado.length) {
++        aviso.fim = null;
++        texto.textContent = "O AUTO SERE está trabalhando (" + rotulo(aviso.ocupado) + "). Sua sessão não vai ser encerrada enquanto isso, "
++          + "mas confirme que você ainda está aí.";
++      } else {
++        if (aviso.fim === null) { aviso.fim = Date.now() + ESPERA_S * 1000; }
++        var falta = Math.max(0, Math.ceil((aviso.fim - Date.now()) / 1000));
++        texto.textContent = "Você ficou um tempo sem usar o sistema. A sessão será encerrada em " + falta + " s se nada for feito.";
++        if (falta <= 0) { sair("inatividade"); }
++      }
++    }
++    function ciclo() {
++      if (!aviso || aviso.consultando) { return; }
++      aviso.consultando = true;
++      consultarSessao().then(function (info) {
++        if (!aviso) { return; }
++        aviso.consultando = false;
++        aviso.ocupado = (info && info.ocupado) || [];
++        desenhar();
++      });
++    }
++    var voltas = 0;
++    aviso.timer = setInterval(function () { voltas += 1; desenhar(); if (voltas % 5 === 0) { ciclo(); } }, 1000);
++    ciclo();
++    desenhar();
++  }
++  setInterval(function () { if (!saindo && !aviso && Date.now() - ultimo > limite) { perguntar(); } }, 15000);
++  window.autoSerePerguntarSessao = perguntar;
+ 
+   // ---- topo: quem entrou
+   document.addEventListener("DOMContentLoaded", function () {
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/web/static/js/whatsapp.js b/src/web/static/js/whatsapp.js
+--- a/src/web/static/js/whatsapp.js
++++ b/src/web/static/js/whatsapp.js
+@@ -162,6 +162,7 @@
+         </div>
+         <div class="campo-ajuda" style="margin:2px 0 0;white-space:pre-wrap">${esc(i.texto.length > 160 ? i.texto.slice(0, 160) + "…" : i.texto)}</div>
+         ${i.erro ? `<div class="campo-ajuda" style="margin:2px 0 0;color:var(--rose)">${esc(i.erro)}</div>` : ""}
++        ${i.aviso ? `<div class="campo-ajuda" style="margin:2px 0 0">${esc(i.aviso)}</div>` : ""}
+       </div>`).join("") : `<div class="campo-ajuda">Nada para mostrar aqui.</div>`;
+   }
+ 
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/tests/test_seguranca_web.py b/tests/test_seguranca_web.py
+--- a/tests/test_seguranca_web.py
++++ b/tests/test_seguranca_web.py
+@@ -457,6 +457,40 @@
+     assert "falta de uso" in app.test_client().get("/web/entrar?motivo=inatividade").get_data(as_text=True)
+ 
+ 
++def test_sessao_informa_o_que_esta_rodando_e_estender_renova(app, monkeypatch):
++    c = _logado(app)
++    assert c.get("/web/api/seguranca/sessao").get_json()["ocupado"] == []
++    monkeypatch.setattr(seg_web, "tarefas_em_andamento", lambda: ["turmas", "fila de WhatsApp"])
++    d = c.get("/web/api/seguranca/sessao").get_json()
++    assert d["ocupado"] == ["turmas", "fila de WhatsApp"]
++    r = c.post("/web/api/seguranca/estender", headers={"X-CSRF-Token": d["csrf"]})
++    assert r.status_code == 200 and r.get_json()["ok"] is True
++    assert c.post("/web/api/seguranca/estender").status_code in (400, 403)          # sem CSRF não vale
++
++
++def test_estender_funciona_para_perfil_consulta_e_exige_login(app):
++    consulta = _logado(app, "consulta")
++    csrf = _csrf(consulta)
++    assert consulta.post("/web/api/seguranca/estender", headers={"X-CSRF-Token": csrf}).status_code == 200
++    assert app.test_client().post("/web/api/seguranca/estender").status_code == 401
++
++
++def test_tarefas_em_andamento_enxerga_fila_do_whatsapp_rodando(monkeypatch):
++    from src.servicos.whatsapp import fila as _fila_mod
++
++    class Falsa:
++        def em_andamento(self): return True
++    monkeypatch.setattr(_fila_mod, "obter_fila", lambda: Falsa())
++    assert "fila de WhatsApp" in seg_web.tarefas_em_andamento()
++
++
++def test_js_pergunta_antes_de_sair_por_inatividade():
++    from pathlib import Path
++    js = (Path(__file__).resolve().parent.parent / "src" / "web" / "static" / "js" / "seguranca.js").read_text(encoding="utf-8")
++    assert "Estender essa sessão?" in js and "/web/api/seguranca/estender" in js
++    assert 'setInterval(function () { if (!saindo && Date.now() - ultimo > limite) { sair("inatividade"); } }, 15000);' not in js
++
++
+ # ───────────────────────────── CLI ─────────────────────────────
+ 
+ def _roteiro(monkeypatch, senhas_digitadas, textos=()):
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/tests/test_whatsapp_fila.py b/tests/test_whatsapp_fila.py
+--- a/tests/test_whatsapp_fila.py
++++ b/tests/test_whatsapp_fila.py
+@@ -372,3 +372,47 @@
+     from src.servicos.whatsapp import fila as modulo
+     assert modulo.INTERVALO_PADRAO_S == 300
+     assert _fila(Prov()).resumo()["config"]["intervalo_s"] == 300
++
++
++def test_enviada_sem_confirmacao_do_tique_nao_conta_como_falha_nem_pausa(amb):
++    """Antes, 3 mensagens que SAÍRAM mas sem o tique viravam 3 "falhas" e a fila pausava sozinha."""
++    class SemTique(Prov):
++        def enviar(self, numero, texto):
++            self.enviados.append((numero, texto))
++            return ResultadoEnvio(True, False, aviso="Enviada, sem confirmação do tique.")
++    prov = SemTique()
++    fila = _fila(prov)
++    fila.adicionar([{"numero": n, "nome": f"Pai {i}", "texto": f"Oi {i}"} for i, n in enumerate((N1, N2, N3, "(42) 99999-4444"), 1)])
++    _rodar(fila)
++    r = fila.resumo()
++    assert len(prov.enviados) == 4 and r["estado"] == f.CONCLUIDA and r["contagem"]["enviado"] == 4 and r["contagem"]["falhou"] == 0
++    assert all(i["status"] == "enviado" and "tique" in i["aviso"] and not i["erro"] for i in r["itens"])
++    assert r["enviados_hoje"] == 4                               # conta no limite do dia
++
++
++def test_falha_de_verdade_continua_pausando_depois_de_3(amb):
++    fila = _fila(Prov(falha="O WhatsApp não abriu a conversa: número sem WhatsApp ou inválido."))
++    fila.adicionar([{"numero": n, "nome": f"Pai {i}", "texto": f"Oi {i}"} for i, n in enumerate((N1, N2, N3, "(42) 99999-4444"), 1)])
++    _rodar(fila)
++    r = fila.resumo()
++    assert r["estado"] == f.PAUSADA and r["contagem"]["falhou"] == 3 and r["contagem"]["pendente"] == 1
++
++
++def test_whatsplay_false_sem_erro_e_enviada_sem_confirmacao_e_com_erro_e_falha(amb):
++    from src.servicos.whatsapp.provedor_whatsplay import ProvedorWhatsplay
++
++    class Sessao:
++        def __init__(self, erro): self.erro = erro
++        def foto(self):
++            from src.servicos.whatsapp.monitor import Foto, Situacao
++            return Foto(Situacao.CONECTADO, gateway_online=True)
++        def limpar_erro(self): pass
++        def ultimo_erro(self): return self.erro
++        def executar(self, fazer, timeout=0): return False
++
++    sem_erro = ProvedorWhatsplay(Sessao(""), intervalo_min_s=0, dormir=lambda s: None).enviar(N1, "Oi")
++    assert sem_erro.ok and sem_erro.aviso and not sem_erro.erro
++    com_erro = ProvedorWhatsplay(Sessao("Could not open chat: 5542"), intervalo_min_s=0, dormir=lambda s: None).enviar(N1, "Oi")
++    assert not com_erro.ok and "não abriu a conversa" in com_erro.erro
++    outro = ProvedorWhatsplay(Sessao("Error sending message: x"), intervalo_min_s=0, dormir=lambda s: None).enviar(N1, "Oi")
++    assert not outro.ok and "Não consegui enviar" in outro.erro

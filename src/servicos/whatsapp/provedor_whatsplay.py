@@ -47,6 +47,8 @@ AVISO_INSTALAR = ("A biblioteca whatsplay não está instalada. Execute: pip ins
 SEM_CARREGAR_APOS_S = 120.0       # sem estado reconhecido por tanto tempo → orienta a olhar a janela
 TIMEOUT_ENVIO_S = 180.0
 TIMEOUT_PARADA_S = 20.0
+AVISO_SEM_CONFIRMACAO = ("Enviada, mas o WhatsApp Web não mostrou o tique de confirmação a tempo. "
+                         "Se quiser ter certeza, confira a conversa.")
 INTERVALO_MIN_ENVIO_S = 3.0       # espaçamento mínimo entre mensagens (estabilidade e menor risco de bloqueio)
 
 _NUMEROS = re.compile(r"\d{8,15}")
@@ -309,12 +311,20 @@ class ProvedorWhatsplay:
         if falta > 0:
             self._dormir(falta)
 
+    def _resultado_texto_falso(self) -> ResultadoEnvio:
+        """A whatsplay devolveu False. Com erro registrado (on_error) é falha de verdade; SEM erro, a mensagem foi digitada e
+        enviada (Enter) e só o tique de confirmação não apareceu a tempo: isso é "enviada, sem confirmação", não falha."""
+        erro = self.sessao.ultimo_erro()
+        if not erro:
+            return ResultadoEnvio(True, False, aviso=AVISO_SEM_CONFIRMACAO)
+        return ResultadoEnvio(False, False, erro=self._traduzir_falha())
+
     def _traduzir_falha(self) -> str:
         erro = self.sessao.ultimo_erro()
         if "Could not open chat" in erro:
             return "O WhatsApp não abriu a conversa: número sem WhatsApp ou inválido."
-        return ("Não consegui confirmar o envio. A mensagem pode ou não ter saído: confira no WhatsApp antes de "
-                "reenviar." + (f" ({erro})" if erro else ""))
+        return ("Não consegui enviar. A mensagem provavelmente não saiu: confira no WhatsApp antes de reenviar."
+                + (f" ({erro})" if erro else ""))
 
     def enviar(self, numero: str, texto: str) -> ResultadoEnvio:
         self._exigir_autorizacao()
@@ -334,7 +344,7 @@ class ProvedorWhatsplay:
                 return ResultadoEnvio(False, False, erro=f"Falha ao enviar ({type(exc).__name__}).")
             finally:
                 self._ultimo_envio = self._relogio()
-        return ResultadoEnvio(True, False) if ok else ResultadoEnvio(False, False, erro=self._traduzir_falha())
+        return ResultadoEnvio(True, False) if ok else self._resultado_texto_falso()
 
     def enviar_midia(self, numero: str, tipo: str, dados: bytes, *, nome_arquivo: Optional[str] = None,
                      mimetype: Optional[str] = None, legenda: Optional[str] = None, voz: bool = False) -> ResultadoEnvio:

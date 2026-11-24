@@ -299,12 +299,40 @@ def trocar_senha_pagina():
 
 # ───────────────────────────── API ─────────────────────────────
 
+def tarefas_em_andamento() -> list[str]:
+    """O que o sistema está fazendo agora (automações do SERE, fila do WhatsApp). Enquanto houver algo, a tela NÃO sai sozinha por
+    falta de uso: ela pergunta "Estender essa sessão?"."""
+    nomes: list[str] = []
+    try:
+        from src.web.api import rotas
+        nomes += [str(k) for k in rotas._automacoes_rodando()]
+    except Exception:                                              # noqa: BLE001 — nunca derruba a consulta de sessão
+        pass
+    try:
+        from src.servicos.whatsapp.fila import obter_fila
+        if obter_fila().em_andamento():
+            nomes.append("fila de WhatsApp")
+    except Exception:                                              # noqa: BLE001
+        pass
+    return nomes
+
+
 @api_seg_bp.route("/sessao", methods=["GET"])
 def sessao_atual():
     u, s = usuario_atual(), getattr(g, "sessao", None)
     if not u or not s:
         return _resposta_erro(401, "Sem sessão.", autenticacao=True)
-    return jsonify({"usuario": u.publico(), "csrf": s.csrf, "inatividade_s": _sessoes.inatividade_s()})
+    return jsonify({"usuario": u.publico(), "csrf": s.csrf, "inatividade_s": _sessoes.inatividade_s(),
+                    "ocupado": tarefas_em_andamento()})
+
+
+@api_seg_bp.route("/estender", methods=["POST"])
+def estender_sessao():
+    """O usuário respondeu "sim" a "Estender essa sessão?". O guarda já renovou a inatividade ao receber o pedido."""
+    u, s = usuario_atual(), getattr(g, "sessao", None)
+    if not u or not s:
+        return _resposta_erro(401, "Sem sessão.", autenticacao=True)
+    return jsonify({"ok": True, "inatividade_s": _sessoes.inatividade_s(), "ocupado": tarefas_em_andamento()})
 
 
 @api_seg_bp.route("/sair", methods=["POST"])

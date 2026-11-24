@@ -13,6 +13,8 @@ O que a fila garante:
   - histórico: cada item guarda o resultado (enviado, simulado, falhou, cancelado) e a hora;
   - nada se repete: o mesmo texto para o mesmo número, se já está na fila ou já foi enviado, não entra de novo;
   - envio real só com WHATSAPP_ENVIO_REAL=1 (a fila pausa e avisa se estiver bloqueado) e só com o WhatsApp conectado;
+  - "enviada, sem confirmação do tique" (o WhatsApp Web não mostrou o visto a tempo) NÃO é falha: o item fica "enviado" com um
+    aviso e não conta para pausar;
   - 3 falhas seguidas pausam a fila; uma mensagem que ficou "enviando" quando o programa caiu vira "falhou" (confira no
     WhatsApp se saiu antes de tentar de novo, para não mandar duas vezes).
 No provedor SIMULADO a fila roda (sem pausas longas) mas nada sai: os itens ficam "simulado" e podem voltar à fila.
@@ -97,6 +99,10 @@ class FilaWhatsApp:
     def _rodando(self) -> bool:
         return bool(self._thread and self._thread.is_alive())
 
+    def em_andamento(self) -> bool:
+        """A fila está enviando (ou esperando a próxima mensagem / o dia seguinte) agora."""
+        return self._rodando()
+
     @staticmethod
     def _config(dados: dict) -> dict:
         c = dados.get("config") or {}
@@ -119,7 +125,7 @@ class FilaWhatsApp:
                 contagem[i.get("status", PENDENTE)] = contagem.get(i.get("status", PENDENTE), 0) + 1
             hoje = self._enviados_hoje(dados)
             itens = [{"id": i["id"], "nome": i.get("nome", ""), "numero": mascarar_numero(i.get("numero")), "texto": i.get("texto", ""),
-                      "origem": i.get("origem", ""), "status": i.get("status", PENDENTE), "erro": i.get("erro", ""),
+                      "origem": i.get("origem", ""), "status": i.get("status", PENDENTE), "erro": i.get("erro", ""), "aviso": i.get("aviso", ""),
                       "criado_em": i.get("criado_em", ""), "enviado_em": i.get("enviado_em", ""), "tentativas": i.get("tentativas", 0)}
                      for i in dados["itens"]]
             return {"estado": self._estado if self._rodando() or self._estado != RODANDO else PARADA, "mensagem": self._mensagem,
@@ -293,16 +299,16 @@ class FilaWhatsApp:
                     continue
                 try:
                     r = prov.enviar(item["numero"], item["texto"])
-                    ok, simulado, erro, id_msg = r.ok, bool(r.simulado), r.erro, r.id_mensagem
+                    ok, simulado, erro, id_msg, aviso = r.ok, bool(r.simulado), r.erro, r.id_mensagem, getattr(r, "aviso", None) or ""
                 except EnvioNaoAutorizadoError:
                     self._devolver(item["id"], PENDENTE, "")
                     self._terminar(PAUSADA, "Pausada: o envio real foi bloqueado.")
                     return
                 except Exception as exc:                       # noqa: BLE001 — qualquer falha do provedor vira "falhou"
-                    ok, simulado, erro, id_msg = False, False, f"{type(exc).__name__}: {exc}", None
+                    ok, simulado, erro, id_msg, aviso = False, False, f"{type(exc).__name__}: {exc}", None, ""
                 if ok:
                     falhas_seguidas = 0
-                    self._registrar(item["id"], SIMULADO if simulado else ENVIADO, "", simulado, id_msg)
+                    self._registrar(item["id"], SIMULADO if simulado else ENVIADO, "", simulado, id_msg, aviso)
                 else:
                     falhas_seguidas += 1
                     self._registrar(item["id"], FALHOU, str(erro or "Falha desconhecida."), False, None)
@@ -317,12 +323,12 @@ class FilaWhatsApp:
         except Exception as exc:                               # noqa: BLE001 — a thread nunca morre calada
             self._terminar(PAUSADA, f"Pausada por erro: {exc}")
 
-    def _registrar(self, id_item: str, status: str, erro: str, simulado: bool, id_mensagem) -> None:
+    def _registrar(self, id_item: str, status: str, erro: str, simulado: bool, id_mensagem, aviso: str = "") -> None:
         with self._trava:
             dados = self._ler()
             for i in dados["itens"]:
                 if i["id"] == id_item:
-                    i.update(status=status, erro=erro, simulado=simulado, id_mensagem=id_mensagem)
+                    i.update(status=status, erro=erro, simulado=simulado, id_mensagem=id_mensagem, aviso=aviso)
                     if status in (ENVIADO, SIMULADO):
                         i["enviado_em"] = self._agora().isoformat(timespec="seconds")
             self._gravar(dados)

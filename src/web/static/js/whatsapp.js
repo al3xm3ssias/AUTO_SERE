@@ -162,6 +162,7 @@
         </div>
         <div class="campo-ajuda" style="margin:2px 0 0;white-space:pre-wrap">${esc(i.texto.length > 160 ? i.texto.slice(0, 160) + "…" : i.texto)}</div>
         ${i.erro ? `<div class="campo-ajuda" style="margin:2px 0 0;color:var(--rose)">${esc(i.erro)}</div>` : ""}
+        ${i.aviso ? `<div class="campo-ajuda" style="margin:2px 0 0">${esc(i.aviso)}</div>` : ""}
       </div>`).join("") : `<div class="campo-ajuda">Nada para mostrar aqui.</div>`;
   }
 
@@ -190,9 +191,11 @@
     const atual = $("wa-fila-modelo").value;
     $("wa-fila-modelo").innerHTML = opcoesModelos(false);
     if (atual) $("wa-fila-modelo").value = atual;
+    const pmAtual = $("wa-fila-pm-modelo").value;
     $("wa-fila-pm-modelo").innerHTML = opcoesModelos(true);
+    $("wa-fila-pm-modelo").value = pmAtual || (modelosFila.some((m) => m.id === "matricula_aprovada") ? "matricula_aprovada" : "comunicado");
     $("wa-fila-marcadores").textContent = "Marcadores que valem nos modelos: " + (r.dados.marcadores || []).map((m) => "$" + m).join(", ")
-      + ". Na lista de alunos da pré-matrícula eles são trocados pelos dados de cada aluno; numa mensagem avulsa, escreva o texto final.";
+      + ". Na lista de alunos da pré-matrícula (próximo ano) eles são trocados pelos dados de cada aluno; numa mensagem avulsa, só valem $ESCOLA, $ANO, $PROXIMO_ANO_LETIVO e $DATA, e $ALUNO se você preencher o campo Nome.";
   }
 
   function iniciarFila() {
@@ -261,16 +264,47 @@
       if (r.ok) carregarModelosFila();
     });
 
+    let pmAlunos = [];
+    const ROTULO_SITUACAO = { matriculado: "matriculado", pendente: "aguardando vaga" };
+    function pmVisiveis() {
+      const turma = $("wa-fila-pm-turma").value;
+      const ate = parseInt($("wa-fila-pm-ate").value, 10);
+      return pmAlunos.filter((a) => {
+        if (turma && a.turma !== turma) return false;
+        if (Number.isFinite(ate) && ate > 0) {                       // com limite, quem não tem posição não dá para saber: fica fora
+          const pos = parseInt(a.posicao, 10);
+          if (!Number.isFinite(pos) || pos > ate) return false;
+        }
+        return true;
+      });
+    }
+    function desenharPm(arquivo) {
+      const marcados = new Set([...$("wa-fila-pm-lista").querySelectorAll("input:checked")].map((c) => c.dataset.pmId));
+      const vis = pmVisiveis();
+      $("wa-fila-pm-lista").innerHTML = vis.length ? vis.map((a) => `
+        <label class="checklist-item"><input type="checkbox" data-pm-id="${esc(a.id)}" data-tem="${a.tem_telefone ? 1 : 0}"${a.tem_telefone ? "" : " disabled"}${marcados.has(a.id) && a.tem_telefone ? " checked" : ""}>
+          ${esc(a.nome)} · ${esc(a.turma)}${a.posicao ? ` · ${esc(a.posicao)}º` : ""} · ${esc(ROTULO_SITUACAO[a.situacao] || a.situacao)}${a.tem_telefone ? "" : " · sem telefone"}</label>`).join("")
+        : `<div class="campo-ajuda">Ninguém com esse filtro.</div>`;
+      $("wa-fila-pm-info").textContent = `Arquivo ${arquivo || ""}: ${pmAlunos.length} alunos; ${vis.length} com o filtro atual `
+        + `(${vis.filter((a) => a.tem_telefone).length} com telefone).`;
+      mostrar("wa-fila-pm-todos", vis.length > 0);
+      mostrar("wa-fila-pm-por", vis.length > 0);
+    }
+    let pmArquivo = "";
+    $("wa-fila-pm-turma").addEventListener("change", () => desenharPm(pmArquivo));
+    $("wa-fila-pm-ate").addEventListener("input", () => desenharPm(pmArquivo));
     $("wa-fila-pm-carregar").addEventListener("click", async () => {
       const r = await chamar("/fila/prematricula");
       if (!r.ok) { toast(r.dados.erro || "Não consegui ler a pré-matrícula."); return; }
-      const alunos = r.dados.alunos || [];
-      $("wa-fila-pm-lista").innerHTML = alunos.length ? alunos.map((a) => `
-        <label class="checklist-item"><input type="checkbox" data-pm-id="${esc(a.id)}" data-tem="${a.tem_telefone ? 1 : 0}"${a.tem_telefone ? "" : " disabled"}>
-          ${esc(a.nome)} · ${esc(a.turma)}${a.posicao ? ` · ${esc(a.posicao)}º` : ""}${a.tem_telefone ? "" : " · sem telefone"}</label>`).join("")
-        : `<div class="campo-ajuda">Ninguém na fila da pré-matrícula.</div>`;
-      mostrar("wa-fila-pm-todos", alunos.length > 0);
-      mostrar("wa-fila-pm-por", alunos.length > 0);
+      pmAlunos = r.dados.alunos || [];
+      pmArquivo = r.dados.arquivo || "";
+      const turmas = [...new Set(pmAlunos.map((a) => a.turma))].sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true }));
+      const atual = $("wa-fila-pm-turma").value;
+      $("wa-fila-pm-turma").innerHTML = `<option value="">Todas as turmas</option>`
+        + turmas.map((tm) => `<option value="${esc(tm)}">${esc(tm)}</option>`).join("");
+      if (turmas.includes(atual)) $("wa-fila-pm-turma").value = atual;
+      $("wa-fila-pm-filtros").hidden = false;
+      desenharPm(pmArquivo);
     });
     $("wa-fila-pm-todos").addEventListener("click", () =>
       $("wa-fila-pm-lista").querySelectorAll("input[data-tem='1']").forEach((c) => { c.checked = true; }));

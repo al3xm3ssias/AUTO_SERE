@@ -18,15 +18,72 @@ PrimeFaces (IDs com ":" escapado, ex.: "#Login\\:cpf"), a normalização de
 espaços ao comparar nome do aluno no dropdown, e a sequência de cliques
 "Sim" (com IDs alternativos) são preservados exatamente como estavam.
 
+Trava de escola: antes de iniciar a confirmação, confirmar_matricula confere
+se o campo INSTITUIÇÃO da tela contém o texto recebido em `escola_esperada`
+(o nome NÃO fica fixo aqui: o chamador lê da configuração do sistema e passa
+por parâmetro). Se for outra escola (ou o campo não puder ser lido), NÃO
+confirma nada e retorna o marcador "ESCOLA_DIFERENTE" — o chamador deve
+registrar a observação e seguir para o próximo aluno.
+
 Uso:
     from src.automacao.rematricula_area_aluno import fazer_login_area_aluno, acessar_matricula_online, confirmar_matricula
 
     ok = await fazer_login_area_aluno(page_aluno, cpf, chave)
     ok = await acessar_matricula_online(page_aluno, "Ana Silva")
-    ok = await confirmar_matricula(page_aluno)
+    ok = await confirmar_matricula(page_aluno, escola_esperada=escola_da_config)
 """
 
 from __future__ import annotations
+
+import unicodedata
+
+# Marcador retornado por confirmar_matricula quando a escola não confere.
+ESCOLA_DIFERENTE = "ESCOLA_DIFERENTE"
+
+
+def _normalizar(texto: str) -> str:
+    """Remove acentos, colapsa espaços e coloca em maiúsculas."""
+    sem_acento = "".join(
+        c for c in unicodedata.normalize("NFD", texto or "")
+        if unicodedata.category(c) != "Mn"
+    )
+    return " ".join(sem_acento.split()).upper()
+
+
+async def ler_instituicao_area_aluno(page) -> str | None:
+    """
+    Lê o texto do campo INSTITUIÇÃO na tela "SITUAÇÃO DA MATRÍCULA PARA <ano>".
+
+    A estrutura é: uma linha (ui-grid-row) com o label "INSTITUIÇÃO" seguida
+    de outra linha com o valor. Retorna o texto do valor, ou None se o campo
+    não for encontrado.
+    """
+    xpath = (
+        "//label[normalize-space(.)='INSTITUIÇÃO']"
+        "/ancestor::div[contains(@class,'ui-grid-row')][1]"
+        "/following-sibling::div[contains(@class,'ui-grid-row')][1]"
+        "//div[contains(@class,'ui-panelgrid-cell')]"
+    )
+    try:
+        await page.wait_for_selector(f"xpath={xpath}", timeout=5000)
+        el = await page.query_selector(f"xpath={xpath}")
+        if not el:
+            return None
+        texto = " ".join((await el.inner_text()).split()).strip()
+        return texto or None
+    except Exception:
+        return None
+
+
+async def escola_confere(page, escola_esperada: str) -> tuple[bool, str | None]:
+    """
+    Confere se o campo INSTITUIÇÃO contém `escola_esperada` (comparação sem
+    acento e sem diferença de caixa). Retorna (confere, instituicao_lida).
+    """
+    instituicao = await ler_instituicao_area_aluno(page)
+    if not instituicao:
+        return False, None
+    return _normalizar(escola_esperada) in _normalizar(instituicao), instituicao
 
 
 async def fazer_login_area_aluno(page, cpf: str, chave: str) -> bool:
@@ -126,7 +183,7 @@ async def acessar_matricula_online(page, nome_aluno: str) -> bool:
         return False
 
 
-async def confirmar_matricula(page):
+async def confirmar_matricula(page, escola_esperada: str | None = None):
     """
     Confirma a matrícula do aluno selecionado.
 
@@ -144,8 +201,16 @@ async def confirmar_matricula(page):
     clica no botão final de confirmação (por ID PrimeFaces, com fallback
     por texto).
 
+    Trava de escola: depois de descartar "JA_MATRICULADO" e ANTES de clicar
+    em qualquer botão, confere se o campo INSTITUIÇÃO contém `escola_esperada`
+    (nome vindo da configuração do sistema, nunca fixo no código). Se não
+    conferir (ou o campo não puder ser lido), nada é confirmado e a função
+    retorna "ESCOLA_DIFERENTE". Se `escola_esperada` vier vazio/None, a
+    trava fica desligada e um aviso é impresso no log.
+
     Retorna True em caso de sucesso, "JA_MATRICULADO" se a matrícula já
-    existia, ou False em caso de erro.
+    existia, "ESCOLA_DIFERENTE" se a instituição não for a esperada, ou
+    False em caso de erro.
     """
     try:
         try:
@@ -162,6 +227,32 @@ async def confirmar_matricula(page):
         except Exception as e:
             print("⚠️ Erro ao verificar matrícula já realizada:", e)
 
+        # Trava: só segue se a instituição exibida for a escola cadastrada
+        if not (escola_esperada or "").strip():
+            print(
+                "⚠️ Nenhuma escola configurada – trava de INSTITUIÇÃO desligada "
+                "(a matrícula será confirmada sem conferir a escola)."
+            )
+            instituicao = None
+            confere = True
+        else:
+            confere, instituicao = await escola_confere(page, escola_esperada)
+
+        if not confere:
+            if instituicao is None:
+                print(
+                    "⏭️ Não foi possível ler o campo INSTITUIÇÃO – "
+                    "aluno ignorado (próximo aluno)."
+                )
+            else:
+                print(
+                    f"⏭️ Instituição '{instituicao}' não é a escola cadastrada "
+                    f"({escola_esperada}) – aluno ignorado (próximo aluno)."
+                )
+            return ESCOLA_DIFERENTE
+
+        if instituicao:
+            print(f"🏫 Instituição confere ({instituicao}).")
         print("✔️ Confirmando matrícula...")
 
         try:

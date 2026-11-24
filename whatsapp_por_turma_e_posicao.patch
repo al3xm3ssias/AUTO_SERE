@@ -1,0 +1,261 @@
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/comum/modelos_whatsapp.py b/src/comum/modelos_whatsapp.py
+--- a/src/comum/modelos_whatsapp.py
++++ b/src/comum/modelos_whatsapp.py
+@@ -133,6 +133,11 @@
+     return _RE_MARCADOR.sub(lambda m: str(contexto.get(m.group(1)) or m.group(0)), texto)
+ 
+ 
++def marcadores_sobrando(texto: str) -> list[str]:
++    """Marcadores válidos que continuam no texto depois de renderizar (faltou o dado): nunca devem ir para um responsável."""
++    return sorted({m for m in _RE_MARCADOR.findall(texto or "") if m in MARCADORES})
++
++
+ def contexto_base() -> dict:
+     from src.comum import escola
+     return {"ESCOLA": " ".join(str(escola.nome()).split()), "ANO": str(paths.ano_atual()),
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/web/api/whatsapp.py b/src/web/api/whatsapp.py
+--- a/src/web/api/whatsapp.py
++++ b/src/web/api/whatsapp.py
+@@ -11,7 +11,7 @@
+     POST /envio-real     liga/desliga a permissão de envio real
+     GET  /fila           a fila de envio: estado, configuração, contagens, limite do dia e as mensagens (número mascarado)
+     POST /fila/itens     põe mensagens na fila ({itens:[{numero,nome,texto}]})
+-    GET  /fila/prematricula          alunos com matrícula aprovada em previsao_alunos_<ano+1>.json (próximo ano letivo)
++    GET  /fila/prematricula          alunos de previsao_alunos_<ano+1>.json (próximo ano letivo), para filtrar por turma/posição
+     POST /fila/da-prematricula       põe na fila os alunos escolhidos ({ids, modelo_id})
+     POST /fila/config    intervalo entre mensagens, limite por dia, continuar no dia seguinte
+     POST /fila/iniciar | /fila/pausar | /fila/cancelar-pendentes | /fila/limpar-historico
+@@ -314,8 +314,19 @@
+     itens = corpo.get("itens")
+     if not isinstance(itens, list) or not itens:
+         return _erro("Informe as mensagens a pôr na fila.")
++    from src.comum import modelos_whatsapp as _modelos
+     try:
+-        r = obter_fila().adicionar([i for i in itens if isinstance(i, dict)], origem="manual")
++        base, prontos = _modelos.contexto_base(), []
++        for i in (i for i in itens if isinstance(i, dict)):
++            nome = " ".join(str(i.get("nome") or "").split())
++            texto = _modelos.renderizar(str(i.get("texto") or ""), {**base, "ALUNO": nome})
++            sobra = _modelos.marcadores_sobrando(texto)
++            if sobra:
++                return _erro("Esta mensagem ainda tem " + ", ".join("$" + m for m in sobra) + ". Na mensagem avulsa só valem "
++                             "$ESCOLA, $ANO, $PROXIMO_ANO_LETIVO e $DATA, e $ALUNO se você preencher o campo Nome; "
++                             "para os demais, escreva o texto final (ou use a lista de alunos da pré-matrícula).")
++            prontos.append({**i, "texto": texto})
++        r = obter_fila().adicionar(prontos, origem="manual")
+         return _resposta_fila(resultado=r)
+     except ValueError as exc:
+         return _erro(str(exc))
+@@ -324,8 +335,9 @@
+ def _previsao_para_fila() -> dict:
+     """
+     Alunos da pré-matrícula do PRÓXIMO ano letivo (dados/<ano em uso>/previsao_alunos_<ano+1>.json, ex.: previsao_alunos_2027.json).
+-    Só entra quem está com matrícula APROVADA (situação "matriculado"); quem ainda aguarda vaga (pendente) não é chamado.
+-    Devolve {"ano", "arquivo", "alunos": [{id, nome, turma, posicao, telefone, responsavel}], "pendentes_fora": n}.
++    Vêm todos os que ainda contam (matriculado ou aguardando vaga; cancelados e quem refez o cadastro em outra escola já ficam
++    de fora). Quem será chamado quem decide na tela, por turma e até a posição N da lista (a situação do SERE não manda).
++    Devolve {"ano", "arquivo", "alunos": [{id, nome, turma, posicao, telefone, responsavel, situacao}]}.
+     ValueError (com o motivo) se o arquivo não existe ou está ilegível.
+     """
+     from src.comum import paths, previsao
+@@ -340,15 +352,17 @@
+         raise ValueError(f"{arquivo}: {exc}") from exc
+     if not dados:
+         raise ValueError(f"Ainda não existe {arquivo} (ou está vazio). Rode a coleta da pré-matrícula para gerá-lo.")
+-    alunos, pendentes = [], 0
+-    for n in previsao._novos_da_pre_matricula(dados):
+-        if n["situacao"] != previsao.SITUACAO_MATRICULADO:
+-            pendentes += 1
+-            continue
+-        alunos.append({"id": str(n["cpf"] or n["nome"]), "nome": n["nome"], "turma": n["turma"], "posicao": n["posicao"],
+-                       "telefone": n["telefone"], "responsavel": n["responsavel"]})
+-    alunos.sort(key=lambda a: (a["turma"], a["nome"]))
+-    return {"ano": ano, "arquivo": arquivo, "alunos": alunos, "pendentes_fora": pendentes}
++    alunos = [{"id": str(n["cpf"] or n["nome"]), "nome": n["nome"], "turma": n["turma"], "posicao": n["posicao"],
++               "telefone": n["telefone"], "responsavel": n["responsavel"], "situacao": n["situacao"]}
++              for n in previsao._novos_da_pre_matricula(dados)]
++
++    def _pos(a):
++        try:
++            return int(str(a["posicao"]).strip())
++        except ValueError:
++            return 10**9
++    alunos.sort(key=lambda a: (a["turma"], _pos(a), a["nome"]))
++    return {"ano": ano, "arquivo": arquivo, "alunos": alunos}
+ 
+ 
+ def _alunos_prematricula_para_fila() -> list[dict]:
+@@ -361,9 +375,9 @@
+         p = _previsao_para_fila()
+     except ValueError as exc:
+         return _erro(str(exc))
+-    return jsonify({"ano": p["ano"], "arquivo": p["arquivo"], "pendentes_fora": p["pendentes_fora"],
++    return jsonify({"ano": p["ano"], "arquivo": p["arquivo"],
+                     "alunos": [{"id": a["id"], "nome": a["nome"], "turma": a["turma"], "posicao": a["posicao"],
+-                                "tem_telefone": bool(a["telefone"])} for a in p["alunos"]]})
++                                "situacao": a["situacao"], "tem_telefone": bool(a["telefone"])} for a in p["alunos"]]})
+ 
+ 
+ @whatsapp_bp.route("/fila/da-prematricula", methods=["POST"])
+@@ -378,7 +392,7 @@
+         modelo = None if modelo_id == COMUNICADO_ID else _modelos.obter(modelo_id)
+         if modelo_id != COMUNICADO_ID and (modelo is None or not modelo["texto"].strip()):
+             return _erro("Escolha um modelo com texto (ou o comunicado de matrícula).")
+-        itens, sem_telefone = [], []
++        itens, sem_telefone, recusados = [], [], []
+         for a in _alunos_prematricula_para_fila():
+             if a["id"] not in ids:
+                 continue
+@@ -390,8 +404,13 @@
+             else:
+                 ctx = {**_modelos.contexto_base(), "ALUNO": a["nome"], "TURMA": a["turma"], "RESPONSAVEL": a["responsavel"] or "responsável"}
+                 texto = _modelos.renderizar(modelo["texto"], ctx)
++            sobra = _modelos.marcadores_sobrando(texto)
++            if sobra:
++                recusados.append({"nome": a["nome"], "erro": "faltou o dado de " + ", ".join("$" + m for m in sobra)})
++                continue
+             itens.append({"numero": a["telefone"], "nome": a["nome"], "texto": texto})
+         r = obter_fila().adicionar(itens, origem="prematricula") if itens else {"adicionados": 0, "duplicados": 0, "invalidos": []}
++        r["invalidos"] = list(r.get("invalidos") or []) + recusados
+         r["sem_telefone"] = sem_telefone
+         return _resposta_fila(resultado=r)
+     except ValueError as exc:
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/web/static/js/whatsapp.js b/src/web/static/js/whatsapp.js
+--- a/src/web/static/js/whatsapp.js
++++ b/src/web/static/js/whatsapp.js
+@@ -194,7 +194,7 @@
+     $("wa-fila-pm-modelo").innerHTML = opcoesModelos(true);
+     $("wa-fila-pm-modelo").value = pmAtual || (modelosFila.some((m) => m.id === "matricula_aprovada") ? "matricula_aprovada" : "comunicado");
+     $("wa-fila-marcadores").textContent = "Marcadores que valem nos modelos: " + (r.dados.marcadores || []).map((m) => "$" + m).join(", ")
+-      + ". Na lista de alunos da pré-matrícula (próximo ano) eles são trocados pelos dados de cada aluno; numa mensagem avulsa, escreva o texto final.";
++      + ". Na lista de alunos da pré-matrícula (próximo ano) eles são trocados pelos dados de cada aluno; numa mensagem avulsa, só valem $ESCOLA, $ANO, $PROXIMO_ANO_LETIVO e $DATA, e $ALUNO se você preencher o campo Nome.";
+   }
+ 
+   function iniciarFila() {
+@@ -263,18 +263,47 @@
+       if (r.ok) carregarModelosFila();
+     });
+ 
++    let pmAlunos = [];
++    const ROTULO_SITUACAO = { matriculado: "matriculado", pendente: "aguardando vaga" };
++    function pmVisiveis() {
++      const turma = $("wa-fila-pm-turma").value;
++      const ate = parseInt($("wa-fila-pm-ate").value, 10);
++      return pmAlunos.filter((a) => {
++        if (turma && a.turma !== turma) return false;
++        if (Number.isFinite(ate) && ate > 0) {                       // com limite, quem não tem posição não dá para saber: fica fora
++          const pos = parseInt(a.posicao, 10);
++          if (!Number.isFinite(pos) || pos > ate) return false;
++        }
++        return true;
++      });
++    }
++    function desenharPm(arquivo) {
++      const marcados = new Set([...$("wa-fila-pm-lista").querySelectorAll("input:checked")].map((c) => c.dataset.pmId));
++      const vis = pmVisiveis();
++      $("wa-fila-pm-lista").innerHTML = vis.length ? vis.map((a) => `
++        <label class="checklist-item"><input type="checkbox" data-pm-id="${esc(a.id)}" data-tem="${a.tem_telefone ? 1 : 0}"${a.tem_telefone ? "" : " disabled"}${marcados.has(a.id) && a.tem_telefone ? " checked" : ""}>
++          ${esc(a.nome)} · ${esc(a.turma)}${a.posicao ? ` · ${esc(a.posicao)}º` : ""} · ${esc(ROTULO_SITUACAO[a.situacao] || a.situacao)}${a.tem_telefone ? "" : " · sem telefone"}</label>`).join("")
++        : `<div class="campo-ajuda">Ninguém com esse filtro.</div>`;
++      $("wa-fila-pm-info").textContent = `Arquivo ${arquivo || ""}: ${pmAlunos.length} alunos; ${vis.length} com o filtro atual `
++        + `(${vis.filter((a) => a.tem_telefone).length} com telefone).`;
++      mostrar("wa-fila-pm-todos", vis.length > 0);
++      mostrar("wa-fila-pm-por", vis.length > 0);
++    }
++    let pmArquivo = "";
++    $("wa-fila-pm-turma").addEventListener("change", () => desenharPm(pmArquivo));
++    $("wa-fila-pm-ate").addEventListener("input", () => desenharPm(pmArquivo));
+     $("wa-fila-pm-carregar").addEventListener("click", async () => {
+       const r = await chamar("/fila/prematricula");
+       if (!r.ok) { toast(r.dados.erro || "Não consegui ler a pré-matrícula."); return; }
+-      const alunos = r.dados.alunos || [];
+-      $("wa-fila-pm-info").textContent = `Arquivo ${r.dados.arquivo}: ${alunos.length} com matrícula aprovada`
+-        + (r.dados.pendentes_fora ? ` (${r.dados.pendentes_fora} aguardando vaga, não entram).` : ".");
+-      $("wa-fila-pm-lista").innerHTML = alunos.length ? alunos.map((a) => `
+-        <label class="checklist-item"><input type="checkbox" data-pm-id="${esc(a.id)}" data-tem="${a.tem_telefone ? 1 : 0}"${a.tem_telefone ? "" : " disabled"}>
+-          ${esc(a.nome)} · ${esc(a.turma)}${a.posicao ? ` · ${esc(a.posicao)}º` : ""}${a.tem_telefone ? "" : " · sem telefone"}</label>`).join("")
+-        : `<div class="campo-ajuda">Nenhum aluno com matrícula aprovada no arquivo.</div>`;
+-      mostrar("wa-fila-pm-todos", alunos.length > 0);
+-      mostrar("wa-fila-pm-por", alunos.length > 0);
++      pmAlunos = r.dados.alunos || [];
++      pmArquivo = r.dados.arquivo || "";
++      const turmas = [...new Set(pmAlunos.map((a) => a.turma))].sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true }));
++      const atual = $("wa-fila-pm-turma").value;
++      $("wa-fila-pm-turma").innerHTML = `<option value="">Todas as turmas</option>`
++        + turmas.map((tm) => `<option value="${esc(tm)}">${esc(tm)}</option>`).join("");
++      if (turmas.includes(atual)) $("wa-fila-pm-turma").value = atual;
++      $("wa-fila-pm-filtros").hidden = false;
++      desenharPm(pmArquivo);
+     });
+     $("wa-fila-pm-todos").addEventListener("click", () =>
+       $("wa-fila-pm-lista").querySelectorAll("input[data-tem='1']").forEach((c) => { c.checked = true; }));
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/web/templates/whatsapp.html b/src/web/templates/whatsapp.html
+--- a/src/web/templates/whatsapp.html
++++ b/src/web/templates/whatsapp.html
+@@ -150,9 +150,15 @@
+             <div class="field" style="margin:0;max-width:320px"><label for="wa-fila-pm-modelo">Mensagem</label>
+               <select id="wa-fila-pm-modelo"></select></div>
+             <button class="btn-sm" id="wa-fila-pm-carregar">Carregar alunos</button>
+-            <button class="btn-sm" id="wa-fila-pm-todos" hidden>Marcar todos com telefone</button>
++            <button class="btn-sm" id="wa-fila-pm-todos" hidden>Marcar os da lista com telefone</button>
+             <button class="btn-primary" id="wa-fila-pm-por" hidden>Pôr marcados na fila</button>
+           </div>
++          <div id="wa-fila-pm-filtros" hidden><div class="wa-acoes" style="margin-top:8px">
++            <div class="field" style="margin:0;max-width:260px"><label for="wa-fila-pm-turma">Turma</label>
++              <select id="wa-fila-pm-turma"></select></div>
++            <div class="field" style="margin:0;max-width:200px"><label for="wa-fila-pm-ate">Até a posição (vazio = todos)</label>
++              <input type="number" id="wa-fila-pm-ate" min="1" step="1" placeholder="ex.: 5" autocomplete="off"></div>
++          </div></div>
+           <p class="campo-ajuda" id="wa-fila-pm-info" style="margin:6px 0 0"></p>
+           <div class="checklist" id="wa-fila-pm-lista" style="margin-top:8px;max-height:240px;overflow:auto"></div>
+         </div>
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/tests/test_whatsapp_fila.py b/tests/test_whatsapp_fila.py
+--- a/tests/test_whatsapp_fila.py
++++ b/tests/test_whatsapp_fila.py
+@@ -313,11 +313,13 @@
+     (paths.dados_ano_atual() / "previsao_alunos_2027.json").write_text(json.dumps(dados), encoding="utf-8")
+ 
+ 
+-def test_da_prematricula_usa_previsao_do_proximo_ano_e_so_aprovados(cli, amb):
++def test_da_prematricula_usa_previsao_do_proximo_ano_com_todos_e_marcadores_trocados(cli, amb):
+     _previsao_2027()
+     d = cli.get("/web/api/whatsapp/fila/prematricula").get_json()
+-    assert d["ano"] == 2027 and d["arquivo"] == "previsao_alunos_2027.json" and d["pendentes_fora"] == 1
+-    assert {a["nome"]: a["tem_telefone"] for a in d["alunos"]} == {"ANA LIMA": True, "BETO LIMA": False}   # CAIO aguarda vaga: fora
++    assert d["ano"] == 2027 and d["arquivo"] == "previsao_alunos_2027.json"
++    # vêm todos (inclusive quem aguarda vaga): quem será chamado é filtrado na tela, por turma e posição
++    assert {a["nome"]: (a["situacao"], a["tem_telefone"], a["posicao"]) for a in d["alunos"]} == {
++        "ANA LIMA": ("matriculado", True, "1"), "BETO LIMA": ("matriculado", False, "2"), "CAIO LIMA": ("pendente", True, "3")}
+     r = cli.post("/web/api/whatsapp/fila/da-prematricula", json={"ids": ["111", "112"], "modelo_id": "matricula_aprovada"})
+     res = r.get_json()
+     assert r.status_code == 200 and res["resultado"]["adicionados"] == 1 and res["resultado"]["sem_telefone"] == ["BETO LIMA"]
+@@ -326,6 +328,29 @@
+     assert cli.post("/web/api/whatsapp/fila/da-prematricula", json={"ids": []}).status_code == 400
+ 
+ 
++def test_da_prematricula_recusa_modelo_com_marcador_sem_dado(cli, amb):
++    _previsao_2027()
++    cli.post("/web/api/whatsapp/fila/modelos", json={"nome": "Com turma", "texto": "Oi $ALUNO da $TURMA"})
++    r = cli.post("/web/api/whatsapp/fila/da-prematricula", json={"ids": ["111"], "modelo_id": "com-turma"}).get_json()
++    assert r["resultado"]["adicionados"] == 1 and "$" not in f.obter_fila()._ler()["itens"][0]["texto"]   # turma existe
++    dados = json.loads((paths.dados_ano_atual() / "previsao_alunos_2027.json").read_text(encoding="utf-8"))
++    dados["cadastros"]["111"]["escolas_escolhidas"]["turma"] = ""
++    dados["turmas_intencao"] = {}
++    (paths.dados_ano_atual() / "previsao_alunos_2027.json").write_text(json.dumps(dados), encoding="utf-8")
++    r2 = cli.post("/web/api/whatsapp/fila/da-prematricula", json={"ids": ["111"], "modelo_id": "com-turma"}).get_json()
++    assert r2["resultado"]["adicionados"] == 0 and "$TURMA" in r2["resultado"]["invalidos"][0]["erro"]
++
++
++def test_mensagem_avulsa_troca_marcadores_e_recusa_o_que_faltar(cli, amb):
++    texto = "Ano $PROXIMO_ANO_LETIVO, aluno(a) $ALUNO"
++    r = cli.post("/web/api/whatsapp/fila/itens", json={"itens": [{"numero": N1, "nome": "ANA LIMA", "texto": texto}]})
++    assert r.status_code == 200 and f.obter_fila()._ler()["itens"][0]["texto"] == "Ano 2027, aluno(a) ANA LIMA"
++    r = cli.post("/web/api/whatsapp/fila/itens", json={"itens": [{"numero": N1, "nome": "", "texto": texto}]})
++    assert r.status_code == 400 and "$ALUNO" in r.get_json()["erro"]
++    r = cli.post("/web/api/whatsapp/fila/itens", json={"itens": [{"numero": N1, "nome": "X", "texto": "Preço R$ 50 e R$50"}]})
++    assert r.status_code == 200
++
++
+ def test_da_prematricula_sem_arquivo_da_previsao_explica(cli, amb):
+     r = cli.get("/web/api/whatsapp/fila/prematricula")
+     assert r.status_code == 400 and "previsao_alunos_2027.json" in r.get_json()["erro"]

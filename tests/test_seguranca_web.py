@@ -457,6 +457,40 @@ def test_login_mostra_aviso_de_inatividade(app):
     assert "falta de uso" in app.test_client().get("/web/entrar?motivo=inatividade").get_data(as_text=True)
 
 
+def test_sessao_informa_o_que_esta_rodando_e_estender_renova(app, monkeypatch):
+    c = _logado(app)
+    assert c.get("/web/api/seguranca/sessao").get_json()["ocupado"] == []
+    monkeypatch.setattr(seg_web, "tarefas_em_andamento", lambda: ["turmas", "fila de WhatsApp"])
+    d = c.get("/web/api/seguranca/sessao").get_json()
+    assert d["ocupado"] == ["turmas", "fila de WhatsApp"]
+    r = c.post("/web/api/seguranca/estender", headers={"X-CSRF-Token": d["csrf"]})
+    assert r.status_code == 200 and r.get_json()["ok"] is True
+    assert c.post("/web/api/seguranca/estender").status_code in (400, 403)          # sem CSRF não vale
+
+
+def test_estender_funciona_para_perfil_consulta_e_exige_login(app):
+    consulta = _logado(app, "consulta")
+    csrf = _csrf(consulta)
+    assert consulta.post("/web/api/seguranca/estender", headers={"X-CSRF-Token": csrf}).status_code == 200
+    assert app.test_client().post("/web/api/seguranca/estender").status_code == 401
+
+
+def test_tarefas_em_andamento_enxerga_fila_do_whatsapp_rodando(monkeypatch):
+    from src.servicos.whatsapp import fila as _fila_mod
+
+    class Falsa:
+        def em_andamento(self): return True
+    monkeypatch.setattr(_fila_mod, "obter_fila", lambda: Falsa())
+    assert "fila de WhatsApp" in seg_web.tarefas_em_andamento()
+
+
+def test_js_pergunta_antes_de_sair_por_inatividade():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parent.parent / "src" / "web" / "static" / "js" / "seguranca.js").read_text(encoding="utf-8")
+    assert "Estender essa sessão?" in js and "/web/api/seguranca/estender" in js
+    assert 'setInterval(function () { if (!saindo && Date.now() - ultimo > limite) { sair("inatividade"); } }, 15000);' not in js
+
+
 # ───────────────────────────── CLI ─────────────────────────────
 
 def _roteiro(monkeypatch, senhas_digitadas, textos=()):

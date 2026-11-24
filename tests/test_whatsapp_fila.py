@@ -230,7 +230,7 @@ def test_arquivo_corrompido_da_erro_claro_e_nao_apaga(amb):
 # ───────────── modelos ─────────────
 
 def test_modelos_prontos_criar_ajustar_excluir(amb):
-    assert [m["id"] for m in modelos.listar()] == ["livre", "chamada_matricula"]
+    assert [m["id"] for m in modelos.listar()] == ["livre", "matricula_aprovada", "chamada_matricula"]
     novo = modelos.salvar("Lembrete", "Olá, $RESPONSAVEL! $ALUNO.")
     assert novo["id"] == "lembrete" and not novo["padrao"]
     with pytest.raises(ValueError, match="desconhecido"):
@@ -297,19 +297,68 @@ def test_rotas_cancelar_repetir_modelos(cli):
     assert cli.post("/web/api/whatsapp/fila/modelos", json={"nome": "X", "texto": "$ZZ"}).status_code == 400
 
 
-def test_da_prematricula_enfileira_quem_tem_telefone(cli, amb):
-    (paths.dados_ano_atual() / "pre_matricula.json").write_text(json.dumps({
+def _previsao_2027(**extra):
+    dados = {
         "turmas_intencao": {"Infantil IV": [
-            {"cpf": "111", "nome": "ANA LIMA", "pos": 1, "situacao": ""},
-            {"cpf": "112", "nome": "BETO LIMA", "pos": 2, "situacao": ""}]},
-        "cadastros": {"111": {"nome_responsavel": "MARIA", "telefone": N1}, "112": {"nome_responsavel": "JOAO"}}}), encoding="utf-8")
-    lista = cli.get("/web/api/whatsapp/fila/prematricula").get_json()["alunos"]
-    assert {a["nome"]: a["tem_telefone"] for a in lista} == {"ANA LIMA": True, "BETO LIMA": False}
-    r = cli.post("/web/api/whatsapp/fila/da-prematricula", json={"ids": ["111", "112"], "modelo_id": "chamada_matricula"})
-    d = r.get_json()
-    assert r.status_code == 200 and d["resultado"]["adicionados"] == 1 and d["resultado"]["sem_telefone"] == ["BETO LIMA"]
-    assert "MARIA" in f.obter_fila()._ler()["itens"][0]["texto"] and "ANA LIMA" in f.obter_fila()._ler()["itens"][0]["texto"]
+            {"cpf": "111", "nome": "ANA LIMA", "pos": 1}, {"cpf": "112", "nome": "BETO LIMA", "pos": 2},
+            {"cpf": "113", "nome": "CAIO LIMA", "pos": 3}]},
+        "cadastros": {
+            "111": {"cpf": "111", "nome_aluno": "ANA LIMA", "nome_responsavel": "MARIA", "telefone": N1,
+                    "escolas_escolhidas": {"turma": "Infantil IV", "opcoes": [{"situacao": "MATRICULADO"}]}},
+            "112": {"cpf": "112", "nome_aluno": "BETO LIMA", "nome_responsavel": "JOAO",
+                    "escolas_escolhidas": {"turma": "Infantil IV", "opcoes": [{"situacao": "MATRICULADO"}]}},
+            "113": {"cpf": "113", "nome_aluno": "CAIO LIMA", "nome_responsavel": "LUCIA", "telefone": N1,
+                    "escolas_escolhidas": {"turma": "Infantil IV", "opcoes": []}}}}
+    dados.update(extra)
+    (paths.dados_ano_atual() / "previsao_alunos_2027.json").write_text(json.dumps(dados), encoding="utf-8")
+
+
+def test_da_prematricula_usa_previsao_do_proximo_ano_com_todos_e_marcadores_trocados(cli, amb):
+    _previsao_2027()
+    d = cli.get("/web/api/whatsapp/fila/prematricula").get_json()
+    assert d["ano"] == 2027 and d["arquivo"] == "previsao_alunos_2027.json"
+    # vêm todos (inclusive quem aguarda vaga): quem será chamado é filtrado na tela, por turma e posição
+    assert {a["nome"]: (a["situacao"], a["tem_telefone"], a["posicao"]) for a in d["alunos"]} == {
+        "ANA LIMA": ("matriculado", True, "1"), "BETO LIMA": ("matriculado", False, "2"), "CAIO LIMA": ("pendente", True, "3")}
+    r = cli.post("/web/api/whatsapp/fila/da-prematricula", json={"ids": ["111", "112"], "modelo_id": "matricula_aprovada"})
+    res = r.get_json()
+    assert r.status_code == 200 and res["resultado"]["adicionados"] == 1 and res["resultado"]["sem_telefone"] == ["BETO LIMA"]
+    texto = f.obter_fila()._ler()["itens"][0]["texto"]
+    assert "ano letivo de 2027 foi aprovada" in texto and "aluno(a) ANA LIMA compareça" in texto and "$" not in texto
     assert cli.post("/web/api/whatsapp/fila/da-prematricula", json={"ids": []}).status_code == 400
+
+
+def test_da_prematricula_recusa_modelo_com_marcador_sem_dado(cli, amb):
+    _previsao_2027()
+    cli.post("/web/api/whatsapp/fila/modelos", json={"nome": "Com turma", "texto": "Oi $ALUNO da $TURMA"})
+    r = cli.post("/web/api/whatsapp/fila/da-prematricula", json={"ids": ["111"], "modelo_id": "com-turma"}).get_json()
+    assert r["resultado"]["adicionados"] == 1 and "$" not in f.obter_fila()._ler()["itens"][0]["texto"]   # turma existe
+    dados = json.loads((paths.dados_ano_atual() / "previsao_alunos_2027.json").read_text(encoding="utf-8"))
+    dados["cadastros"]["111"]["escolas_escolhidas"]["turma"] = ""
+    dados["turmas_intencao"] = {}
+    (paths.dados_ano_atual() / "previsao_alunos_2027.json").write_text(json.dumps(dados), encoding="utf-8")
+    r2 = cli.post("/web/api/whatsapp/fila/da-prematricula", json={"ids": ["111"], "modelo_id": "com-turma"}).get_json()
+    assert r2["resultado"]["adicionados"] == 0 and "$TURMA" in r2["resultado"]["invalidos"][0]["erro"]
+
+
+def test_mensagem_avulsa_troca_marcadores_e_recusa_o_que_faltar(cli, amb):
+    texto = "Ano $PROXIMO_ANO_LETIVO, aluno(a) $ALUNO"
+    r = cli.post("/web/api/whatsapp/fila/itens", json={"itens": [{"numero": N1, "nome": "ANA LIMA", "texto": texto}]})
+    assert r.status_code == 200 and f.obter_fila()._ler()["itens"][0]["texto"] == "Ano 2027, aluno(a) ANA LIMA"
+    r = cli.post("/web/api/whatsapp/fila/itens", json={"itens": [{"numero": N1, "nome": "", "texto": texto}]})
+    assert r.status_code == 400 and "$ALUNO" in r.get_json()["erro"]
+    r = cli.post("/web/api/whatsapp/fila/itens", json={"itens": [{"numero": N1, "nome": "X", "texto": "Preço R$ 50 e R$50"}]})
+    assert r.status_code == 200
+
+
+def test_da_prematricula_sem_arquivo_da_previsao_explica(cli, amb):
+    r = cli.get("/web/api/whatsapp/fila/prematricula")
+    assert r.status_code == 400 and "previsao_alunos_2027.json" in r.get_json()["erro"]
+
+
+def test_da_prematricula_arquivo_antigo_pre_matricula_nao_e_a_fonte(cli, amb):
+    (paths.dados_ano_atual() / "pre_matricula.json").write_text(json.dumps({"turmas_intencao": {"X": [{"cpf": "9", "nome": "Z"}]}}), encoding="utf-8")
+    assert cli.get("/web/api/whatsapp/fila/prematricula").status_code == 400
 
 
 def test_modo_consulta_bloqueia_escrita_da_fila(cli, monkeypatch):
@@ -323,3 +372,47 @@ def test_pausa_padrao_entre_mensagens_e_de_5_minutos(amb):
     from src.servicos.whatsapp import fila as modulo
     assert modulo.INTERVALO_PADRAO_S == 300
     assert _fila(Prov()).resumo()["config"]["intervalo_s"] == 300
+
+
+def test_enviada_sem_confirmacao_do_tique_nao_conta_como_falha_nem_pausa(amb):
+    """Antes, 3 mensagens que SAÍRAM mas sem o tique viravam 3 "falhas" e a fila pausava sozinha."""
+    class SemTique(Prov):
+        def enviar(self, numero, texto):
+            self.enviados.append((numero, texto))
+            return ResultadoEnvio(True, False, aviso="Enviada, sem confirmação do tique.")
+    prov = SemTique()
+    fila = _fila(prov)
+    fila.adicionar([{"numero": n, "nome": f"Pai {i}", "texto": f"Oi {i}"} for i, n in enumerate((N1, N2, N3, "(42) 99999-4444"), 1)])
+    _rodar(fila)
+    r = fila.resumo()
+    assert len(prov.enviados) == 4 and r["estado"] == f.CONCLUIDA and r["contagem"]["enviado"] == 4 and r["contagem"]["falhou"] == 0
+    assert all(i["status"] == "enviado" and "tique" in i["aviso"] and not i["erro"] for i in r["itens"])
+    assert r["enviados_hoje"] == 4                               # conta no limite do dia
+
+
+def test_falha_de_verdade_continua_pausando_depois_de_3(amb):
+    fila = _fila(Prov(falha="O WhatsApp não abriu a conversa: número sem WhatsApp ou inválido."))
+    fila.adicionar([{"numero": n, "nome": f"Pai {i}", "texto": f"Oi {i}"} for i, n in enumerate((N1, N2, N3, "(42) 99999-4444"), 1)])
+    _rodar(fila)
+    r = fila.resumo()
+    assert r["estado"] == f.PAUSADA and r["contagem"]["falhou"] == 3 and r["contagem"]["pendente"] == 1
+
+
+def test_whatsplay_false_sem_erro_e_enviada_sem_confirmacao_e_com_erro_e_falha(amb):
+    from src.servicos.whatsapp.provedor_whatsplay import ProvedorWhatsplay
+
+    class Sessao:
+        def __init__(self, erro): self.erro = erro
+        def foto(self):
+            from src.servicos.whatsapp.monitor import Foto, Situacao
+            return Foto(Situacao.CONECTADO, gateway_online=True)
+        def limpar_erro(self): pass
+        def ultimo_erro(self): return self.erro
+        def executar(self, fazer, timeout=0): return False
+
+    sem_erro = ProvedorWhatsplay(Sessao(""), intervalo_min_s=0, dormir=lambda s: None).enviar(N1, "Oi")
+    assert sem_erro.ok and sem_erro.aviso and not sem_erro.erro
+    com_erro = ProvedorWhatsplay(Sessao("Could not open chat: 5542"), intervalo_min_s=0, dormir=lambda s: None).enviar(N1, "Oi")
+    assert not com_erro.ok and "não abriu a conversa" in com_erro.erro
+    outro = ProvedorWhatsplay(Sessao("Error sending message: x"), intervalo_min_s=0, dormir=lambda s: None).enviar(N1, "Oi")
+    assert not outro.ok and "Não consegui enviar" in outro.erro

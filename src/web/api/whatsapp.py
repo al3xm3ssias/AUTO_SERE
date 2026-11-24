@@ -11,7 +11,7 @@ API do WhatsApp para a interface web  —  prefixo /web/api/whatsapp
     POST /envio-real     liga/desliga a permissão de envio real
     GET  /fila           a fila de envio: estado, configuração, contagens, limite do dia e as mensagens (número mascarado)
     POST /fila/itens     põe mensagens na fila ({itens:[{numero,nome,texto}]})
-    GET  /fila/prematricula          alunos da fila da pré-matrícula que podem entrar na fila do WhatsApp
+    GET  /fila/prematricula          alunos de previsao_alunos_<ano+1>.json (próximo ano letivo), para filtrar por turma/posição
     POST /fila/da-prematricula       põe na fila os alunos escolhidos ({ids, modelo_id})
     POST /fila/config    intervalo entre mensagens, limite por dia, continuar no dia seguinte
     POST /fila/iniciar | /fila/pausar | /fila/cancelar-pendentes | /fila/limpar-historico
@@ -314,34 +314,70 @@ def fila_adicionar():
     itens = corpo.get("itens")
     if not isinstance(itens, list) or not itens:
         return _erro("Informe as mensagens a pôr na fila.")
+    from src.comum import modelos_whatsapp as _modelos
     try:
-        r = obter_fila().adicionar([i for i in itens if isinstance(i, dict)], origem="manual")
+        base, prontos = _modelos.contexto_base(), []
+        for i in (i for i in itens if isinstance(i, dict)):
+            nome = " ".join(str(i.get("nome") or "").split())
+            texto = _modelos.renderizar(str(i.get("texto") or ""), {**base, "ALUNO": nome})
+            sobra = _modelos.marcadores_sobrando(texto)
+            if sobra:
+                return _erro("Esta mensagem ainda tem " + ", ".join("$" + m for m in sobra) + ". Na mensagem avulsa só valem "
+                             "$ESCOLA, $ANO, $PROXIMO_ANO_LETIVO e $DATA, e $ALUNO se você preencher o campo Nome; "
+                             "para os demais, escreva o texto final (ou use a lista de alunos da pré-matrícula).")
+            prontos.append({**i, "texto": texto})
+        r = obter_fila().adicionar(prontos, origem="manual")
         return _resposta_fila(resultado=r)
     except ValueError as exc:
         return _erro(str(exc))
 
 
+def _previsao_para_fila() -> dict:
+    """
+    Alunos da pré-matrícula do PRÓXIMO ano letivo (dados/<ano em uso>/previsao_alunos_<ano+1>.json, ex.: previsao_alunos_2027.json).
+    Vêm todos os que ainda contam (matriculado ou aguardando vaga; cancelados e quem refez o cadastro em outra escola já ficam
+    de fora). Quem será chamado quem decide na tela, por turma e até a posição N da lista (a situação do SERE não manda).
+    Devolve {"ano", "arquivo", "alunos": [{id, nome, turma, posicao, telefone, responsavel, situacao}]}.
+    ValueError (com o motivo) se o arquivo não existe ou está ilegível.
+    """
+    from src.comum import paths, previsao
+    from src.comum.arquivos_json import ArquivoJsonCorrompidoError
+
+    ano = int(paths.ano_atual()) + 1
+    pasta = paths.dados_ano_atual()
+    arquivo = previsao.nome_arquivo(ano)
+    try:
+        dados = previsao.carregar_previsao_alunos(pasta, ano)
+    except ArquivoJsonCorrompidoError as exc:
+        raise ValueError(f"{arquivo}: {exc}") from exc
+    if not dados:
+        raise ValueError(f"Ainda não existe {arquivo} (ou está vazio). Rode a coleta da pré-matrícula para gerá-lo.")
+    alunos = [{"id": str(n["cpf"] or n["nome"]), "nome": n["nome"], "turma": n["turma"], "posicao": n["posicao"],
+               "telefone": n["telefone"], "responsavel": n["responsavel"], "situacao": n["situacao"]}
+              for n in previsao._novos_da_pre_matricula(dados)]
+
+    def _pos(a):
+        try:
+            return int(str(a["posicao"]).strip())
+        except ValueError:
+            return 10**9
+    alunos.sort(key=lambda a: (a["turma"], _pos(a), a["nome"]))
+    return {"ano": ano, "arquivo": arquivo, "alunos": alunos}
+
+
 def _alunos_prematricula_para_fila() -> list[dict]:
-    from src.web.api.rotas import _carregar_json, _fila_prematricula
-    cadastros = (_carregar_json("pre_matricula.json", {}) or {}).get("cadastros", {})
-    saida = []
-    for r in _fila_prematricula():
-        tel = r.get("telefone_responsavel")
-        tel = "" if not tel or tel == "—" else str(tel)
-        cad = cadastros.get(str(r.get("id"))) if isinstance(cadastros, dict) else None
-        saida.append({"id": str(r.get("id")), "nome": r.get("nome", ""), "turma": r.get("turma", ""), "posicao": r.get("posicao", ""),
-                      "telefone": tel, "responsavel": str((cad or {}).get("nome_responsavel") or "")})
-    return saida
+    return _previsao_para_fila()["alunos"]
 
 
 @whatsapp_bp.route("/fila/prematricula")
 def fila_prematricula():
     try:
-        alunos = _alunos_prematricula_para_fila()
+        p = _previsao_para_fila()
     except ValueError as exc:
         return _erro(str(exc))
-    return jsonify({"alunos": [{"id": a["id"], "nome": a["nome"], "turma": a["turma"], "posicao": a["posicao"],
-                                "tem_telefone": bool(a["telefone"])} for a in alunos]})
+    return jsonify({"ano": p["ano"], "arquivo": p["arquivo"],
+                    "alunos": [{"id": a["id"], "nome": a["nome"], "turma": a["turma"], "posicao": a["posicao"],
+                                "situacao": a["situacao"], "tem_telefone": bool(a["telefone"])} for a in p["alunos"]]})
 
 
 @whatsapp_bp.route("/fila/da-prematricula", methods=["POST"])
@@ -356,7 +392,7 @@ def fila_da_prematricula():
         modelo = None if modelo_id == COMUNICADO_ID else _modelos.obter(modelo_id)
         if modelo_id != COMUNICADO_ID and (modelo is None or not modelo["texto"].strip()):
             return _erro("Escolha um modelo com texto (ou o comunicado de matrícula).")
-        itens, sem_telefone = [], []
+        itens, sem_telefone, recusados = [], [], []
         for a in _alunos_prematricula_para_fila():
             if a["id"] not in ids:
                 continue
@@ -368,8 +404,13 @@ def fila_da_prematricula():
             else:
                 ctx = {**_modelos.contexto_base(), "ALUNO": a["nome"], "TURMA": a["turma"], "RESPONSAVEL": a["responsavel"] or "responsável"}
                 texto = _modelos.renderizar(modelo["texto"], ctx)
+            sobra = _modelos.marcadores_sobrando(texto)
+            if sobra:
+                recusados.append({"nome": a["nome"], "erro": "faltou o dado de " + ", ".join("$" + m for m in sobra)})
+                continue
             itens.append({"numero": a["telefone"], "nome": a["nome"], "texto": texto})
         r = obter_fila().adicionar(itens, origem="prematricula") if itens else {"adicionados": 0, "duplicados": 0, "invalidos": []}
+        r["invalidos"] = list(r.get("invalidos") or []) + recusados
         r["sem_telefone"] = sem_telefone
         return _resposta_fila(resultado=r)
     except ValueError as exc:

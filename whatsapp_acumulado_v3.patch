@@ -1,0 +1,794 @@
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/comum/modelos_whatsapp.py b/src/comum/modelos_whatsapp.py
+--- a/src/comum/modelos_whatsapp.py
++++ b/src/comum/modelos_whatsapp.py
+@@ -6,7 +6,8 @@
+ ajuste devolve o texto original; um pronto nunca some.
+ 
+ Marcadores ($MARCADOR; um desconhecido é recusado ao salvar e ao montar a mensagem):
+-  $ESCOLA  $ANO  $DATA   (nossa escola, ano letivo e data de hoje)
++  $ESCOLA  $ANO  $DATA   (nossa escola, ano letivo em uso e data de hoje)
++  $PROXIMO_ANO_LETIVO    (ano letivo em uso + 1: o da previsão/pré-matrícula, ex.: 2027)
+   $ALUNO  $TURMA         (do aluno da pré-matrícula)  ·  $RESPONSAVEL (quando o nome do responsável é conhecido)
+ O texto montado é gravado na própria mensagem da fila: mudar o modelo depois não altera o que já está na fila.
+ """
+@@ -21,12 +22,63 @@
+ from src.comum.arquivos_json import ArquivoJsonCorrompidoError, carregar_json, salvar_json_atomico
+ 
+ NOME_ARQUIVO = "modelos_whatsapp.json"
+-MARCADORES = ("ESCOLA", "ANO", "DATA", "ALUNO", "TURMA", "RESPONSAVEL")
++MARCADORES = ("ESCOLA", "ANO", "DATA", "PROXIMO_ANO_LETIVO", "ALUNO", "TURMA", "RESPONSAVEL")
+ LIMITE_NOME, LIMITE_TEXTO = 80, 4000
+ _RE_MARCADOR = re.compile(r"\$([A-Z_]+)")
+ 
++TEXTO_MATRICULA_APROVADA = """🌟 Olá, tudo bem?
++Me chamo Claudio, sou escriturário da Escola Judith.
++
++Estou entrando em contato para informar que a matrícula do(a) seu(sua) filho(a) para o ano letivo de $PROXIMO_ANO_LETIVO foi aprovada em nossa escola. ✅
++
++Pedimos, por gentileza, que o responsável do/da aluno(a) $ALUNO compareça à secretaria para confirmar a matrícula.
++
++📅 Período para comparecimento:
++De 24 de novembro de 2026 a 2 de dezembro de 2026
++
++⏰ Horário de atendimento da secretaria:
++Segunda a sexta-feira
++🕗 08h00 às 12h00
++🕐 13h30 às 16h00
++
++⚠️ É muito importante que o responsável leia atentamente toda a mensagem, pois aqui constam todas as informações sobre a matrícula.
++
++📄 Documentos necessários
++
++Trazer ORIGINAIS e CÓPIAS, pois os documentos serão digitalizados e anexados ao sistema da escola, conforme determinação do Governo do Estado e do Núcleo Regional de Educação do Paraná.
++
++✔️ Certidão de Nascimento (cópia)
++✔️ Cartão do SUS (cópia)
++✔️ Carteirinha de vacinação (cópia)
++📌 Obs.: Deve constar na carteirinha a declaração de que as vacinas estão em dia.
++✔️ Comprovante de residência atualizado (preferencialmente emitido nos últimos 45 dias — talão de luz em nome do responsável)
++✔️ Documento do responsável (RG e CPF ou CNH — cópia)
++
++⚠️ Atenção – Beneficiários do Bolsa Família:
++Trazer também a Folha Resumo do CadÚnico (retirada no CRAS onde o benefício está cadastrado).
++
++📌 É obrigatório apresentar todos os documentos que comprovem as informações declaradas na pré-matrícula, principalmente os documentos da criança e do responsável.
++
++Caso a documentação não seja apresentada dentro do prazo, a matrícula será cancelada, sendo necessário realizar novo cadastro posteriormente.
++
++🛑 Prazo final: 02/12/2026
++Se não puder comparecer, orientamos que agende um horário.
++O não comparecimento implicará no cancelamento da vaga.
++
++🏫 Horário escolar
++
++🚪 Abertura dos portões: 07h30 às 07h45
++📚 Início das aulas: 07h45
++⏰ Saída:
++* 16h00 (segunda a quinta)
++* 11h30 (sexta-feira – regime parcial)"""
++
+ PADROES: dict[str, dict] = {
+     "livre": {"nome": "Mensagem livre (escrever na hora)", "texto": ""},
++    "matricula_aprovada": {
++        "nome": "Matrícula aprovada (próximo ano letivo)",
++        "texto": TEXTO_MATRICULA_APROVADA,
++    },
+     "chamada_matricula": {
+         "nome": "Chamada para matrícula (pais de aluno novo)",
+         "texto": ("Olá, $RESPONSAVEL! Aqui é da $ESCOLA.\n\n"
+@@ -81,9 +133,15 @@
+     return _RE_MARCADOR.sub(lambda m: str(contexto.get(m.group(1)) or m.group(0)), texto)
+ 
+ 
++def marcadores_sobrando(texto: str) -> list[str]:
++    """Marcadores válidos que continuam no texto depois de renderizar (faltou o dado): nunca devem ir para um responsável."""
++    return sorted({m for m in _RE_MARCADOR.findall(texto or "") if m in MARCADORES})
++
++
+ def contexto_base() -> dict:
+     from src.comum import escola
+-    return {"ESCOLA": " ".join(str(escola.nome()).split()), "ANO": str(paths.ano_atual()), "DATA": datetime.now().strftime("%d/%m/%Y")}
++    return {"ESCOLA": " ".join(str(escola.nome()).split()), "ANO": str(paths.ano_atual()),
++            "PROXIMO_ANO_LETIVO": str(int(paths.ano_atual()) + 1), "DATA": datetime.now().strftime("%d/%m/%Y")}
+ 
+ 
+ def _slug(nome: str) -> str:
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/seguranca/politica.py b/src/seguranca/politica.py
+--- a/src/seguranca/politica.py
++++ b/src/seguranca/politica.py
+@@ -21,7 +21,7 @@
+ # (método ou None = qualquer, expressão, perfil mínimo). A ORDEM IMPORTA: a primeira que casa vale.
+ _TABELA: list[tuple[tuple[str, ...] | None, re.Pattern, str]] = [
+     # a própria conta: qualquer usuário entrado
+-    (None, re.compile(r"^/web/api/seguranca/(sessao|sair|trocar-senha)$"), "consulta"),
++    (None, re.compile(r"^/web/api/seguranca/(sessao|estender|sair|trocar-senha)$"), "consulta"),
+     (None, re.compile(r"^/web/(sair|trocar-senha)$"), "consulta"),
+     # administração
+     (None, re.compile(r"^/web/api/seguranca/(usuarios|auditoria)(/.*)?$"), "admin"),
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/seguranca/web.py b/src/seguranca/web.py
+--- a/src/seguranca/web.py
++++ b/src/seguranca/web.py
+@@ -299,12 +299,40 @@
+ 
+ # ───────────────────────────── API ─────────────────────────────
+ 
++def tarefas_em_andamento() -> list[str]:
++    """O que o sistema está fazendo agora (automações do SERE, fila do WhatsApp). Enquanto houver algo, a tela NÃO sai sozinha por
++    falta de uso: ela pergunta "Estender essa sessão?"."""
++    nomes: list[str] = []
++    try:
++        from src.web.api import rotas
++        nomes += [str(k) for k in rotas._automacoes_rodando()]
++    except Exception:                                              # noqa: BLE001 — nunca derruba a consulta de sessão
++        pass
++    try:
++        from src.servicos.whatsapp.fila import obter_fila
++        if obter_fila().em_andamento():
++            nomes.append("fila de WhatsApp")
++    except Exception:                                              # noqa: BLE001
++        pass
++    return nomes
++
++
+ @api_seg_bp.route("/sessao", methods=["GET"])
+ def sessao_atual():
+     u, s = usuario_atual(), getattr(g, "sessao", None)
+     if not u or not s:
+         return _resposta_erro(401, "Sem sessão.", autenticacao=True)
+-    return jsonify({"usuario": u.publico(), "csrf": s.csrf, "inatividade_s": _sessoes.inatividade_s()})
++    return jsonify({"usuario": u.publico(), "csrf": s.csrf, "inatividade_s": _sessoes.inatividade_s(),
++                    "ocupado": tarefas_em_andamento()})
++
++
++@api_seg_bp.route("/estender", methods=["POST"])
++def estender_sessao():
++    """O usuário respondeu "sim" a "Estender essa sessão?". O guarda já renovou a inatividade ao receber o pedido."""
++    u, s = usuario_atual(), getattr(g, "sessao", None)
++    if not u or not s:
++        return _resposta_erro(401, "Sem sessão.", autenticacao=True)
++    return jsonify({"ok": True, "inatividade_s": _sessoes.inatividade_s(), "ocupado": tarefas_em_andamento()})
+ 
+ 
+ @api_seg_bp.route("/sair", methods=["POST"])
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/servicos/whatsapp/base.py b/src/servicos/whatsapp/base.py
+--- a/src/servicos/whatsapp/base.py
++++ b/src/servicos/whatsapp/base.py
+@@ -41,6 +41,9 @@
+     simulado: bool
+     id_mensagem: Optional[str] = None
+     erro: Optional[str] = None
++    # Saiu (ok=True), mas o provedor não conseguiu ver a confirmação (tique) a tempo. Não é falha: a fila não conta isso
++    # para pausar, só mostra o aviso no item.
++    aviso: Optional[str] = None
+ 
+ 
+ @dataclass(frozen=True)
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/servicos/whatsapp/fila.py b/src/servicos/whatsapp/fila.py
+--- a/src/servicos/whatsapp/fila.py
++++ b/src/servicos/whatsapp/fila.py
+@@ -13,6 +13,8 @@
+   - histórico: cada item guarda o resultado (enviado, simulado, falhou, cancelado) e a hora;
+   - nada se repete: o mesmo texto para o mesmo número, se já está na fila ou já foi enviado, não entra de novo;
+   - envio real só com WHATSAPP_ENVIO_REAL=1 (a fila pausa e avisa se estiver bloqueado) e só com o WhatsApp conectado;
++  - "enviada, sem confirmação do tique" (o WhatsApp Web não mostrou o visto a tempo) NÃO é falha: o item fica "enviado" com um
++    aviso e não conta para pausar;
+   - 3 falhas seguidas pausam a fila; uma mensagem que ficou "enviando" quando o programa caiu vira "falhou" (confira no
+     WhatsApp se saiu antes de tentar de novo, para não mandar duas vezes).
+ No provedor SIMULADO a fila roda (sem pausas longas) mas nada sai: os itens ficam "simulado" e podem voltar à fila.
+@@ -97,6 +99,10 @@
+     def _rodando(self) -> bool:
+         return bool(self._thread and self._thread.is_alive())
+ 
++    def em_andamento(self) -> bool:
++        """A fila está enviando (ou esperando a próxima mensagem / o dia seguinte) agora."""
++        return self._rodando()
++
+     @staticmethod
+     def _config(dados: dict) -> dict:
+         c = dados.get("config") or {}
+@@ -119,7 +125,7 @@
+                 contagem[i.get("status", PENDENTE)] = contagem.get(i.get("status", PENDENTE), 0) + 1
+             hoje = self._enviados_hoje(dados)
+             itens = [{"id": i["id"], "nome": i.get("nome", ""), "numero": mascarar_numero(i.get("numero")), "texto": i.get("texto", ""),
+-                      "origem": i.get("origem", ""), "status": i.get("status", PENDENTE), "erro": i.get("erro", ""),
++                      "origem": i.get("origem", ""), "status": i.get("status", PENDENTE), "erro": i.get("erro", ""), "aviso": i.get("aviso", ""),
+                       "criado_em": i.get("criado_em", ""), "enviado_em": i.get("enviado_em", ""), "tentativas": i.get("tentativas", 0)}
+                      for i in dados["itens"]]
+             return {"estado": self._estado if self._rodando() or self._estado != RODANDO else PARADA, "mensagem": self._mensagem,
+@@ -293,16 +299,16 @@
+                     continue
+                 try:
+                     r = prov.enviar(item["numero"], item["texto"])
+-                    ok, simulado, erro, id_msg = r.ok, bool(r.simulado), r.erro, r.id_mensagem
++                    ok, simulado, erro, id_msg, aviso = r.ok, bool(r.simulado), r.erro, r.id_mensagem, getattr(r, "aviso", None) or ""
+                 except EnvioNaoAutorizadoError:
+                     self._devolver(item["id"], PENDENTE, "")
+                     self._terminar(PAUSADA, "Pausada: o envio real foi bloqueado.")
+                     return
+                 except Exception as exc:                       # noqa: BLE001 — qualquer falha do provedor vira "falhou"
+-                    ok, simulado, erro, id_msg = False, False, f"{type(exc).__name__}: {exc}", None
++                    ok, simulado, erro, id_msg, aviso = False, False, f"{type(exc).__name__}: {exc}", None, ""
+                 if ok:
+                     falhas_seguidas = 0
+-                    self._registrar(item["id"], SIMULADO if simulado else ENVIADO, "", simulado, id_msg)
++                    self._registrar(item["id"], SIMULADO if simulado else ENVIADO, "", simulado, id_msg, aviso)
+                 else:
+                     falhas_seguidas += 1
+                     self._registrar(item["id"], FALHOU, str(erro or "Falha desconhecida."), False, None)
+@@ -317,12 +323,12 @@
+         except Exception as exc:                               # noqa: BLE001 — a thread nunca morre calada
+             self._terminar(PAUSADA, f"Pausada por erro: {exc}")
+ 
+-    def _registrar(self, id_item: str, status: str, erro: str, simulado: bool, id_mensagem) -> None:
++    def _registrar(self, id_item: str, status: str, erro: str, simulado: bool, id_mensagem, aviso: str = "") -> None:
+         with self._trava:
+             dados = self._ler()
+             for i in dados["itens"]:
+                 if i["id"] == id_item:
+-                    i.update(status=status, erro=erro, simulado=simulado, id_mensagem=id_mensagem)
++                    i.update(status=status, erro=erro, simulado=simulado, id_mensagem=id_mensagem, aviso=aviso)
+                     if status in (ENVIADO, SIMULADO):
+                         i["enviado_em"] = self._agora().isoformat(timespec="seconds")
+             self._gravar(dados)
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/servicos/whatsapp/provedor_whatsplay.py b/src/servicos/whatsapp/provedor_whatsplay.py
+--- a/src/servicos/whatsapp/provedor_whatsplay.py
++++ b/src/servicos/whatsapp/provedor_whatsplay.py
+@@ -47,6 +47,8 @@
+ SEM_CARREGAR_APOS_S = 120.0       # sem estado reconhecido por tanto tempo → orienta a olhar a janela
+ TIMEOUT_ENVIO_S = 180.0
+ TIMEOUT_PARADA_S = 20.0
++AVISO_SEM_CONFIRMACAO = ("Enviada, mas o WhatsApp Web não mostrou o tique de confirmação a tempo. "
++                         "Se quiser ter certeza, confira a conversa.")
+ INTERVALO_MIN_ENVIO_S = 3.0       # espaçamento mínimo entre mensagens (estabilidade e menor risco de bloqueio)
+ 
+ _NUMEROS = re.compile(r"\d{8,15}")
+@@ -309,12 +311,20 @@
+         if falta > 0:
+             self._dormir(falta)
+ 
++    def _resultado_texto_falso(self) -> ResultadoEnvio:
++        """A whatsplay devolveu False. Com erro registrado (on_error) é falha de verdade; SEM erro, a mensagem foi digitada e
++        enviada (Enter) e só o tique de confirmação não apareceu a tempo: isso é "enviada, sem confirmação", não falha."""
++        erro = self.sessao.ultimo_erro()
++        if not erro:
++            return ResultadoEnvio(True, False, aviso=AVISO_SEM_CONFIRMACAO)
++        return ResultadoEnvio(False, False, erro=self._traduzir_falha())
++
+     def _traduzir_falha(self) -> str:
+         erro = self.sessao.ultimo_erro()
+         if "Could not open chat" in erro:
+             return "O WhatsApp não abriu a conversa: número sem WhatsApp ou inválido."
+-        return ("Não consegui confirmar o envio. A mensagem pode ou não ter saído: confira no WhatsApp antes de "
+-                "reenviar." + (f" ({erro})" if erro else ""))
++        return ("Não consegui enviar. A mensagem provavelmente não saiu: confira no WhatsApp antes de reenviar."
++                + (f" ({erro})" if erro else ""))
+ 
+     def enviar(self, numero: str, texto: str) -> ResultadoEnvio:
+         self._exigir_autorizacao()
+@@ -334,7 +344,7 @@
+                 return ResultadoEnvio(False, False, erro=f"Falha ao enviar ({type(exc).__name__}).")
+             finally:
+                 self._ultimo_envio = self._relogio()
+-        return ResultadoEnvio(True, False) if ok else ResultadoEnvio(False, False, erro=self._traduzir_falha())
++        return ResultadoEnvio(True, False) if ok else self._resultado_texto_falso()
+ 
+     def enviar_midia(self, numero: str, tipo: str, dados: bytes, *, nome_arquivo: Optional[str] = None,
+                      mimetype: Optional[str] = None, legenda: Optional[str] = None, voz: bool = False) -> ResultadoEnvio:
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/web/api/whatsapp.py b/src/web/api/whatsapp.py
+--- a/src/web/api/whatsapp.py
++++ b/src/web/api/whatsapp.py
+@@ -11,7 +11,7 @@
+     POST /envio-real     liga/desliga a permissão de envio real
+     GET  /fila           a fila de envio: estado, configuração, contagens, limite do dia e as mensagens (número mascarado)
+     POST /fila/itens     põe mensagens na fila ({itens:[{numero,nome,texto}]})
+-    GET  /fila/prematricula          alunos da fila da pré-matrícula que podem entrar na fila do WhatsApp
++    GET  /fila/prematricula          alunos de previsao_alunos_<ano+1>.json (próximo ano letivo), para filtrar por turma/posição
+     POST /fila/da-prematricula       põe na fila os alunos escolhidos ({ids, modelo_id})
+     POST /fila/config    intervalo entre mensagens, limite por dia, continuar no dia seguinte
+     POST /fila/iniciar | /fila/pausar | /fila/cancelar-pendentes | /fila/limpar-historico
+@@ -314,34 +314,70 @@
+     itens = corpo.get("itens")
+     if not isinstance(itens, list) or not itens:
+         return _erro("Informe as mensagens a pôr na fila.")
++    from src.comum import modelos_whatsapp as _modelos
+     try:
+-        r = obter_fila().adicionar([i for i in itens if isinstance(i, dict)], origem="manual")
++        base, prontos = _modelos.contexto_base(), []
++        for i in (i for i in itens if isinstance(i, dict)):
++            nome = " ".join(str(i.get("nome") or "").split())
++            texto = _modelos.renderizar(str(i.get("texto") or ""), {**base, "ALUNO": nome})
++            sobra = _modelos.marcadores_sobrando(texto)
++            if sobra:
++                return _erro("Esta mensagem ainda tem " + ", ".join("$" + m for m in sobra) + ". Na mensagem avulsa só valem "
++                             "$ESCOLA, $ANO, $PROXIMO_ANO_LETIVO e $DATA, e $ALUNO se você preencher o campo Nome; "
++                             "para os demais, escreva o texto final (ou use a lista de alunos da pré-matrícula).")
++            prontos.append({**i, "texto": texto})
++        r = obter_fila().adicionar(prontos, origem="manual")
+         return _resposta_fila(resultado=r)
+     except ValueError as exc:
+         return _erro(str(exc))
+ 
+ 
++def _previsao_para_fila() -> dict:
++    """
++    Alunos da pré-matrícula do PRÓXIMO ano letivo (dados/<ano em uso>/previsao_alunos_<ano+1>.json, ex.: previsao_alunos_2027.json).
++    Vêm todos os que ainda contam (matriculado ou aguardando vaga; cancelados e quem refez o cadastro em outra escola já ficam
++    de fora). Quem será chamado quem decide na tela, por turma e até a posição N da lista (a situação do SERE não manda).
++    Devolve {"ano", "arquivo", "alunos": [{id, nome, turma, posicao, telefone, responsavel, situacao}]}.
++    ValueError (com o motivo) se o arquivo não existe ou está ilegível.
++    """
++    from src.comum import paths, previsao
++    from src.comum.arquivos_json import ArquivoJsonCorrompidoError
++
++    ano = int(paths.ano_atual()) + 1
++    pasta = paths.dados_ano_atual()
++    arquivo = previsao.nome_arquivo(ano)
++    try:
++        dados = previsao.carregar_previsao_alunos(pasta, ano)
++    except ArquivoJsonCorrompidoError as exc:
++        raise ValueError(f"{arquivo}: {exc}") from exc
++    if not dados:
++        raise ValueError(f"Ainda não existe {arquivo} (ou está vazio). Rode a coleta da pré-matrícula para gerá-lo.")
++    alunos = [{"id": str(n["cpf"] or n["nome"]), "nome": n["nome"], "turma": n["turma"], "posicao": n["posicao"],
++               "telefone": n["telefone"], "responsavel": n["responsavel"], "situacao": n["situacao"]}
++              for n in previsao._novos_da_pre_matricula(dados)]
++
++    def _pos(a):
++        try:
++            return int(str(a["posicao"]).strip())
++        except ValueError:
++            return 10**9
++    alunos.sort(key=lambda a: (a["turma"], _pos(a), a["nome"]))
++    return {"ano": ano, "arquivo": arquivo, "alunos": alunos}
++
++
+ def _alunos_prematricula_para_fila() -> list[dict]:
+-    from src.web.api.rotas import _carregar_json, _fila_prematricula
+-    cadastros = (_carregar_json("pre_matricula.json", {}) or {}).get("cadastros", {})
+-    saida = []
+-    for r in _fila_prematricula():
+-        tel = r.get("telefone_responsavel")
+-        tel = "" if not tel or tel == "—" else str(tel)
+-        cad = cadastros.get(str(r.get("id"))) if isinstance(cadastros, dict) else None
+-        saida.append({"id": str(r.get("id")), "nome": r.get("nome", ""), "turma": r.get("turma", ""), "posicao": r.get("posicao", ""),
+-                      "telefone": tel, "responsavel": str((cad or {}).get("nome_responsavel") or "")})
+-    return saida
++    return _previsao_para_fila()["alunos"]
+ 
+ 
+ @whatsapp_bp.route("/fila/prematricula")
+ def fila_prematricula():
+     try:
+-        alunos = _alunos_prematricula_para_fila()
++        p = _previsao_para_fila()
+     except ValueError as exc:
+         return _erro(str(exc))
+-    return jsonify({"alunos": [{"id": a["id"], "nome": a["nome"], "turma": a["turma"], "posicao": a["posicao"],
+-                                "tem_telefone": bool(a["telefone"])} for a in alunos]})
++    return jsonify({"ano": p["ano"], "arquivo": p["arquivo"],
++                    "alunos": [{"id": a["id"], "nome": a["nome"], "turma": a["turma"], "posicao": a["posicao"],
++                                "situacao": a["situacao"], "tem_telefone": bool(a["telefone"])} for a in p["alunos"]]})
+ 
+ 
+ @whatsapp_bp.route("/fila/da-prematricula", methods=["POST"])
+@@ -356,7 +392,7 @@
+         modelo = None if modelo_id == COMUNICADO_ID else _modelos.obter(modelo_id)
+         if modelo_id != COMUNICADO_ID and (modelo is None or not modelo["texto"].strip()):
+             return _erro("Escolha um modelo com texto (ou o comunicado de matrícula).")
+-        itens, sem_telefone = [], []
++        itens, sem_telefone, recusados = [], [], []
+         for a in _alunos_prematricula_para_fila():
+             if a["id"] not in ids:
+                 continue
+@@ -368,8 +404,13 @@
+             else:
+                 ctx = {**_modelos.contexto_base(), "ALUNO": a["nome"], "TURMA": a["turma"], "RESPONSAVEL": a["responsavel"] or "responsável"}
+                 texto = _modelos.renderizar(modelo["texto"], ctx)
++            sobra = _modelos.marcadores_sobrando(texto)
++            if sobra:
++                recusados.append({"nome": a["nome"], "erro": "faltou o dado de " + ", ".join("$" + m for m in sobra)})
++                continue
+             itens.append({"numero": a["telefone"], "nome": a["nome"], "texto": texto})
+         r = obter_fila().adicionar(itens, origem="prematricula") if itens else {"adicionados": 0, "duplicados": 0, "invalidos": []}
++        r["invalidos"] = list(r.get("invalidos") or []) + recusados
+         r["sem_telefone"] = sem_telefone
+         return _resposta_fila(resultado=r)
+     except ValueError as exc:
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/web/static/js/seguranca.js b/src/web/static/js/seguranca.js
+--- a/src/web/static/js/seguranca.js
++++ b/src/web/static/js/seguranca.js
+@@ -1,7 +1,8 @@
+ /* seguranca.js — a parte do navegador da segurança (carregado ANTES do app.js).
+    1. Põe o token CSRF em todo fetch de escrita para o próprio sistema.
+    2. Sessão vencida (401): volta para a tela de entrada, em vez de mostrar erros soltos.
+-   3. Bloqueio por inatividade: sem mexer no sistema por N minutos, sai sozinho (mesmo com a tela fazendo consultas em segundo plano).
++   3. Inatividade: sem mexer no sistema por N minutos, pergunta "Estender essa sessão?". Sem nada rodando e sem resposta em 60 s, sai;
++      com automação/fila rodando, não sai sozinho (só a pergunta fica até alguém responder).
+    4. Topo: nome e perfil de quem entrou e o botão Sair; esconde o que o perfil não pode usar (o servidor confere de qualquer jeito). */
+ (function () {
+   "use strict";
+@@ -59,7 +60,91 @@
+     var agora = Date.now();
+     if (agora - ultimoMove > 5000) { ultimoMove = agora; ultimo = agora; }
+   }, { passive: true });
+-  setInterval(function () { if (!saindo && Date.now() - ultimo > limite) { sair("inatividade"); } }, 15000);
++  // Passou do limite: em vez de sair de repente, PERGUNTA "Estender essa sessão?".
++  //  - com tarefa em andamento (automação do SERE, fila do WhatsApp): nunca sai sozinho; a pergunta fica até alguém responder;
++  //  - sem nada rodando: dá 60 s para responder e, sem resposta, sai (como antes).
++  var ESPERA_S = 60;
++  var aviso = null;
++  function rotulo(nomes) { return nomes.length ? nomes.join(", ") : ""; }
++  function consultarSessao() {
++    return originalFetch("/web/api/seguranca/sessao", { credentials: "same-origin" })
++      .then(function (r) {
++        if (r.status === 401) { sairParaEntrada("inatividade"); return null; }
++        return r.ok ? r.json() : { ocupado: [] };
++      })
++      .catch(function () { return { ocupado: [] }; });
++  }
++  function fecharPergunta() {
++    if (!aviso) { return; }
++    clearInterval(aviso.timer);
++    aviso.caixa.remove();
++    aviso = null;
++    ultimo = Date.now();
++  }
++  function estender() {
++    originalFetch("/web/api/seguranca/estender", { method: "POST", headers: { "X-CSRF-Token": csrf }, credentials: "same-origin" })
++      .then(function (r) { if (r.status === 401) { sairParaEntrada("inatividade"); } })
++      .catch(function () { /* sem resposta: a próxima consulta decide */ })
++      .then(fecharPergunta);
++  }
++  function perguntar() {
++    if (aviso || saindo) { return; }
++    var caixa = document.createElement("div");
++    caixa.setAttribute("role", "alertdialog");
++    caixa.setAttribute("aria-live", "assertive");
++    caixa.style.cssText = "position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55)";
++    var painel = document.createElement("div");
++    painel.style.cssText = "max-width:440px;margin:16px;padding:20px 22px;border-radius:12px;background:var(--surface,#161b26);color:var(--text,#e8ecf4);border:1px solid var(--border,#2a3142);box-shadow:0 12px 40px rgba(0,0,0,.5)";
++    var titulo = document.createElement("h3");
++    titulo.textContent = "Estender essa sessão?";
++    titulo.style.margin = "0 0 8px";
++    var texto = document.createElement("p");
++    texto.style.cssText = "margin:0 0 14px;line-height:1.45";
++    var botoes = document.createElement("div");
++    botoes.style.cssText = "display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap";
++    var bSair = document.createElement("button");
++    bSair.type = "button"; bSair.className = "btn"; bSair.textContent = "Sair agora";
++    var bSim = document.createElement("button");
++    bSim.type = "button"; bSim.className = "btn btn-primary"; bSim.textContent = "Estender sessão";
++    botoes.appendChild(bSair); botoes.appendChild(bSim);
++    painel.appendChild(titulo); painel.appendChild(texto); painel.appendChild(botoes);
++    caixa.appendChild(painel);
++    document.body.appendChild(caixa);
++    aviso = { caixa: caixa, fim: null, ocupado: [], timer: null, consultando: false };
++    bSim.addEventListener("click", estender);
++    bSair.addEventListener("click", function () { sair("manual"); });
++    bSim.focus();
++
++    function desenhar() {
++      if (!aviso) { return; }
++      if (aviso.ocupado.length) {
++        aviso.fim = null;
++        texto.textContent = "O AUTO SERE está trabalhando (" + rotulo(aviso.ocupado) + "). Sua sessão não vai ser encerrada enquanto isso, "
++          + "mas confirme que você ainda está aí.";
++      } else {
++        if (aviso.fim === null) { aviso.fim = Date.now() + ESPERA_S * 1000; }
++        var falta = Math.max(0, Math.ceil((aviso.fim - Date.now()) / 1000));
++        texto.textContent = "Você ficou um tempo sem usar o sistema. A sessão será encerrada em " + falta + " s se nada for feito.";
++        if (falta <= 0) { sair("inatividade"); }
++      }
++    }
++    function ciclo() {
++      if (!aviso || aviso.consultando) { return; }
++      aviso.consultando = true;
++      consultarSessao().then(function (info) {
++        if (!aviso) { return; }
++        aviso.consultando = false;
++        aviso.ocupado = (info && info.ocupado) || [];
++        desenhar();
++      });
++    }
++    var voltas = 0;
++    aviso.timer = setInterval(function () { voltas += 1; desenhar(); if (voltas % 5 === 0) { ciclo(); } }, 1000);
++    ciclo();
++    desenhar();
++  }
++  setInterval(function () { if (!saindo && !aviso && Date.now() - ultimo > limite) { perguntar(); } }, 15000);
++  window.autoSerePerguntarSessao = perguntar;
+ 
+   // ---- topo: quem entrou
+   document.addEventListener("DOMContentLoaded", function () {
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/web/static/js/whatsapp.js b/src/web/static/js/whatsapp.js
+--- a/src/web/static/js/whatsapp.js
++++ b/src/web/static/js/whatsapp.js
+@@ -162,6 +162,7 @@
+         </div>
+         <div class="campo-ajuda" style="margin:2px 0 0;white-space:pre-wrap">${esc(i.texto.length > 160 ? i.texto.slice(0, 160) + "…" : i.texto)}</div>
+         ${i.erro ? `<div class="campo-ajuda" style="margin:2px 0 0;color:var(--rose)">${esc(i.erro)}</div>` : ""}
++        ${i.aviso ? `<div class="campo-ajuda" style="margin:2px 0 0">${esc(i.aviso)}</div>` : ""}
+       </div>`).join("") : `<div class="campo-ajuda">Nada para mostrar aqui.</div>`;
+   }
+ 
+@@ -190,9 +191,11 @@
+     const atual = $("wa-fila-modelo").value;
+     $("wa-fila-modelo").innerHTML = opcoesModelos(false);
+     if (atual) $("wa-fila-modelo").value = atual;
++    const pmAtual = $("wa-fila-pm-modelo").value;
+     $("wa-fila-pm-modelo").innerHTML = opcoesModelos(true);
++    $("wa-fila-pm-modelo").value = pmAtual || (modelosFila.some((m) => m.id === "matricula_aprovada") ? "matricula_aprovada" : "comunicado");
+     $("wa-fila-marcadores").textContent = "Marcadores que valem nos modelos: " + (r.dados.marcadores || []).map((m) => "$" + m).join(", ")
+-      + ". Na lista de alunos da pré-matrícula eles são trocados pelos dados de cada aluno; numa mensagem avulsa, escreva o texto final.";
++      + ". Na lista de alunos da pré-matrícula (próximo ano) eles são trocados pelos dados de cada aluno; numa mensagem avulsa, só valem $ESCOLA, $ANO, $PROXIMO_ANO_LETIVO e $DATA, e $ALUNO se você preencher o campo Nome.";
+   }
+ 
+   function iniciarFila() {
+@@ -261,16 +264,47 @@
+       if (r.ok) carregarModelosFila();
+     });
+ 
++    let pmAlunos = [];
++    const ROTULO_SITUACAO = { matriculado: "matriculado", pendente: "aguardando vaga" };
++    function pmVisiveis() {
++      const turma = $("wa-fila-pm-turma").value;
++      const ate = parseInt($("wa-fila-pm-ate").value, 10);
++      return pmAlunos.filter((a) => {
++        if (turma && a.turma !== turma) return false;
++        if (Number.isFinite(ate) && ate > 0) {                       // com limite, quem não tem posição não dá para saber: fica fora
++          const pos = parseInt(a.posicao, 10);
++          if (!Number.isFinite(pos) || pos > ate) return false;
++        }
++        return true;
++      });
++    }
++    function desenharPm(arquivo) {
++      const marcados = new Set([...$("wa-fila-pm-lista").querySelectorAll("input:checked")].map((c) => c.dataset.pmId));
++      const vis = pmVisiveis();
++      $("wa-fila-pm-lista").innerHTML = vis.length ? vis.map((a) => `
++        <label class="checklist-item"><input type="checkbox" data-pm-id="${esc(a.id)}" data-tem="${a.tem_telefone ? 1 : 0}"${a.tem_telefone ? "" : " disabled"}${marcados.has(a.id) && a.tem_telefone ? " checked" : ""}>
++          ${esc(a.nome)} · ${esc(a.turma)}${a.posicao ? ` · ${esc(a.posicao)}º` : ""} · ${esc(ROTULO_SITUACAO[a.situacao] || a.situacao)}${a.tem_telefone ? "" : " · sem telefone"}</label>`).join("")
++        : `<div class="campo-ajuda">Ninguém com esse filtro.</div>`;
++      $("wa-fila-pm-info").textContent = `Arquivo ${arquivo || ""}: ${pmAlunos.length} alunos; ${vis.length} com o filtro atual `
++        + `(${vis.filter((a) => a.tem_telefone).length} com telefone).`;
++      mostrar("wa-fila-pm-todos", vis.length > 0);
++      mostrar("wa-fila-pm-por", vis.length > 0);
++    }
++    let pmArquivo = "";
++    $("wa-fila-pm-turma").addEventListener("change", () => desenharPm(pmArquivo));
++    $("wa-fila-pm-ate").addEventListener("input", () => desenharPm(pmArquivo));
+     $("wa-fila-pm-carregar").addEventListener("click", async () => {
+       const r = await chamar("/fila/prematricula");
+       if (!r.ok) { toast(r.dados.erro || "Não consegui ler a pré-matrícula."); return; }
+-      const alunos = r.dados.alunos || [];
+-      $("wa-fila-pm-lista").innerHTML = alunos.length ? alunos.map((a) => `
+-        <label class="checklist-item"><input type="checkbox" data-pm-id="${esc(a.id)}" data-tem="${a.tem_telefone ? 1 : 0}"${a.tem_telefone ? "" : " disabled"}>
+-          ${esc(a.nome)} · ${esc(a.turma)}${a.posicao ? ` · ${esc(a.posicao)}º` : ""}${a.tem_telefone ? "" : " · sem telefone"}</label>`).join("")
+-        : `<div class="campo-ajuda">Ninguém na fila da pré-matrícula.</div>`;
+-      mostrar("wa-fila-pm-todos", alunos.length > 0);
+-      mostrar("wa-fila-pm-por", alunos.length > 0);
++      pmAlunos = r.dados.alunos || [];
++      pmArquivo = r.dados.arquivo || "";
++      const turmas = [...new Set(pmAlunos.map((a) => a.turma))].sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true }));
++      const atual = $("wa-fila-pm-turma").value;
++      $("wa-fila-pm-turma").innerHTML = `<option value="">Todas as turmas</option>`
++        + turmas.map((tm) => `<option value="${esc(tm)}">${esc(tm)}</option>`).join("");
++      if (turmas.includes(atual)) $("wa-fila-pm-turma").value = atual;
++      $("wa-fila-pm-filtros").hidden = false;
++      desenharPm(pmArquivo);
+     });
+     $("wa-fila-pm-todos").addEventListener("click", () =>
+       $("wa-fila-pm-lista").querySelectorAll("input[data-tem='1']").forEach((c) => { c.checked = true; }));
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/src/web/templates/whatsapp.html b/src/web/templates/whatsapp.html
+--- a/src/web/templates/whatsapp.html
++++ b/src/web/templates/whatsapp.html
+@@ -145,14 +145,21 @@
+           </div>
+           <p class="campo-ajuda" id="wa-fila-marcadores"></p>
+ 
+-          <strong style="display:block;margin-top:16px">Alunos da pré-matrícula (quem ainda está na fila de chamada)</strong>
++          <strong style="display:block;margin-top:16px">Alunos da pré-matrícula do próximo ano letivo (matrícula aprovada)</strong>
+           <div class="wa-acoes" style="margin-top:8px">
+             <div class="field" style="margin:0;max-width:320px"><label for="wa-fila-pm-modelo">Mensagem</label>
+               <select id="wa-fila-pm-modelo"></select></div>
+             <button class="btn-sm" id="wa-fila-pm-carregar">Carregar alunos</button>
+-            <button class="btn-sm" id="wa-fila-pm-todos" hidden>Marcar todos com telefone</button>
++            <button class="btn-sm" id="wa-fila-pm-todos" hidden>Marcar os da lista com telefone</button>
+             <button class="btn-primary" id="wa-fila-pm-por" hidden>Pôr marcados na fila</button>
+           </div>
++          <div id="wa-fila-pm-filtros" hidden><div class="wa-acoes" style="margin-top:8px">
++            <div class="field" style="margin:0;max-width:260px"><label for="wa-fila-pm-turma">Turma</label>
++              <select id="wa-fila-pm-turma"></select></div>
++            <div class="field" style="margin:0;max-width:200px"><label for="wa-fila-pm-ate">Até a posição (vazio = todos)</label>
++              <input type="number" id="wa-fila-pm-ate" min="1" step="1" placeholder="ex.: 5" autocomplete="off"></div>
++          </div></div>
++          <p class="campo-ajuda" id="wa-fila-pm-info" style="margin:6px 0 0"></p>
+           <div class="checklist" id="wa-fila-pm-lista" style="margin-top:8px;max-height:240px;overflow:auto"></div>
+         </div>
+       </details>
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/tests/test_seguranca_web.py b/tests/test_seguranca_web.py
+--- a/tests/test_seguranca_web.py
++++ b/tests/test_seguranca_web.py
+@@ -457,6 +457,40 @@
+     assert "falta de uso" in app.test_client().get("/web/entrar?motivo=inatividade").get_data(as_text=True)
+ 
+ 
++def test_sessao_informa_o_que_esta_rodando_e_estender_renova(app, monkeypatch):
++    c = _logado(app)
++    assert c.get("/web/api/seguranca/sessao").get_json()["ocupado"] == []
++    monkeypatch.setattr(seg_web, "tarefas_em_andamento", lambda: ["turmas", "fila de WhatsApp"])
++    d = c.get("/web/api/seguranca/sessao").get_json()
++    assert d["ocupado"] == ["turmas", "fila de WhatsApp"]
++    r = c.post("/web/api/seguranca/estender", headers={"X-CSRF-Token": d["csrf"]})
++    assert r.status_code == 200 and r.get_json()["ok"] is True
++    assert c.post("/web/api/seguranca/estender").status_code in (400, 403)          # sem CSRF não vale
++
++
++def test_estender_funciona_para_perfil_consulta_e_exige_login(app):
++    consulta = _logado(app, "consulta")
++    csrf = _csrf(consulta)
++    assert consulta.post("/web/api/seguranca/estender", headers={"X-CSRF-Token": csrf}).status_code == 200
++    assert app.test_client().post("/web/api/seguranca/estender").status_code == 401
++
++
++def test_tarefas_em_andamento_enxerga_fila_do_whatsapp_rodando(monkeypatch):
++    from src.servicos.whatsapp import fila as _fila_mod
++
++    class Falsa:
++        def em_andamento(self): return True
++    monkeypatch.setattr(_fila_mod, "obter_fila", lambda: Falsa())
++    assert "fila de WhatsApp" in seg_web.tarefas_em_andamento()
++
++
++def test_js_pergunta_antes_de_sair_por_inatividade():
++    from pathlib import Path
++    js = (Path(__file__).resolve().parent.parent / "src" / "web" / "static" / "js" / "seguranca.js").read_text(encoding="utf-8")
++    assert "Estender essa sessão?" in js and "/web/api/seguranca/estender" in js
++    assert 'setInterval(function () { if (!saindo && Date.now() - ultimo > limite) { sair("inatividade"); } }, 15000);' not in js
++
++
+ # ───────────────────────────── CLI ─────────────────────────────
+ 
+ def _roteiro(monkeypatch, senhas_digitadas, textos=()):
+diff -ruN -x __pycache__ -x .pytest_cache -x logs a/tests/test_whatsapp_fila.py b/tests/test_whatsapp_fila.py
+--- a/tests/test_whatsapp_fila.py
++++ b/tests/test_whatsapp_fila.py
+@@ -230,7 +230,7 @@
+ # ───────────── modelos ─────────────
+ 
+ def test_modelos_prontos_criar_ajustar_excluir(amb):
+-    assert [m["id"] for m in modelos.listar()] == ["livre", "chamada_matricula"]
++    assert [m["id"] for m in modelos.listar()] == ["livre", "matricula_aprovada", "chamada_matricula"]
+     novo = modelos.salvar("Lembrete", "Olá, $RESPONSAVEL! $ALUNO.")
+     assert novo["id"] == "lembrete" and not novo["padrao"]
+     with pytest.raises(ValueError, match="desconhecido"):
+@@ -297,21 +297,70 @@
+     assert cli.post("/web/api/whatsapp/fila/modelos", json={"nome": "X", "texto": "$ZZ"}).status_code == 400
+ 
+ 
+-def test_da_prematricula_enfileira_quem_tem_telefone(cli, amb):
+-    (paths.dados_ano_atual() / "pre_matricula.json").write_text(json.dumps({
++def _previsao_2027(**extra):
++    dados = {
+         "turmas_intencao": {"Infantil IV": [
+-            {"cpf": "111", "nome": "ANA LIMA", "pos": 1, "situacao": ""},
+-            {"cpf": "112", "nome": "BETO LIMA", "pos": 2, "situacao": ""}]},
+-        "cadastros": {"111": {"nome_responsavel": "MARIA", "telefone": N1}, "112": {"nome_responsavel": "JOAO"}}}), encoding="utf-8")
+-    lista = cli.get("/web/api/whatsapp/fila/prematricula").get_json()["alunos"]
+-    assert {a["nome"]: a["tem_telefone"] for a in lista} == {"ANA LIMA": True, "BETO LIMA": False}
+-    r = cli.post("/web/api/whatsapp/fila/da-prematricula", json={"ids": ["111", "112"], "modelo_id": "chamada_matricula"})
+-    d = r.get_json()
+-    assert r.status_code == 200 and d["resultado"]["adicionados"] == 1 and d["resultado"]["sem_telefone"] == ["BETO LIMA"]
+-    assert "MARIA" in f.obter_fila()._ler()["itens"][0]["texto"] and "ANA LIMA" in f.obter_fila()._ler()["itens"][0]["texto"]
++            {"cpf": "111", "nome": "ANA LIMA", "pos": 1}, {"cpf": "112", "nome": "BETO LIMA", "pos": 2},
++            {"cpf": "113", "nome": "CAIO LIMA", "pos": 3}]},
++        "cadastros": {
++            "111": {"cpf": "111", "nome_aluno": "ANA LIMA", "nome_responsavel": "MARIA", "telefone": N1,
++                    "escolas_escolhidas": {"turma": "Infantil IV", "opcoes": [{"situacao": "MATRICULADO"}]}},
++            "112": {"cpf": "112", "nome_aluno": "BETO LIMA", "nome_responsavel": "JOAO",
++                    "escolas_escolhidas": {"turma": "Infantil IV", "opcoes": [{"situacao": "MATRICULADO"}]}},
++            "113": {"cpf": "113", "nome_aluno": "CAIO LIMA", "nome_responsavel": "LUCIA", "telefone": N1,
++                    "escolas_escolhidas": {"turma": "Infantil IV", "opcoes": []}}}}
++    dados.update(extra)
++    (paths.dados_ano_atual() / "previsao_alunos_2027.json").write_text(json.dumps(dados), encoding="utf-8")
++
++
++def test_da_prematricula_usa_previsao_do_proximo_ano_com_todos_e_marcadores_trocados(cli, amb):
++    _previsao_2027()
++    d = cli.get("/web/api/whatsapp/fila/prematricula").get_json()
++    assert d["ano"] == 2027 and d["arquivo"] == "previsao_alunos_2027.json"
++    # vêm todos (inclusive quem aguarda vaga): quem será chamado é filtrado na tela, por turma e posição
++    assert {a["nome"]: (a["situacao"], a["tem_telefone"], a["posicao"]) for a in d["alunos"]} == {
++        "ANA LIMA": ("matriculado", True, "1"), "BETO LIMA": ("matriculado", False, "2"), "CAIO LIMA": ("pendente", True, "3")}
++    r = cli.post("/web/api/whatsapp/fila/da-prematricula", json={"ids": ["111", "112"], "modelo_id": "matricula_aprovada"})
++    res = r.get_json()
++    assert r.status_code == 200 and res["resultado"]["adicionados"] == 1 and res["resultado"]["sem_telefone"] == ["BETO LIMA"]
++    texto = f.obter_fila()._ler()["itens"][0]["texto"]
++    assert "ano letivo de 2027 foi aprovada" in texto and "aluno(a) ANA LIMA compareça" in texto and "$" not in texto
+     assert cli.post("/web/api/whatsapp/fila/da-prematricula", json={"ids": []}).status_code == 400
+ 
+ 
++def test_da_prematricula_recusa_modelo_com_marcador_sem_dado(cli, amb):
++    _previsao_2027()
++    cli.post("/web/api/whatsapp/fila/modelos", json={"nome": "Com turma", "texto": "Oi $ALUNO da $TURMA"})
++    r = cli.post("/web/api/whatsapp/fila/da-prematricula", json={"ids": ["111"], "modelo_id": "com-turma"}).get_json()
++    assert r["resultado"]["adicionados"] == 1 and "$" not in f.obter_fila()._ler()["itens"][0]["texto"]   # turma existe
++    dados = json.loads((paths.dados_ano_atual() / "previsao_alunos_2027.json").read_text(encoding="utf-8"))
++    dados["cadastros"]["111"]["escolas_escolhidas"]["turma"] = ""
++    dados["turmas_intencao"] = {}
++    (paths.dados_ano_atual() / "previsao_alunos_2027.json").write_text(json.dumps(dados), encoding="utf-8")
++    r2 = cli.post("/web/api/whatsapp/fila/da-prematricula", json={"ids": ["111"], "modelo_id": "com-turma"}).get_json()
++    assert r2["resultado"]["adicionados"] == 0 and "$TURMA" in r2["resultado"]["invalidos"][0]["erro"]
++
++
++def test_mensagem_avulsa_troca_marcadores_e_recusa_o_que_faltar(cli, amb):
++    texto = "Ano $PROXIMO_ANO_LETIVO, aluno(a) $ALUNO"
++    r = cli.post("/web/api/whatsapp/fila/itens", json={"itens": [{"numero": N1, "nome": "ANA LIMA", "texto": texto}]})
++    assert r.status_code == 200 and f.obter_fila()._ler()["itens"][0]["texto"] == "Ano 2027, aluno(a) ANA LIMA"
++    r = cli.post("/web/api/whatsapp/fila/itens", json={"itens": [{"numero": N1, "nome": "", "texto": texto}]})
++    assert r.status_code == 400 and "$ALUNO" in r.get_json()["erro"]
++    r = cli.post("/web/api/whatsapp/fila/itens", json={"itens": [{"numero": N1, "nome": "X", "texto": "Preço R$ 50 e R$50"}]})
++    assert r.status_code == 200
++
++
++def test_da_prematricula_sem_arquivo_da_previsao_explica(cli, amb):
++    r = cli.get("/web/api/whatsapp/fila/prematricula")
++    assert r.status_code == 400 and "previsao_alunos_2027.json" in r.get_json()["erro"]
++
++
++def test_da_prematricula_arquivo_antigo_pre_matricula_nao_e_a_fonte(cli, amb):
++    (paths.dados_ano_atual() / "pre_matricula.json").write_text(json.dumps({"turmas_intencao": {"X": [{"cpf": "9", "nome": "Z"}]}}), encoding="utf-8")
++    assert cli.get("/web/api/whatsapp/fila/prematricula").status_code == 400
++
++
+ def test_modo_consulta_bloqueia_escrita_da_fila(cli, monkeypatch):
+     monkeypatch.setattr(paths, "somente_consulta", lambda: True)
+     assert cli.post("/web/api/whatsapp/fila/iniciar", json={}).status_code == 403
+@@ -323,3 +372,47 @@
+     from src.servicos.whatsapp import fila as modulo
+     assert modulo.INTERVALO_PADRAO_S == 300
+     assert _fila(Prov()).resumo()["config"]["intervalo_s"] == 300
++
++
++def test_enviada_sem_confirmacao_do_tique_nao_conta_como_falha_nem_pausa(amb):
++    """Antes, 3 mensagens que SAÍRAM mas sem o tique viravam 3 "falhas" e a fila pausava sozinha."""
++    class SemTique(Prov):
++        def enviar(self, numero, texto):
++            self.enviados.append((numero, texto))
++            return ResultadoEnvio(True, False, aviso="Enviada, sem confirmação do tique.")
++    prov = SemTique()
++    fila = _fila(prov)
++    fila.adicionar([{"numero": n, "nome": f"Pai {i}", "texto": f"Oi {i}"} for i, n in enumerate((N1, N2, N3, "(42) 99999-4444"), 1)])
++    _rodar(fila)
++    r = fila.resumo()
++    assert len(prov.enviados) == 4 and r["estado"] == f.CONCLUIDA and r["contagem"]["enviado"] == 4 and r["contagem"]["falhou"] == 0
++    assert all(i["status"] == "enviado" and "tique" in i["aviso"] and not i["erro"] for i in r["itens"])
++    assert r["enviados_hoje"] == 4                               # conta no limite do dia
++
++
++def test_falha_de_verdade_continua_pausando_depois_de_3(amb):
++    fila = _fila(Prov(falha="O WhatsApp não abriu a conversa: número sem WhatsApp ou inválido."))
++    fila.adicionar([{"numero": n, "nome": f"Pai {i}", "texto": f"Oi {i}"} for i, n in enumerate((N1, N2, N3, "(42) 99999-4444"), 1)])
++    _rodar(fila)
++    r = fila.resumo()
++    assert r["estado"] == f.PAUSADA and r["contagem"]["falhou"] == 3 and r["contagem"]["pendente"] == 1
++
++
++def test_whatsplay_false_sem_erro_e_enviada_sem_confirmacao_e_com_erro_e_falha(amb):
++    from src.servicos.whatsapp.provedor_whatsplay import ProvedorWhatsplay
++
++    class Sessao:
++        def __init__(self, erro): self.erro = erro
++        def foto(self):
++            from src.servicos.whatsapp.monitor import Foto, Situacao
++            return Foto(Situacao.CONECTADO, gateway_online=True)
++        def limpar_erro(self): pass
++        def ultimo_erro(self): return self.erro
++        def executar(self, fazer, timeout=0): return False
++
++    sem_erro = ProvedorWhatsplay(Sessao(""), intervalo_min_s=0, dormir=lambda s: None).enviar(N1, "Oi")
++    assert sem_erro.ok and sem_erro.aviso and not sem_erro.erro
++    com_erro = ProvedorWhatsplay(Sessao("Could not open chat: 5542"), intervalo_min_s=0, dormir=lambda s: None).enviar(N1, "Oi")
++    assert not com_erro.ok and "não abriu a conversa" in com_erro.erro
++    outro = ProvedorWhatsplay(Sessao("Error sending message: x"), intervalo_min_s=0, dormir=lambda s: None).enviar(N1, "Oi")
++    assert not outro.ok and "Não consegui enviar" in outro.erro

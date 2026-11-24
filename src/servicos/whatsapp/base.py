@@ -41,6 +41,9 @@ class ResultadoEnvio:
     simulado: bool
     id_mensagem: Optional[str] = None
     erro: Optional[str] = None
+    # Saiu (ok=True), mas o provedor não conseguiu ver a confirmação (tique) a tempo. Não é falha: a fila não conta isso
+    # para pausar, só mostra o aviso no item.
+    aviso: Optional[str] = None
 
 
 @dataclass(frozen=True)

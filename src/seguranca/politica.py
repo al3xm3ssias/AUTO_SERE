@@ -21,7 +21,7 @@ LEITURA = ("GET", "HEAD", "OPTIONS")
 # (método ou None = qualquer, expressão, perfil mínimo). A ORDEM IMPORTA: a primeira que casa vale.
 _TABELA: list[tuple[tuple[str, ...] | None, re.Pattern, str]] = [
     # a própria conta: qualquer usuário entrado
-    (None, re.compile(r"^/web/api/seguranca/(sessao|sair|trocar-senha)$"), "consulta"),
+    (None, re.compile(r"^/web/api/seguranca/(sessao|estender|sair|trocar-senha)$"), "consulta"),
     (None, re.compile(r"^/web/(sair|trocar-senha)$"), "consulta"),
     # administração
     (None, re.compile(r"^/web/api/seguranca/(usuarios|auditoria)(/.*)?$"), "admin"),
