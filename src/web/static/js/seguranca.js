@@ -103,7 +103,7 @@
     var botoes = document.createElement("div");
     botoes.style.cssText = "display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap";
     var bSair = document.createElement("button");
-    bSair.type = "button"; bSair.className = "btn"; bSair.textContent = "Sair agora";
+    bSair.type = "button"; bSair.className = "btn-sm"; bSair.textContent = "Sair agora";
     var bSim = document.createElement("button");
     bSim.type = "button"; bSim.className = "btn btn-primary"; bSim.textContent = "Estender sessão";
     botoes.appendChild(bSair); botoes.appendChild(bSim);

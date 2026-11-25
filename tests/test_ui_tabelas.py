@@ -204,6 +204,35 @@ def test_funcionarios_cards_filtros_busca_detalhe_e_paginacao(pagina):
     assert d.value.suggested_filename.startswith("funcionarios_")
 
 
+def test_prematricula_aba_do_proximo_ano_mostra_as_opcoes_de_escola(pagina, tmp_path):
+    from src.comum import paths
+    ano = int(paths.ano_atual())
+    pg = pagina
+    _gravar(tmp_path, "pre_matricula.json", {"turmas_intencao": {}, "cadastros": {
+        "1": {"nome_aluno": "Do Ano Atual", "escolas_escolhidas": {"opcoes": [{"escola": "Esc X", "situacao": "MATRICULADO"}]}}}})
+    _gravar(tmp_path, f"previsao_alunos_{ano + 1}.json", {
+        "turmas_intencao": {"Infantil IV": [{"nome": "Ana Futura", "cpf": "7", "pos": "3"}]},
+        "cadastros": {"7": {"nome_aluno": "Ana Futura", "nome_responsavel": "Mãe da Ana", "telefone": "42999990000",
+                            "escolas_escolhidas": {"turma": "Infantil IV", "opcoes": [
+                                {"escola": "Escola Primeira"}, {"escola": "Judith Macedo Silveira"}, {"escola": "Escola Terceira"}]}}}})
+    _abrir(pg, "prematricula")
+    anos = pg.inner_text("#pm-anos")
+    assert str(ano) in anos and str(ano + 1) in anos and "Do Ano Atual" in pg.inner_text("#pm-tbody")
+    pg.click(f'#pm-anos [data-pmano="{ano + 1}"]')
+    pg.wait_for_function("document.getElementById('pm-titulo').textContent.includes('%d')" % (ano + 1))
+    corpo = pg.inner_text("#pm-tbody")
+    assert "Ana Futura" in corpo and "Do Ano Atual" not in corpo
+    assert "1ª" in corpo and "2ª" in corpo and "3ª" in corpo and "Escola Primeira" in corpo and "Escola Terceira" in corpo
+    assert "Somente consulta" in pg.inner_text("#pm-ano-aviso")
+    pg.click("#pm-tbody .al-expand-btn")
+    detalhe = pg.inner_text("#pm-det-0")
+    assert "Escolas Escolhidas" in detalhe.title() or "Escolas Escolhidas" in detalhe
+    assert "nossa escola" in detalhe and "Corrigir dados" not in detalhe                  # próximo ano é só consulta
+    pg.click(f'#pm-anos [data-pmano="{ano}"]')
+    pg.wait_for_function("document.getElementById('pm-titulo').textContent.includes('%d')" % ano)
+    assert "Do Ano Atual" in pg.inner_text("#pm-tbody")
+
+
 def test_prematricula_abas_busca_detalhe_e_nao_mostra_a_tentativa_antiga(pagina, tmp_path):
     pg = pagina
     _gravar(tmp_path, "pre_matricula.json", {"atualizado_em": "2026-10-01 09:00", "turmas_intencao": {

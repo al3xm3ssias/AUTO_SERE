@@ -127,32 +127,39 @@
       <details class="wa-ajuda" id="wa-fila-adicionar">
         <summary>Adicionar mensagens à fila</summary>
         <div style="margin-top:10px">
-          <strong>Uma mensagem</strong>
+          <strong>1. Mensagem</strong>
           <div class="wa-acoes" style="margin-top:8px">
-            <div class="field" style="margin:0;max-width:220px"><label for="wa-fila-numero">Número (com DDD)</label>
-              <input type="text" id="wa-fila-numero" placeholder="(42) 99999-8888" autocomplete="off"></div>
-            <div class="field" style="margin:0;max-width:260px"><label for="wa-fila-nome">Nome (para a lista)</label>
-              <input type="text" id="wa-fila-nome" autocomplete="off"></div>
-            <div class="field" style="margin:0;max-width:300px"><label for="wa-fila-modelo">Modelo</label>
+            <div class="field" style="margin:0;max-width:360px"><label for="wa-fila-modelo">Modelo</label>
               <select id="wa-fila-modelo"></select></div>
-          </div>
-          <div class="field"><label for="wa-fila-texto">Mensagem</label>
-            <textarea id="wa-fila-texto" rows="5" maxlength="4000"></textarea></div>
-          <div class="wa-acoes">
-            <button class="btn-primary" id="wa-fila-por">Pôr na fila</button>
             <button class="btn-sm" id="wa-fila-modelo-salvar">Salvar como modelo…</button>
             <button class="btn-sm" id="wa-fila-modelo-excluir">Excluir modelo</button>
           </div>
+          <div class="field" style="margin-top:8px"><label for="wa-fila-texto">Texto</label>
+            <textarea id="wa-fila-texto" rows="6" maxlength="4000"></textarea></div>
           <p class="campo-ajuda" id="wa-fila-marcadores"></p>
 
-          <strong style="display:block;margin-top:16px">Alunos da pré-matrícula do próximo ano letivo (matrícula aprovada)</strong>
-          <div class="wa-acoes" style="margin-top:8px">
-            <div class="field" style="margin:0;max-width:320px"><label for="wa-fila-pm-modelo">Mensagem</label>
-              <select id="wa-fila-pm-modelo"></select></div>
-            <button class="btn-sm" id="wa-fila-pm-carregar">Carregar alunos</button>
-            <button class="btn-sm" id="wa-fila-pm-todos" hidden>Marcar os da lista com telefone</button>
-            <button class="btn-primary" id="wa-fila-pm-por" hidden>Pôr marcados na fila</button>
+          <strong style="display:block;margin-top:14px">2. Para quem</strong>
+          <div class="wa-seg" role="group" aria-label="Para quem enviar">
+            <button class="btn-sm ativo" id="wa-destino-numero" type="button" data-destino="numero">Um número</button>
+            <button class="btn-sm" id="wa-destino-alunos" type="button" data-destino="alunos">Alunos da pré-matrícula (próximo ano)</button>
           </div>
+
+          <div id="wa-dest-numero">
+            <div class="wa-acoes">
+              <div class="field" style="margin:0;max-width:220px"><label for="wa-fila-numero">Número (com DDD)</label>
+                <input type="text" id="wa-fila-numero" placeholder="(42) 99999-8888" autocomplete="off"></div>
+              <div class="field" style="margin:0;max-width:260px"><label for="wa-fila-nome">Nome (vira $ALUNO)</label>
+                <input type="text" id="wa-fila-nome" autocomplete="off"></div>
+              <button class="btn-primary" id="wa-fila-por">Pôr na fila</button>
+            </div>
+          </div>
+
+          <div id="wa-dest-alunos" hidden>
+            <div class="wa-acoes">
+              <button class="btn-sm" id="wa-fila-pm-carregar">Carregar alunos</button>
+              <button class="btn-sm" id="wa-fila-pm-todos" hidden>Marcar os da lista com telefone</button>
+              <button class="btn-primary" id="wa-fila-pm-por" hidden>Pôr marcados na fila</button>
+            </div>
           <div id="wa-fila-pm-filtros" hidden><div class="wa-acoes" style="margin-top:8px">
             <div class="field" style="margin:0;max-width:260px"><label for="wa-fila-pm-turma">Turma</label>
               <select id="wa-fila-pm-turma"></select></div>
@@ -161,6 +168,7 @@
           </div></div>
           <p class="campo-ajuda" id="wa-fila-pm-info" style="margin:6px 0 0"></p>
           <div class="checklist" id="wa-fila-pm-lista" style="margin-top:8px;max-height:240px;overflow:auto"></div>
+          </div>
         </div>
       </details>
 

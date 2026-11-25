@@ -386,12 +386,17 @@ def fila_da_prematricula():
     corpo = request.get_json(silent=True) or {}
     ids = {str(i) for i in (corpo.get("ids") or [])}
     modelo_id = str(corpo.get("modelo_id") or COMUNICADO_ID)
+    texto_tela = str(corpo.get("texto") or "")              # o texto como está na tela (pode ter sido ajustado sem salvar o modelo)
     if not ids:
         return _erro("Marque pelo menos um aluno.")
     try:
-        modelo = None if modelo_id == COMUNICADO_ID else _modelos.obter(modelo_id)
-        if modelo_id != COMUNICADO_ID and (modelo is None or not modelo["texto"].strip()):
-            return _erro("Escolha um modelo com texto (ou o comunicado de matrícula).")
+        modelo = None
+        if modelo_id != COMUNICADO_ID:
+            achado = _modelos.obter(modelo_id)
+            texto_base = texto_tela.strip() or (achado["texto"] if achado else "")
+            if not texto_base.strip():
+                return _erro("Escolha um modelo com texto (ou o comunicado de matrícula).")
+            modelo = {"texto": texto_base}
         itens, sem_telefone, recusados = [], [], []
         for a in _alunos_prematricula_para_fila():
             if a["id"] not in ids:

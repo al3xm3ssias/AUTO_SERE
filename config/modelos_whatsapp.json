@@ -1,0 +1,8 @@
+{
+  "modelos": {
+    "formulario-matricula": {
+      "nome": "Formulário Matricula",
+      "texto": "Olá, responsável pelo(a) aluno(a) *$ALUNO*!\n\nPara agilizar e organizar o processo de matrículas para o próximo ano letivo, solicitamos que o responsável preencha o formulário disponibilizado pela escola.\n\n📝 **LINK PARA PREENCHIMENTO DO FORMULÁRIO:**\nhttps://docs.google.com/forms/d/e/1FAIpQLSdgTJ2q14LALSW5m4U_NSwiVXE1rQuL2sUwP0PUl9l_tAMnwQ/viewform?usp=sharing&ouid=102005770035071638669\n\n**ATENÇÃO:** Pedimos que compareça à secretaria da escola somente após o preenchimento do formulário. Essa etapa é importante para que possamos organizar e ter um controle adequado dos alunos que irão estudar em nossa escola no próximo ano.\n\nSe você já realizou a matrícula, não se preocupe! Pedimos que preencha o formulário da mesma forma, pois a vaga do(a) aluno(a) já está confirmada.\n\n📅 **Prazo para preenchimento:** até a mesma data informada na mensagem anterior.\n\nContamos com a colaboração de todos!\n\nAtenciosamente,\n**Equipe da Escola Judith Macedo Silveira**"
+    }
+  }
+}

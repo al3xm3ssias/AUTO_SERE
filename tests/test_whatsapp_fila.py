@@ -416,3 +416,17 @@ def test_whatsplay_false_sem_erro_e_enviada_sem_confirmacao_e_com_erro_e_falha(a
     assert not com_erro.ok and "não abriu a conversa" in com_erro.erro
     outro = ProvedorWhatsplay(Sessao("Error sending message: x"), intervalo_min_s=0, dormir=lambda s: None).enviar(N1, "Oi")
     assert not outro.ok and "Não consegui enviar" in outro.erro
+
+
+def test_da_prematricula_usa_o_texto_da_tela_mesmo_sem_salvar_o_modelo(cli, amb):
+    _previsao_2027()
+    r = cli.post("/web/api/whatsapp/fila/da-prematricula", json={
+        "ids": ["111"], "modelo_id": "matricula_aprovada", "texto": "Oi, responsável de $ALUNO ($TURMA)!"})
+    assert r.status_code == 200 and r.get_json()["resultado"]["adicionados"] == 1
+    assert f.obter_fila()._ler()["itens"][0]["texto"] == "Oi, responsável de ANA LIMA (Infantil IV)!"
+    # sem texto na requisição, vale o do modelo salvo (compatível com o jeito antigo)
+    r = cli.post("/web/api/whatsapp/fila/da-prematricula", json={"ids": ["112", "113"], "modelo_id": "matricula_aprovada"})
+    assert r.status_code == 200
+    # modelo vazio e sem texto: recusa
+    r = cli.post("/web/api/whatsapp/fila/da-prematricula", json={"ids": ["111"], "modelo_id": "livre", "texto": "  "})
+    assert r.status_code == 400

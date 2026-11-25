@@ -178,10 +178,10 @@
     } catch (e) { /* tenta no próximo ciclo */ }
   }
 
-  function opcoesModelos(comComunicado) {
-    return (comComunicado ? [`<option value="comunicado">Comunicado de matrícula (texto oficial do sistema)</option>`] : [])
-      .concat(modelosFila.filter((m) => !comComunicado || m.texto.trim()).map((m) =>
-        `<option value="${esc(m.id)}">${esc(m.nome + (m.padrao && m.personalizado ? " (ajustado)" : ""))}</option>`)).join("");
+  function opcoesModelos() {
+    return modelosFila.map((m) =>
+      `<option value="${esc(m.id)}">${esc(m.nome + (m.padrao && m.personalizado ? " (ajustado)" : ""))}</option>`)
+      .concat([`<option value="comunicado">Comunicado de matrícula (texto oficial do sistema)</option>`]).join("");
   }
 
   async function carregarModelosFila() {
@@ -189,20 +189,34 @@
     if (!r.ok) return;
     modelosFila = r.dados.modelos || [];
     const atual = $("wa-fila-modelo").value;
-    $("wa-fila-modelo").innerHTML = opcoesModelos(false);
-    if (atual) $("wa-fila-modelo").value = atual;
-    const pmAtual = $("wa-fila-pm-modelo").value;
-    $("wa-fila-pm-modelo").innerHTML = opcoesModelos(true);
-    $("wa-fila-pm-modelo").value = pmAtual || (modelosFila.some((m) => m.id === "matricula_aprovada") ? "matricula_aprovada" : "comunicado");
+    $("wa-fila-modelo").innerHTML = opcoesModelos();
+    const padrao = modelosFila.some((m) => m.id === "matricula_aprovada") ? "matricula_aprovada" : "";
+    $("wa-fila-modelo").value = atual || padrao;
+    if (!atual && padrao && !$("wa-fila-texto").value.trim()) aplicarModelo();          // abre já com o texto do modelo escolhido
     $("wa-fila-marcadores").textContent = "Marcadores que valem nos modelos: " + (r.dados.marcadores || []).map((m) => "$" + m).join(", ")
-      + ". Na lista de alunos da pré-matrícula (próximo ano) eles são trocados pelos dados de cada aluno; numa mensagem avulsa, só valem $ESCOLA, $ANO, $PROXIMO_ANO_LETIVO e $DATA, e $ALUNO se você preencher o campo Nome.";
+      + ". Para os alunos da pré-matrícula eles são trocados pelos dados de cada aluno; para um número avulso, só valem $ESCOLA, $ANO, $PROXIMO_ANO_LETIVO e $DATA, e $ALUNO se você preencher o Nome.";
+  }
+
+  const TEXTO_COMUNICADO = "(Texto oficial gerado na hora pelo sistema, com o prazo contado a partir de hoje. Vale só para a lista de alunos da pré-matrícula.)";
+  const ehComunicado = () => $("wa-fila-modelo").value === "comunicado";
+  function aplicarModelo() {
+    const caixa = $("wa-fila-texto");
+    if (ehComunicado()) { caixa.value = TEXTO_COMUNICADO; caixa.readOnly = true; return; }
+    caixa.readOnly = false;
+    const m = modelosFila.find((x) => x.id === $("wa-fila-modelo").value);
+    if (m) caixa.value = m.texto;
+  }
+  function mostrarDestino(destino) {
+    $("wa-dest-numero").hidden = destino !== "numero";
+    $("wa-dest-alunos").hidden = destino !== "alunos";
+    $("wa-destino-numero").classList.toggle("ativo", destino === "numero");
+    $("wa-destino-alunos").classList.toggle("ativo", destino === "alunos");
   }
 
   function iniciarFila() {
-    $("wa-fila-modelo").addEventListener("change", () => {
-      const m = modelosFila.find((x) => x.id === $("wa-fila-modelo").value);
-      if (m) $("wa-fila-texto").value = m.texto;
-    });
+    $("wa-fila-modelo").addEventListener("change", aplicarModelo);
+    $("wa-destino-numero").addEventListener("click", () => mostrarDestino("numero"));
+    $("wa-destino-alunos").addEventListener("click", () => mostrarDestino("alunos"));
     $("wa-fila-filtro").addEventListener("change", desenharItensFila);
 
     $("wa-fila-iniciar").addEventListener("click", async () => {
@@ -242,12 +256,14 @@
       toast(partes.join(" · "));
     }
     $("wa-fila-por").addEventListener("click", async () => {
+      if (ehComunicado()) { toast("O comunicado oficial só vale para a lista de alunos da pré-matrícula. Escolha outro modelo para um número avulso."); return; }
       const r = await chamarFila("/itens", "POST", { itens: [{ numero: $("wa-fila-numero").value, nome: $("wa-fila-nome").value, texto: $("wa-fila-texto").value }] });
       if (!r) return;
       resumoAdicao(r);
       if (r.resultado.adicionados) { $("wa-fila-numero").value = ""; $("wa-fila-nome").value = ""; }
     });
     $("wa-fila-modelo-salvar").addEventListener("click", async () => {
+      if (ehComunicado()) { toast("O comunicado oficial é gerado pelo sistema e não pode ser salvo como modelo."); return; }
       const atual = modelosFila.find((m) => m.id === $("wa-fila-modelo").value);
       const nome = prompt("Nome do modelo (se for o de um modelo existente, ele é atualizado):", atual && atual.id !== "livre" ? atual.nome : "");
       if (!nome) return;
@@ -258,6 +274,7 @@
     });
     $("wa-fila-modelo-excluir").addEventListener("click", async () => {
       const id = $("wa-fila-modelo").value;
+      if (id === "comunicado") { toast("O comunicado oficial não pode ser excluído."); return; }
       if (!id || !confirm("Excluir este modelo? (Num modelo pronto ajustado, volta o texto original.)")) return;
       const r = await chamar(`/fila/modelos/${encodeURIComponent(id)}`, "DELETE");
       toast(r.ok ? (r.dados.acao === "restaurado" ? "Texto original restaurado." : "Modelo excluído.") : (r.dados.erro || "Não foi possível excluir."));
@@ -311,7 +328,7 @@
     $("wa-fila-pm-por").addEventListener("click", async () => {
       const ids = [...$("wa-fila-pm-lista").querySelectorAll("input:checked")].map((c) => c.dataset.pmId);
       if (!ids.length) { toast("Marque pelo menos um aluno."); return; }
-      const r = await chamarFila("/da-prematricula", "POST", { ids, modelo_id: $("wa-fila-pm-modelo").value });
+      const r = await chamarFila("/da-prematricula", "POST", { ids, modelo_id: $("wa-fila-modelo").value, texto: ehComunicado() ? "" : $("wa-fila-texto").value });
       if (r) { resumoAdicao(r); $("wa-fila-pm-lista").querySelectorAll("input:checked").forEach((c) => { c.checked = false; }); }
     });
     carregarModelosFila();

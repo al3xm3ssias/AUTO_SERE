@@ -38,6 +38,9 @@ dados/backup/*
 *.xlsx
 !config/*.xlsx
 
+src/**/pdf_matricula/
+*.pdf
+
 # ==== Logs e locks (gerados em runtime) ====
 logs/*.log
 logs/*.txt

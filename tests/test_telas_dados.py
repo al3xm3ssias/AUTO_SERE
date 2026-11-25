@@ -389,6 +389,46 @@ def test_prematricula_cadastros_vazio(dados, c):
     assert r["cadastros"] == [] and r["cartoes"] == [] and r["total"] == 0
 
 
+def _cadastro_com_3_opcoes(cpf, nome, situacoes=("", "", "")):
+    escolas = ("Esc Primeira", "Judith Macedo Silveira", "Esc Terceira")
+    return {"nome_aluno": nome, "nome_responsavel": "Mãe", "telefone": "42999990000",
+            "escolas_escolhidas": {"turma": "Infantil IV", "opcoes": [
+                {"escola": e, "situacao": sit} for e, sit in zip(escolas, situacoes)]}}
+
+
+def test_prematricula_cadastros_por_ano_le_a_previsao_do_proximo_ano_com_as_3_opcoes(dados, c):
+    ano = int(rotas._paths.ano_atual())
+    gravar(dados, "pre_matricula.json", {"turmas_intencao": {}, "cadastros": {"1": _cadastro_com_3_opcoes("1", "Do Ano Atual")}})
+    gravar(dados, f"previsao_alunos_{ano + 1}.json", {
+        "turmas_intencao": {"Infantil IV": [{"nome": "Ana Futura", "cpf": "7", "pos": "3"}]},
+        "cadastros": {"7": _cadastro_com_3_opcoes("7", "Ana Futura")}})
+    atual = c.get("/web/api/prematricula/cadastros").get_json()
+    assert atual["ano"] == ano and atual["somente_leitura"] is False and [x["nome_aluno"] for x in atual["cadastros"]] == ["Do Ano Atual"]
+    prox = c.get(f"/web/api/prematricula/cadastros?ano={ano + 1}").get_json()
+    assert prox["ano"] == ano + 1 and prox["somente_leitura"] is True and prox["arquivo"] == f"previsao_alunos_{ano + 1}.json"
+    assert [a["ano"] for a in prox["anos"]] == [ano, ano + 1] and prox["existe"] is True
+    ana = prox["cadastros"][0]
+    assert ana["nome_aluno"] == "Ana Futura" and [o["opcao"] for o in ana["opcoes"]] == [1, 2, 3]
+    assert [o["escola"] for o in ana["opcoes"]] == ["Esc Primeira", "Judith Macedo Silveira", "Esc Terceira"]
+    assert [o["nossa"] for o in ana["opcoes"]] == [False, True, False]                 # nossa escola marcada (aqui, a 2ª opção)
+    assert ana["intencoes"][0]["pos"] == "3"
+
+
+def test_prematricula_cadastros_ano_sem_arquivo_e_ano_invalido(dados, c):
+    ano = int(rotas._paths.ano_atual())
+    vazio = c.get(f"/web/api/prematricula/cadastros?ano={ano + 1}").get_json()
+    assert vazio["cadastros"] == [] and vazio["existe"] is False and vazio["somente_leitura"] is True
+    assert c.get(f"/web/api/prematricula/cadastros?ano={ano + 2}").status_code == 400
+    assert c.get(f"/web/api/prematricula/cadastros?ano={ano - 1}").status_code == 400
+
+
+def test_prematricula_opcao_numero_vem_do_site_quando_existe(dados, c):
+    gravar(dados, "pre_matricula.json", {"turmas_intencao": {}, "cadastros": {"1": {
+        "nome_aluno": "X", "escolas_escolhidas": {"opcoes": [{"escola": "B", "opcao": 2}, {"escola": "A", "opcao": 1}]}}}})
+    ops = c.get("/web/api/prematricula/cadastros").get_json()["cadastros"][0]["opcoes"]
+    assert [(o["opcao"], o["escola"]) for o in ops] == [(1, "A"), (2, "B")]
+
+
 def test_transferidos_status_pelos_6_passos_da_guia_e_historico(dados, c):
     d = "2026-03-01T10:00:00"
     gravar(dados, "transferidos.json", {

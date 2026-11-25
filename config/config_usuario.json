@@ -24,6 +24,7 @@
     "analisa_sere": []
   },
   "data_corte_transferidos": "18/10/2026",
+  "mapeamento_turmas_qr": {},
   "observacao_historico": null,
   "navegador_padrao": null,
   "navegador_scripts": {
@@ -38,7 +39,8 @@
   "google_oauth": {
     "conta": "judith@pontagrossa.pr.gov.br",
     "navegador": "chrome",
-    "perfil": "Profile 2",
+    "perfil": "Profile 11",
     "abrir": true
-  }
+  },
+  "backup_automatico": null
 }

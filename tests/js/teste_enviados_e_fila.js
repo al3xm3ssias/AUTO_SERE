@@ -84,7 +84,7 @@ async function testeFila() {
   ok($("wa-fila-resumo").textContent.includes("3 de 40") && $("wa-fila-resumo").textContent.includes("2 pendente"), "resumo do dia e contagem");
   ok($("wa-fila-lista").querySelectorAll(".checklist-item").length === 3 && !$("wa-fila-lista").innerHTML.includes("<i>Pai"), "lista com 3 itens e nome escapado");
   ok($("wa-fila-intervalo").value === "45" && $("wa-fila-limite").value === "40" && $("wa-fila-amanha").checked, "ajustes carregados");
-  ok($("wa-fila-modelo").options.length === 2 && $("wa-fila-pm-modelo").options.length === 2 && $("wa-fila-pm-modelo").options[0].value === "comunicado", "modelos nos dois seletores (só os com texto + comunicado no da pré-matrícula)");
+  ok($("wa-fila-modelo").options.length === 3 && $("wa-fila-modelo").options[2].value === "comunicado", "um só seletor de modelos (os modelos + o comunicado oficial no fim)");
 
   $("wa-fila-iniciar").click(); await esperar();
   ok(!chamadas.some((c) => c[1].endsWith("/fila/iniciar")) && w.__t.some((t) => t.includes("confirmação")), "envio real exige a caixa de confirmação");
@@ -108,7 +108,16 @@ async function testeFila() {
   ok($("wa-fila-pm-lista").querySelectorAll("input").length === 2 && $("wa-fila-pm-lista").querySelector("input[disabled]"), "pré-matrícula: sem telefone fica desabilitado");
   $("wa-fila-pm-todos").click(); $("wa-fila-pm-por").click(); await esperar();
   const pm = chamadas.find((c) => c[1].endsWith("/fila/da-prematricula"));
-  ok(pm && JSON.stringify(JSON.parse(pm[2]).ids) === '["111"]' && JSON.parse(pm[2]).modelo_id === "comunicado", "manda só os marcados e o modelo escolhido");
+  ok(pm && JSON.stringify(JSON.parse(pm[2]).ids) === '["111"]' && JSON.parse(pm[2]).modelo_id === "chamada" && JSON.parse(pm[2]).texto === "Olá $ALUNO", "manda só os marcados, o modelo escolhido e o texto da tela");
+
+  // um só modelo/texto para os dois destinos: o seletor "Para quem" só alterna os painéis
+  ok(!$("wa-dest-numero").hidden && $("wa-dest-alunos").hidden, "começa em 'Um número'");
+  $("wa-destino-alunos").click();
+  ok($("wa-dest-numero").hidden && !$("wa-dest-alunos").hidden && $("wa-destino-alunos").classList.contains("ativo"), "alterna para 'Alunos da pré-matrícula'");
+  $("wa-fila-modelo").value = "comunicado"; $("wa-fila-modelo").dispatchEvent(new w.Event("change"));
+  ok($("wa-fila-texto").readOnly && $("wa-fila-texto").value.includes("Texto oficial"), "comunicado oficial: texto só de leitura");
+  $("wa-destino-numero").click(); $("wa-fila-numero").value = "42999991111"; $("wa-fila-por").click(); await esperar();
+  ok(w.__t.some((t) => t.includes("comunicado oficial só vale")), "comunicado não vai para um número avulso");
 
   $("wa-fila-limite").value = "10"; $("wa-fila-salvar-config").click(); await esperar();
   const cfg = chamadas.find((c) => c[1].endsWith("/fila/config"));
