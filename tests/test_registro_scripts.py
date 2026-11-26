@@ -415,10 +415,11 @@ def test_turmas_e_alunos():
 
 def test_extras_de_alunos_trazem_modos_com_ajuda_e_o_rapido_condicional():
     extras = reg.obter("alunos").extras()
-    modo, rapido = extras
+    modo, rapido, cgms = extras
     assert modo["nome"] == "modo" and modo["padrao"] == "basico" and modo["semVazio"] is True
     assert [o["valor"] for o in modo["opcoes"]] == ["basico", "completo"] and all(o["ajuda"] for o in modo["opcoes"])
     assert rapido["visivelSe"] == {"campo": "campo-modo", "valor": "completo"}
+    assert cgms["nome"] == "cgms" and cgms["tipo"] == "texto" and "visivelSe" not in cgms     # vale nos dois modos
 
 
 def test_termos_exige_tema_e_usa_o_nome_da_escola_da_configuracao(monkeypatch):
@@ -518,3 +519,26 @@ def test_gerar_chaves_executa_pela_rota(tmp_path, monkeypatch):
     assert _post(c, "gerar_chaves", turmas=["INFANTIL 4"], modo_teste=True, regenerar=True).status_code == 200
     assert _esperar(c, "gerar_chaves")["status"] == "concluido"
     assert chamadas == [{"modo_teste": True, "turmas_alvo": ["INFANTIL 4"], "regenerar": True}]
+
+
+def test_alunos_com_cgms_repassa_a_selecao_aos_dois_modos():
+    from src.automacao.alunos import coletar_alunos_via_login
+    from src.automacao.alunos_completo import coletar_cadastro_completo_via_login
+    a = reg.obter("alunos")
+    p = a.planejar(Opcoes(), {"cgms": "1234567890, 1234567891"}, {}, {})
+    assert p.funcao is coletar_alunos_via_login and p.kwargs == {"cgms": ["1234567890", "1234567891"]}
+    p = a.planejar(Opcoes(), {"modo": "completo", "rapido": True, "cgms": "1234567890"}, TJ, {})
+    assert p.funcao is coletar_cadastro_completo_via_login
+    assert p.kwargs == {"modo_rapido": True, "cgms": ["1234567890"]}
+    with pytest.raises(ValueError, match="formato inválido"):
+        a.validar_extras({"cgms": "abc"})
+    a.validar_extras({"cgms": ""})                       # em branco = sem seleção
+
+
+def test_sus_aceita_cgm_e_filtra_a_selecao():
+    s = reg.obter("sus")
+    assert "cgm" in s.recursos
+    tj = {"1º Ano": [{"CGM": "1234567890", "Nome": "Ana", "Situação": "Matriculado"},
+                     {"CGM": "1234567891", "Nome": "Bia", "Situação": "Matriculado"}]}
+    p = s.planejar(Opcoes(cgms=("1234567891",)), {}, tj, {})
+    assert p.kwargs == {"cgms": ["1234567891"]}

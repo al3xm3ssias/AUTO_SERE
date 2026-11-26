@@ -106,7 +106,8 @@ AUTOMACOES: dict[str, dict] = {
         "quando": "Para ter a ficha dos alunos atualizada na tela Alunos. Use o modo Completo quando precisar de todos os campos.",
         "antes": ["Executar **Turmas** antes (o modo Completo precisa do `turmas.json`).", "Login do SERE salvo."],
         "resultado": ["Modo Básico grava `alunos.json`; modo Completo grava `alunos_completo.json`.",
-                      "O modo Completo salva aos poucos e registra os erros, então pode ser retomado."],
+                      "O modo Completo salva aos poucos e registra os erros, então pode ser retomado.",
+                      "Com **Só estes CGMs** preenchido, coleta apenas esses alunos e mantém os dados dos demais (é o que a rotina diária faz com os alunos novos)."],
         "cuidados": ["O modo Completo é bem mais lento.", "Duas coletas de Alunos não rodam juntas."],
         "veja_tambem": [R("tela", "alunos"), R("automacao", "turmas")],
     },
@@ -180,7 +181,8 @@ AUTOMACOES: dict[str, dict] = {
                       "A coleta do próximo ano letivo grava `previsao_alunos_<ano>.json`, usado na tela Previsão.",
                       "Com **Enviar os contatos ao Google Contatos** marcado, cada responsável vira um contato no Google (além do CSV): criado na 1ª vez e **atualizado** nas seguintes, sem duplicar. "
                       "Ano vigente: rótulo do ano (ex.: 2026). Só próximo ano: dois rótulos, \"Pré-matrícula <ano>\" e \"Aluno <ano>\". Contatos enviados ficam registrados em `dados/google_contatos.json`.",
-                      "Ao terminar, o sistema pode avisar os responsáveis pelo WhatsApp (cadastro recebido / matrícula aprovada); cada aviso vai uma vez por aluno, e no modo simulado nada sai."],
+                      "Ao terminar, o sistema pode avisar os responsáveis pelo WhatsApp (cadastro recebido / matrícula aprovada); cada aviso vai uma vez por aluno, e no modo simulado nada sai. "
+                      "Marque **Não enviar o comunicado por WhatsApp ao final** para só coletar (a rotina diária usa esta opção)."],
         "cuidados": ["Só lê o site; não altera cadastros no portal. Pode levar vários minutos.",
                      "**Cadastro refeito (Escolas Escolhidas do último cadastro):** se a nossa escola é a **Opção 1**, o fluxo é o normal. "
                      "Se é a **Opção 2 ou 3** e alguma escola anterior ainda **não tem situação**, o aluno **não é registrado** (a escola da Opção 1 é quem cancela ou matricula): "
@@ -421,7 +423,8 @@ AUTOMACOES: dict[str, dict] = {
         "resumo": "Consulta no **SISREG** (fila de espera do SUS de Ponta Grossa), pelo CPF, os encaminhamentos dos alunos escolhidos.",
         "quando": "Para atualizar a tela de Encaminhamentos do SUS.",
         "antes": ["Alunos com CPF no cadastro (execute **Alunos** antes)."],
-        "resultado": ["Grava `alunos_encaminhamento.json`. Os alunos que você não escolheu mantêm o resultado anterior."],
+        "resultado": ["Grava `alunos_encaminhamento.json`. Os alunos que você não escolheu mantêm o resultado anterior.",
+                      "Dá para escolher os alunos por turma, por situação ou pelo CGM."],
         "cuidados": ["A consulta é pública: não precisa de login. Aluno com CPF inválido aparece com o erro dele na tela de Encaminhamentos."],
         "veja_tambem": [R("tela", "encaminhamentos"), R("automacao", "alunos")],
     },
@@ -504,6 +507,18 @@ AUTOMACOES: dict[str, dict] = {
                      "Mãe e data de nascimento é que separam homônimos.",
                      "Com **Tirar do buscas_base.json quem já foi vinculado** (vem marcada), o registro sai de `buscas_base.json` depois de gravado no cadastro de origem; o que foi digitado fica."],
         "veja_tambem": [R("tela", "prematricula")],
+    },
+    "fluxo_geo": {
+        "grupo": "sistema",
+        "resumo": "Coleta no SERE os **alunos direcionados por fluxo/geo** para o próximo ano letivo (Planejamento Escolar → Criar planejamento de turma), com o responsável e o telefone dele.",
+        "quando": "Durante o período de direcionamento, para saber quem a rede mandou para a escola no ano que vem e ligar para o responsável.",
+        "antes": ["Login do SERE salvo."],
+        "resultado": ["Grava `sere_sisgea_<próximo ano>.json` na pasta do ano em uso.",
+                      "A **Previsão** mostra turma, aluno, CGM e responsável; a **Pré matrícula** (botão Direcionados GEO) mostra todos os dados, com o telefone em destaque."],
+        "cuidados": ["Só lê o SERE: não altera nada lá.",
+                     "Direcionado **não é matrícula confirmada**: o responsável pode desistir. Quem some da lista fica marcado como ausente (com a data), nunca é apagado.",
+                     "Se alguma etapa não bater com o total do SERE, a coleta avisa e ninguém é marcado como ausente nessa rodada."],
+        "veja_tambem": [R("tela", "prematricula"), R("tela", "previsao")],
     },
     "gerar_chaves": {
         "grupo": "sistema",

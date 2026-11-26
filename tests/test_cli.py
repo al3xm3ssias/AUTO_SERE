@@ -250,3 +250,13 @@ def test_extras_viram_argumentos(turmas, monkeypatch):
     monkeypatch.setattr(ac, "coletar_cadastro_completo_via_login", fake)
     assert cli.main(["alunos", "--modo", "completo", "--rapido"]) == 0
     assert visto == {"rapido": True}
+
+
+def test_resultado_com_ok_falso_vira_codigo_1(capsys):
+    """Ex.: pré-matrícula com login recusado devolve {"ok": False}: sem isto a rotina diária acharia que deu certo."""
+    from src.comum import cli as cli_mod
+    assert cli_mod._codigo_do_resultado({"ok": False, "resultados": {}}) == 1
+    assert cli_mod._codigo_do_resultado({"ok": True}) == 0
+    assert cli_mod._codigo_do_resultado(None) == 0 and cli_mod._codigo_do_resultado([]) == 0
+    assert cli_mod._codigo_do_resultado({"1234567890": {"ok": False}}) == 0          # dado de aluno, não resultado da automação
+    assert "sem sucesso" in capsys.readouterr().err

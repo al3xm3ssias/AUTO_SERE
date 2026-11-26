@@ -170,9 +170,16 @@ def _executar_plano(plano: reg.Plano) -> int:
         print(f"A execução terminou com status: {getattr(execucao.status, 'value', execucao.status)}", file=sys.stderr)
         return 1
     if plano.tipo == "coroutine":
-        asyncio.run(plano.funcao(**plano.kwargs))
-        return 0
-    plano.funcao(**plano.kwargs)
+        return _codigo_do_resultado(asyncio.run(plano.funcao(**plano.kwargs)))
+    return _codigo_do_resultado(plano.funcao(**plano.kwargs))
+
+
+def _codigo_do_resultado(resultado) -> int:
+    """Automações que devolvem {"ok": False, ...} (ex.: pré-matrícula com login recusado) terminam com código 1: sem
+    isso a rotina diária e qualquer agendador achariam que deu certo."""
+    if isinstance(resultado, dict) and resultado.get("ok") is False:
+        print("A automação terminou sem sucesso (resultado ok=False).", file=sys.stderr)
+        return 1
     return 0
 
 

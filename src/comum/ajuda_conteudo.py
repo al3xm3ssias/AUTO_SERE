@@ -87,6 +87,9 @@ TELAS: dict[str, dict] = {
                  "transferidos, encaminhamentos). Número zerado costuma significar que a automação que coleta aquele "
                  "dado ainda não foi executada.",
         "passos": [
+            "Se aparecer o cartão **Avisos**, ele traz o que a rotina diária encontrou e pede ação: aluno transferido (gerar "
+            "os documentos e enviá-los à escola de destino) ou aluno que sumiu da lista sem constar como transferido (conferir no SERE). "
+            "O aviso se resolve sozinho quando os passos são feitos; ou clique em **Marcar como resolvido**.",
             "Olhe os cartões do alto: total de alunos, meninos, meninas, fila da pré-matrícula e turmas.",
             "Veja os **indicadores complementares** (documentos pendentes, alunos fora do raio, transferidos e "
             "encaminhamentos do SUS) para saber onde ainda há trabalho.",
@@ -95,6 +98,8 @@ TELAS: dict[str, dict] = {
             "Clique em **Atualizar** para recalcular os números.",
         ],
         "elementos": [
+            E("Avisos", "Só aparece quando há algo a fazer: transferidos a documentar e enviar à escola de destino, e saídas a conferir. "
+                        "Cada aviso mostra os passos já feitos (✔) e os que faltam (☐).", "#painel-avisos"),
             E("Última atualização", "Data e hora em que os números foram calculados.", "#ultima-atualizacao"),
             E("Botão Atualizar", "Recalcula todos os números agora.", "#btn-atualizar-painel"),
             E("Cartões principais",

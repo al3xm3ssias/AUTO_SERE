@@ -95,6 +95,22 @@ def _mtime_formatado(nome_arquivo: str) -> Optional[str]:
 # PAINEL PRINCIPAL
 # ============================================================
 
+@api_bp.route("/painel/avisos")
+def painel_avisos_listar():
+    """Avisos abertos da home (rotina diária: transferidos a documentar/enviar, saídas a conferir). Lista vazia = nada a mostrar."""
+    from src.comum import painel_avisos
+    avisos = painel_avisos.listar_abertos(_dados_dir())
+    return jsonify({"avisos": avisos, "total": len(avisos)})
+
+
+@api_bp.route("/painel/avisos/<id_aviso>/resolver", methods=["POST"])
+def painel_avisos_resolver(id_aviso: str):
+    from src.comum import painel_avisos
+    if not painel_avisos.resolver(id_aviso, _dados_dir()):
+        return jsonify({"erro": "Aviso não encontrado."}), 404
+    return jsonify({"ok": True})
+
+
 @api_bp.route("/painel/resumo")
 def painel_resumo():
     """
@@ -674,11 +690,7 @@ def prematricula_cadastros():
     derivada das escolas escolhidas e as turmas de intenção (posição na fila, pontuação). Tentativas antigas
     substituídas por uma nova (aluno que voltou noutra turma) não entram: vale a última, como em BUGS_CONHECIDOS.md.
     """
-    ano_atual = int(_paths.ano_atual())
-    ano_pedido = request.args.get("ano", type=int) or ano_atual
-    if ano_pedido not in (ano_atual, ano_atual + 1):
-        return jsonify({"erro": f"Só há pré-matrícula de {ano_atual} e {ano_atual + 1}."}), 400
-    dados, arquivo, existe = _dados_prematricula_do_ano(ano_pedido, ano_atual)
+    dados = _carregar_json("pre_matricula.json", {})
     dados = dados if isinstance(dados, dict) else {}
     cadastros = dados.get("cadastros") if isinstance(dados.get("cadastros"), dict) else {}
     turmas_intencao = dados.get("turmas_intencao") if isinstance(dados.get("turmas_intencao"), dict) else {}
@@ -716,7 +728,7 @@ def prematricula_cadastros():
         cpf = str(c.get("cpf") or cid)
         com_cadastro.update({str(cid), cpf, str(c.get("tr_id") or "")} - {""})
         escolhas = c.get("escolas_escolhidas") if isinstance(c.get("escolas_escolhidas"), dict) else {}
-        opcoes = _opcoes_com_numero([o for o in (escolhas.get("opcoes") or []) if isinstance(o, dict)])
+        opcoes = [o for o in (escolhas.get("opcoes") or []) if isinstance(o, dict)]
         situacao = _situacao_prematricula(opcoes)
         turma_pedida = escolhas.get("turma") or c.get("turma_matriculada") or ""
         aceita = next((o for o in opcoes if str(o.get("situacao") or "").strip()
@@ -787,42 +799,7 @@ def prematricula_cadastros():
         "contagem": n,
         "total": len(registros),
         "atualizado_em": "" if not atualizado or atualizado.lower().startswith("x") else atualizado,
-        "ano": ano_pedido, "ano_atual": ano_atual, "arquivo": arquivo, "existe": existe,
-        "somente_leitura": ano_pedido != ano_atual,          # a previsão do próximo ano só se consulta; correções valem para o ano em uso
-        "anos": [{"ano": ano_atual, "rotulo": f"{ano_atual}", "detalhe": "ano em uso"},
-                 {"ano": ano_atual + 1, "rotulo": f"{ano_atual + 1}", "detalhe": "próximo ano"}],
     })
-
-
-def _dados_prematricula_do_ano(ano: int, ano_atual: int):
-    """(dados, nome do arquivo, existe). Ano em uso: pre_matricula.json. Próximo ano: previsao_alunos_<ano>.json (mesmo formato)."""
-    if ano == ano_atual:
-        return _carregar_json("pre_matricula.json", {}), "pre_matricula.json", (_dados_dir() / "pre_matricula.json").exists()
-    from src.comum import previsao as _previsao
-    from src.comum.arquivos_json import ArquivoJsonCorrompidoError
-    nome = _previsao.nome_arquivo(ano)
-    try:
-        dados = _previsao.carregar_previsao_alunos(_dados_dir(), ano)
-    except ArquivoJsonCorrompidoError:
-        dados = {}
-    return dados, nome, bool(dados)
-
-
-def _opcoes_com_numero(opcoes: list[dict]) -> list[dict]:
-    """Cada escola escolhida com o número da opção (1ª, 2ª, 3ª) e a marca de qual é a NOSSA escola, na ordem das opções."""
-    try:
-        from src.automacao.pre_matricula import NOME_ESCOLA_ALVO   # import tardio: o módulo carrega o Playwright
-    except Exception:                                              # noqa: BLE001
-        NOME_ESCOLA_ALVO = "Judith Macedo Silveira"
-    alvo = _sem_acento(NOME_ESCOLA_ALVO)
-    saida = []
-    for i, o in enumerate(opcoes, 1):
-        try:
-            n = int(o.get("opcao")) if o.get("opcao") not in (None, "") else i
-        except (TypeError, ValueError):
-            n = i
-        saida.append({**o, "opcao": n, "nossa": bool(alvo) and alvo in _sem_acento(o.get("escola") or "")})
-    return sorted(saida, key=lambda o: o["opcao"])
 
 
 MOTIVO_NAO_PRIMEIRA = "CADASTRO REFEITO: NOSSA ESCOLA NÃO É A 1ª OPÇÃO"
@@ -928,6 +905,23 @@ def prematricula_fila():
     limit = int(request.args.get("limit", 5))
     itens = sorted(_fila_prematricula(), key=_posicao_ordenavel)
     return jsonify({"itens": itens[:limit]})
+
+
+@api_bp.route("/direcionados-geo")
+def direcionados_geo_rota():
+    """
+    "Direcionados GEO": alunos direcionados por fluxo/geo ao próximo ano letivo (sere_sisgea_<ano+1>.json, gravado pela
+    automação "fluxo_geo"). Usado pela Previsão (turma, aluno, CGM, responsável) e pela Pré matrícula (todos os dados).
+    """
+    from src.comum import direcionados_geo as _geo
+    from src.comum.arquivos_json import ArquivoJsonCorrompidoError
+
+    ano = int(_paths.ano_atual()) + 1
+    try:
+        dados = _geo.carregar_direcionados(_dados_dir(), ano)
+    except ArquivoJsonCorrompidoError as exc:
+        return jsonify({"erro": str(exc), "mensagem": str(exc), "ano": ano}), 500
+    return jsonify(dados)
 
 
 @api_bp.route("/previsao")
@@ -1694,6 +1688,7 @@ AUTOMACOES_DISPONIVEIS = [
     {"chave": "termos", "nome": "Gerar termos de ciência", "descricao": "Gera termos de ciência para os funcionários."},
     {"chave": "mapear_pastas", "nome": "Mapear pastas dos alunos", "descricao": "Mapeia e organiza caminhos das pastas dos alunos."},
     {"chave": "mascara", "nome": "Máscara de dados", "descricao": "Aplica máscara em dados sensíveis (LGPD)."},
+    {"chave": "fluxo_geo", "nome": "Direcionados GEO", "descricao": "Coleta no SERE os alunos direcionados por fluxo/geo para o próximo ano letivo (Criar planejamento de turma), com o telefone do responsável. Só lê: não altera nada no SERE. Alimenta a Previsão e a Pré matrícula."},
     {"chave": "base_abc", "nome": "Consulta na Base ABC", "descricao": "Busca o aluno na Base ABC do SERE (nome + data de nascimento + nome da mãe, ou CGM) e registra em buscas_base.json as escolas do histórico escolar. Quem não está na base fica registrado, sem erro. Só lê: não altera nada no SERE."},
     {"chave": "gerar_chaves", "nome": "Gerar chaves de acesso", "descricao": "Gera no SERE a chave de acesso do responsável de cada aluno matriculado e guarda (com o CPF) para a rematrícula usar. Não rematricula ninguém."},
     {"chave": "rematricula", "nome": "Rematrícula alunos no SERE", "descricao": "Realiza rematrícula dos alunos no SERE."},

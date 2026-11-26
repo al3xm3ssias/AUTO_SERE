@@ -21,6 +21,7 @@
     <button class="pill active" type="button" data-pvview="lista">Lista geral</button>
     <button class="pill" type="button" data-pvview="turmas">Por turma</button>
     <button class="pill" type="button" data-pvview="fora">Ficaram de fora <span id="pv-fora-n"></span></button>
+    <button class="pill" type="button" data-pvview="geo">Direcionados GEO <span id="pv-geo-n"></span></button>
   </div>
 
   {# ───────── visão 1: lista geral ───────── #}
@@ -111,6 +112,38 @@
           </table>
           <div class="empty" id="pv-fora-vazio" style="display:none">
             <span data-icon="search"></span><span id="pv-fora-vazio-msg">Nenhum resultado.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ───────── visão 4: direcionados GEO (turma, aluno, CGM, responsável) ───────── #}
+  <div id="pv-view-geo" style="display:none">
+    <div class="card">
+      <div class="card-header">
+        <span data-icon="mapPin" style="color:var(--txt3)"></span>
+        <span class="card-title">Direcionados GEO</span>
+        <span class="card-header-badge" id="pv-geo-cnt">0</span>
+      </div>
+      <div class="card-body">
+        <p class="campo-ajuda" style="margin:0 0 8px">Alunos que a rede direcionou para a escola no próximo ano (Planejamento Escolar do SERE). Direcionado não é matrícula confirmada. Telefone e demais dados: Pré matrícula → Direcionados GEO. <span id="pv-geo-info"></span></p>
+        <div class="fbar">
+          <select class="pv-select" id="pv-geo-turma" title="Mostra só uma turma"></select>
+          <div class="sbox-wrap" style="margin-left:auto">
+            <span data-icon="search"></span>
+            <input type="text" class="sbox" id="pv-geo-busca" placeholder="Buscar nome, CGM, responsável, turma…">
+          </div>
+        </div>
+      </div>
+      <div class="card-body no-pad">
+        <div class="tbl-wrap" style="border:none; border-radius:0">
+          <table>
+            <thead><tr><th>Turma</th><th>Aluno</th><th>CGM</th><th>Responsável</th></tr></thead>
+            <tbody id="pv-geo-tbody"></tbody>
+          </table>
+          <div class="empty" id="pv-geo-vazio" style="display:none">
+            <span data-icon="search"></span><span id="pv-geo-vazio-msg">Nenhum resultado.</span>
           </div>
         </div>
       </div>

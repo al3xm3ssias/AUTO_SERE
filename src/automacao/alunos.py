@@ -86,7 +86,9 @@ Uso:
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+from typing import Iterable, Optional
 
 from playwright.async_api import Error as PlaywrightError, async_playwright
 
@@ -389,7 +391,32 @@ async def _abrir_turma_com_recuperacao(page, turma_id: str) -> bool:
     return False
 
 
-async def get_alunos_da_turma(page, turma_id: str) -> tuple[str, list[dict]]:
+def normalizar_cgms(cgms: Optional[Iterable[str]]) -> Optional[set]:
+    """None/vazio = sem seleção (todos). Senão, o conjunto de CGMs (texto, sem espaços)."""
+    if cgms is None:
+        return None
+    alvo = {str(c).strip() for c in cgms if str(c).strip()}
+    return alvo or None
+
+
+def ler_alunos_existentes(arquivo: Path) -> list[dict]:
+    """alunos.json atual (lista plana); [] se não existir ou estiver ilegível."""
+    try:
+        dados = json.loads(Path(arquivo).read_text(encoding="utf-8"))
+        return dados if isinstance(dados, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def mesclar_alunos(existentes: list[dict], coletados: list[dict]) -> list[dict]:
+    """Coleta seletiva: os registros dos CGMs recém-coletados SUBSTITUEM os antigos (um CGM pode ter mais de um
+    registro, ex.: transferido + retorno); os dos demais CGMs ficam exatamente como estavam."""
+    trocados = {str(a.get("CGM", "")).strip() for a in coletados} - {""}
+    mantidos = [a for a in existentes if str(a.get("CGM", "")).strip() not in trocados]
+    return mantidos + list(coletados)
+
+
+async def get_alunos_da_turma(page, turma_id: str, cgms: Optional[set] = None) -> tuple[str, list[dict]]:
     """
     Abre a turma pelo `turma_id` e coleta o cadastro completo de todos os
     seus alunos (um clique no CGM por aluno, voltando à lista de alunos da
@@ -401,6 +428,9 @@ async def get_alunos_da_turma(page, turma_id: str) -> tuple[str, list[dict]]:
     do aluno em que parou (os já coletados são mantidos). Cada aluno tem até
     MAX_TENTATIVAS_ALUNO tentativas; esgotadas, ele é pulado (logado como
     erro) e a coleta segue. A turma é abandonada após MAX_FALHAS_TURMA falhas.
+
+    SELEÇÃO POR CGM: se `cgms` for informado, só as linhas desses CGMs são abertas (as demais são puladas sem
+    clicar), o que torna a coleta dos alunos novos da rotina diária rápida. Sem `cgms`, coleta a turma inteira.
     """
     alunos: list[dict] = []
 
@@ -422,6 +452,9 @@ async def get_alunos_da_turma(page, turma_id: str) -> tuple[str, list[dict]]:
             linha = aluno_rows.nth(i)
             cgm_link = linha.locator("a[href^='javascript:AoClicarAluno']")
             cgm = (await cgm_link.inner_text(timeout=15_000)).strip()
+            if cgms is not None and cgm not in cgms:
+                i += 1  # fora da seleção: não clica, só segue para a próxima linha
+                continue
             meta = await _ler_meta_linha(linha)  # lido ANTES do clique (a página muda depois)
             dados_aluno = await get_dados_aluno(page, cgm, linha=linha)
             if dados_aluno:
@@ -457,7 +490,8 @@ async def get_alunos_da_turma(page, turma_id: str) -> tuple[str, list[dict]]:
     return turma_id, alunos
 
 
-async def coletar_cadastro_completo_alunos(page, output_file: Path = ALUNOS_JSON) -> list[dict]:
+async def coletar_cadastro_completo_alunos(page, output_file: Path = ALUNOS_JSON,
+                                            cgms: Optional[Iterable[str]] = None) -> list[dict]:
     """
     Orquestra a coleta completa: navega até 'Por Turma', coleta a lista de
     turmas válidas, e para cada uma coleta o cadastro completo de todos os
@@ -472,7 +506,12 @@ async def coletar_cadastro_completo_alunos(page, output_file: Path = ALUNOS_JSON
     Assume que `page` já está autenticada no SERE — quem só quer disparar
     a coleta completa (login + coleta) deve chamar
     coletar_alunos_via_login() em vez desta função diretamente.
+
+    `cgms`: se informado, coleta SÓ esses alunos e MESCLA o resultado no `output_file` existente (os registros
+    dos CGMs coletados são substituídos; todos os outros ficam como estavam). Sem `cgms`, o arquivo é
+    regravado por inteiro, como sempre foi.
     """
+    alvo = normalizar_cgms(cgms)
     await navegar_por_turma(page)
     await page.wait_for_timeout(1000)
 
@@ -482,15 +521,25 @@ async def coletar_cadastro_completo_alunos(page, output_file: Path = ALUNOS_JSON
     print(f"Encontradas {len(turmas)} turmas válidas")
 
     for turma_id in turmas:
-        nome, alunos = await get_alunos_da_turma(page, turma_id)
+        nome, alunos = await get_alunos_da_turma(page, turma_id, cgms=alvo)
         alunos_data.extend(alunos)
         print(f"Turma {nome} → {len(alunos)} alunos")
+
+    if alvo is not None:
+        achados = {str(a.get("CGM", "")).strip() for a in alunos_data}
+        faltou = sorted(alvo - achados)
+        if faltou:
+            log.warning("CGM(s) pedido(s) que não apareceram em nenhuma turma: " + ", ".join(faltou[:20])
+                        + (" …" if len(faltou) > 20 else ""))
+        alunos_data = mesclar_alunos(ler_alunos_existentes(output_file), alunos_data)
 
     log.info(f"Todas as turmas coletadas. Salvando JSON em '{output_file}'...")
     try:
         output_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_file, "w", encoding="utf-8") as f:
+        tmp = output_file.with_suffix(output_file.suffix + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(alunos_data, f, ensure_ascii=False, indent=4)
+        os.replace(tmp, output_file)
         log.info(f"JSON salvo com sucesso em '{output_file}'.")
     except OSError as e:
         log.error(f"ERRO ao salvar JSON: {e}")
@@ -500,7 +549,7 @@ async def coletar_cadastro_completo_alunos(page, output_file: Path = ALUNOS_JSON
     return alunos_data
 
 
-async def coletar_alunos_via_login(output_file: Path = ALUNOS_JSON) -> list[dict]:
+async def coletar_alunos_via_login(output_file: Path = ALUNOS_JSON, cgms: Optional[Iterable[str]] = None) -> list[dict]:
     """
     Ponto de entrada completo: abre o navegador, faz login no SERE, coleta
     o cadastro completo de todos os alunos, salva em `output_file` e fecha
@@ -524,7 +573,7 @@ async def coletar_alunos_via_login(output_file: Path = ALUNOS_JSON) -> list[dict
         await page.wait_for_timeout(3000)
         log.info("Iniciando coleta...")
 
-        resultado = await coletar_cadastro_completo_alunos(page, output_file=output_file)
+        resultado = await coletar_cadastro_completo_alunos(page, output_file=output_file, cgms=cgms)
 
         log.info("Coleta finalizada!")
         await browser.close()

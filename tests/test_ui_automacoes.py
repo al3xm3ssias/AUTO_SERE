@@ -106,7 +106,7 @@ def test_alunos_modo_basico_e_o_padrao_e_explica_cada_modo(pagina):
         "Básico (alunos.py)", "Completo (alunos_completo.py)"]                # sem opção vazia "Selecione..."
     assert "tela de consulta" in pg.inner_text("#campo-modo-ajuda")
     assert not pg.locator("#campo-rapido").is_visible()                       # "Modo rápido" é só do completo
-    assert _executar_e_capturar(pg, "alunos") == {"automacao": "alunos", "modo": "basico", "rapido": False}
+    assert _executar_e_capturar(pg, "alunos") == {"automacao": "alunos", "modo": "basico", "rapido": False, "cgms": ""}
     pg.wait_for_function("document.getElementById('exec-log')?.textContent.includes('LINHA-BASICO')")
 
 
@@ -118,7 +118,7 @@ def test_alunos_modo_completo_mostra_o_modo_rapido_e_envia_as_escolhas(pagina):
     assert pg.locator("#campo-rapido").is_visible()
     assert pg.locator("#campo-rapido").is_checked() is False
     pg.check("#campo-rapido")
-    assert _executar_e_capturar(pg, "alunos") == {"automacao": "alunos", "modo": "completo", "rapido": True}
+    assert _executar_e_capturar(pg, "alunos") == {"automacao": "alunos", "modo": "completo", "rapido": True, "cgms": ""}
     pg.wait_for_function("document.getElementById('exec-log')?.textContent.includes('LINHA-COMPLETO rapido=True')")
 
 

@@ -436,6 +436,8 @@ async function carregarPainel() {
     console.warn("Painel: usando dados de exemplo (endpoint ainda não conectado)", e);
   }
 
+  await carregarAvisosPainel();
+
   try {
     const fila = await apiGet("/prematricula/fila?limit=5");
     const tbody = document.getElementById("tbody-painel-prematricula");   // (id próprio: "tbody-prematricula" é da tela Pré-matrícula)
@@ -452,6 +454,45 @@ async function carregarPainel() {
     console.warn("Fila pré-matrícula: endpoint ainda não conectado", e);
   }
 }
+
+/** Avisos da rotina diária na home: só aparece o cartão quando há algo a fazer. */
+async function carregarAvisosPainel() {
+  const cartao = document.getElementById("painel-avisos");
+  const lista = document.getElementById("painel-avisos-lista");
+  if (!cartao || !lista) return;
+  try {
+    const { avisos } = await apiGet("/painel/avisos");
+    cartao.hidden = !(avisos || []).length;
+    lista.innerHTML = (avisos || []).map((a) => `
+      <div class="painel-aviso" data-aviso="${escaparHtml(a.id)}" style="padding:10px 0; border-bottom:1px solid var(--border, rgba(128,128,128,.25))">
+        <div style="display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap">
+          <div style="flex:1; min-width:240px">
+            <strong>${escaparHtml(a.titulo)}</strong>
+            <div style="color:var(--txt3)">${escaparHtml(a.texto)}</div>
+            <ul style="margin:6px 0 0 18px; padding:0">
+              ${(a.passos || []).map((p) => `<li>${p.feito ? "✔" : "☐"} ${escaparHtml(p.texto)}</li>`).join("")}
+            </ul>
+          </div>
+          <button class="btn-sm" data-aviso-resolver="${escaparHtml(a.id)}">Marcar como resolvido</button>
+        </div>
+      </div>`).join("");
+  } catch (e) {
+    console.warn("Avisos do painel: endpoint ainda não conectado", e);
+  }
+}
+
+document.addEventListener("click", async (ev) => {
+  const botao = ev.target.closest("[data-aviso-resolver]");
+  if (!botao) return;
+  botao.disabled = true;
+  try {
+    await apiPost(`/painel/avisos/${encodeURIComponent(botao.dataset.avisoResolver)}/resolver`, {});
+    await carregarAvisosPainel();
+  } catch (e) {
+    botao.disabled = false;
+    toast(e.message || "Não foi possível marcar o aviso como resolvido.");
+  }
+});
 
 /* ---------- Tabelas genéricas (prematricula / funcionarios / encaminhamentos / fora-do-raio) ---------- */
 
@@ -1415,7 +1456,7 @@ async function carregarFuncionarios() {
 
 /* ---------- Pré-matrícula (mesma tela "Pré-Matrícula" do index.html; os dados podem ser corrigidos à mão) ---------- */
 
-const pmState = { tab: "geral", search: "", pageSize: 25, page: 1, sort: { col: "nome_aluno", dir: 1 }, ano: null };
+const pmState = { tab: "geral", search: "", pageSize: 25, page: 1, sort: { col: "nome_aluno", dir: 1 } };
 let _pmDados = null;
 
 const _pmSituacaoBadge = (s) => (s === "matriculado" ? badge("Matriculado", "bg-lime") : s === "cancelado" ? badge("Cancelado", "bg-rose")
@@ -1427,30 +1468,17 @@ function _pmFiltrados() {
   let dados = _pmDados.cadastros;
   const aba = { matriculados: "matriculado", cancelados: "cancelado", pendentes: "pendente", analise: "analise" }[pmState.tab];
   if (aba) dados = dados.filter((c) => c.situacao === aba);
-  if (q) dados = dados.filter((c) => [c.nome_aluno, c.nome_responsavel, c.cpf, c.turma_matriculada, _pmOpcoesTexto(c)].some((v) => semAcento(v).includes(q)));
+  if (q) dados = dados.filter((c) => [c.nome_aluno, c.nome_responsavel, c.cpf, c.turma_matriculada].some((v) => semAcento(v).includes(q)));
   const { col, dir } = pmState.sort;
   const chave = (c) => (col === "_turmas" ? c.intencoes.map((i) => i.turma).join(", ") : c[col]);
   return [...dados].sort((a, b) => String(chave(a) || "").localeCompare(String(chave(b) || ""), "pt-BR") * dir);
-}
-
-/** "1ª Escola A (situação) · 2ª Escola B · 3ª Escola C" — texto simples (busca e exportação). */
-function _pmOpcoesTexto(c) {
-  return (c.opcoes || []).map((o) => `${o.opcao}ª ${o.escola || "—"}${o.situacao ? ` (${o.situacao})` : ""}`).join(" · ");
-}
-
-/** As opções de escola de um cadastro, uma por linha; a NOSSA escola em destaque. */
-function _pmOpcoesCelula(c) {
-  if (!(c.opcoes || []).length) return '<span style="color:var(--txt3); font-size:.75rem">—</span>';
-  return c.opcoes.map((o) => `<div style="font-size:.72rem;line-height:1.35;white-space:normal"><span class="badge bg-muted">${escaparHtml(o.opcao)}ª</span> `
-    + `${o.nossa ? `<b style="color:var(--cyan)" title="Nossa escola">${escaparHtml(o.escola || "—")}</b>` : escaparHtml(o.escola || "—")}`
-    + `${o.situacao ? ` <small style="color:var(--txt3)">${escaparHtml(o.situacao)}</small>` : ""}</div>`).join("");
 }
 
 function _pmCabecalho() {
   const base = '<th style="width:36px"></th><th data-pms="nome_aluno">Aluno</th><th>CPF</th><th>Responsável</th>';
   if (pmState.tab === "matriculados") return `<tr>${base}<th>Turma</th></tr>`;
   if (pmState.tab === "cancelados") return `<tr>${base}<th>Motivo da Recusa</th></tr>`;
-  return `<tr>${base}<th>Telefone</th><th data-pms="situacao">Situação</th><th data-pms="_turmas">Turma(s) de Intenção</th><th>Escolas (1ª · 2ª · 3ª opção)</th></tr>`;
+  return `<tr>${base}<th>Telefone</th><th data-pms="situacao">Situação</th><th data-pms="_turmas">Turma(s) de Intenção</th></tr>`;
 }
 
 function _pmDetalhe(c) {
@@ -1462,10 +1490,10 @@ function _pmDetalhe(c) {
         `<tr><td>${escaparHtml(i.turma)}</td><td class="td-mono">${escaparHtml(i.pos ?? "—")}</td><td class="td-mono">${escaparHtml(i.pontuacao ?? "—")}</td><td>${escaparHtml(i.tipo ?? "—")}</td><td>${i.presente_na_ultima_coleta === true ? "Sim" : i.presente_na_ultima_coleta === false ? "Não" : "—"}</td></tr>`).join("")}</tbody></table></div>`
     : '<div class="al-field-group" style="grid-column:1/-1"><span class="al-field-val" style="color:var(--txt3)">Sem registros em turmas de intenção.</span></div>';
   const opcoes = c.opcoes.length
-    ? `<div style="grid-column:1/-1" class="tbl-wrap"><table><thead><tr><th>Opção</th><th>Escola</th><th>Situação</th><th>Motivo / observação</th></tr></thead><tbody>${c.opcoes.map((o) =>
-        `<tr><td class="td-mono">${escaparHtml(o.opcao)}ª</td><td>${o.nossa ? `<b style="color:var(--cyan)">${escaparHtml(o.escola || "—")}</b> <small style="color:var(--txt3)">(nossa escola)</small>` : escaparHtml(o.escola || "—")}</td><td>${escaparHtml(o.situacao || "—")}</td><td>${escaparHtml(o.motivo_cancelamento || o.observacao || "—")}</td></tr>`).join("")}</tbody></table></div>`
+    ? `<div style="grid-column:1/-1" class="tbl-wrap"><table><thead><tr><th>Escola</th><th>Situação</th><th>Motivo / observação</th></tr></thead><tbody>${c.opcoes.map((o) =>
+        `<tr><td>${escaparHtml(o.escola || "—")}</td><td>${escaparHtml(o.situacao || "—")}</td><td>${escaparHtml(o.motivo_cancelamento || o.observacao || "—")}</td></tr>`).join("")}</tbody></table></div>`
     : "";
-  const botaoEditar = !(_pmDados && _pmDados.somente_leitura) && /^\d+$/.test(String(c.cpf || ""))
+  const botaoEditar = /^\d+$/.test(String(c.cpf || ""))
     ? `<div class="al-field-group" style="grid-column:1/-1"><button class="btn-sm" data-pm-editar="${escaparHtml(c.cpf)}" title="Corrige nome, telefone, e-mail etc. A correção vale também nas próximas coletas">✎ Corrigir dados</button>` +
       `${c.corrigidos && c.corrigidos.length ? ` <span class="badge bg-blue">corrigido à mão: ${escaparHtml(c.corrigidos.join(", "))}</span>` : ""}</div>` : "";
   const analise = c.situacao === "analise"
@@ -1562,12 +1590,11 @@ function renderPmRows() {
     (p) => { pmState.page = p; renderPmRows(); });
   if (!total) {
     _carregarVazio("pm-tbody", "pm-empty", "pm-empty-msg", _pmDados.cadastros.length ? "Nenhum resultado."
-      : (_pmDados.somente_leitura ? `Ainda não existe ${_pmDados.arquivo} (a coleta do próximo ano letivo ainda não rodou).`
-        : 'Nenhum cadastro de pré-matrícula coletado. Use "Atualizar dados" para rodar a coleta.'));
+      : 'Nenhum cadastro de pré-matrícula coletado. Use "Atualizar dados" para rodar a coleta.');
     return;
   }
   document.getElementById("pm-empty").style.display = "none";
-  const colspan = ["geral", "pendentes", "analise"].includes(pmState.tab) ? 8 : 5;
+  const colspan = ["geral", "pendentes", "analise"].includes(pmState.tab) ? 7 : 5;
   document.getElementById("pm-tbody").innerHTML = todos.slice(inicio, inicio + pmState.pageSize).map((c, i) => {
     const rowId = `pm-det-${inicio + i}`;
     const comum = `<td style="text-align:center"><button class="al-expand-btn" data-btn="${rowId}" data-i="${inicio + i}" title="Ver cadastro completo">+</button></td>
@@ -1577,7 +1604,7 @@ function renderPmRows() {
     if (pmState.tab === "matriculados") resto = `<td>${escaparHtml(c.turma_matriculada || "—")}</td>`;
     else if (pmState.tab === "cancelados") resto = `<td style="white-space:pre-line">${escaparHtml(c.motivo_cancelamento || "—")}</td>`;
     else resto = `<td class="td-mono" style="font-size:.75rem">${escaparHtml(c.telefone)}</td><td>${_pmSituacaoBadge(c.situacao)}${c.situacao === "analise" && (c.encaminhado_de || []).length ? `<small style="display:block;color:var(--txt3)">${c.encaminhado_de.map((o) => escaparHtml(`${o.opcao}ª: ${o.situacao || "—"}`)).join(" · ")}</small>` : ""}</td>
-      <td>${c.intencoes.length ? c.intencoes.map((x) => `<span class="badge bg-muted">${escaparHtml(x.turma)}${x.pos ? " · #" + escaparHtml(x.pos) : ""}</span>`).join(" ") : '<span style="color:var(--txt3); font-size:.75rem">—</span>'}</td><td>${_pmOpcoesCelula(c)}</td>`;
+      <td>${c.intencoes.length ? c.intencoes.map((x) => `<span class="badge bg-muted">${escaparHtml(x.turma)}${x.pos ? " · #" + escaparHtml(x.pos) : ""}</span>`).join(" ") : '<span style="color:var(--txt3); font-size:.75rem">—</span>'}</td>`;
     return `<tr>${comum}${resto}</tr><tr class="al-detail-row" id="${rowId}"><td colspan="${colspan}"><div class="al-detail-inner"></div></td></tr>`;
   }).join("");
   ligarExpansao(document.getElementById("pm-tbody"), (i) => _pmDetalhe(todos[i]));
@@ -1718,51 +1745,17 @@ function ligarPainelExecucaoPm() {
   _pmDesenharEtapas([], "nunca_executado");
 }
 
-/** Abas por ano letivo (ano em uso e próximo ano). O próximo ano é só consulta: lê previsao_alunos_<ano>.json. */
-function _pmDesenharAnos() {
-  const sec = document.getElementById("sec-prematricula");
-  const anos = _pmDados.anos || [];
-  const caixa = document.getElementById("pm-anos");
-  caixa.innerHTML = anos.map((a) => `<button class="pill${a.ano === _pmDados.ano ? " active" : ""}" data-pmano="${a.ano}" role="tab" `
-    + `aria-selected="${a.ano === _pmDados.ano}">${escaparHtml(a.rotulo)} <small style="opacity:.7">${escaparHtml(a.detalhe)}</small></button>`).join("");
-  document.getElementById("pm-titulo").textContent = `Cadastros de Pré-Matrícula ${_pmDados.ano}`;
-  const aviso = document.getElementById("pm-ano-aviso");
-  aviso.hidden = !_pmDados.somente_leitura;
-  aviso.textContent = _pmDados.somente_leitura
-    ? `Somente consulta: cadastros do próximo ano letivo (${_pmDados.arquivo}). Abra um aluno (+) para ver todas as escolas escolhidas, a 2ª e a 3ª opção.`
-    : "";
-  const executar = document.getElementById("pm-btn-executar");
-  if (executar) executar.style.display = _pmDados.somente_leitura ? "none" : "";
-  const painel = document.getElementById("pm-exec");
-  if (painel && _pmDados.somente_leitura) painel.style.display = "none";
-  if (caixa.dataset.ligada !== "1") {
-    caixa.dataset.ligada = "1";
-    caixa.addEventListener("click", (e) => {
-      const b = e.target.closest("[data-pmano]");
-      if (!b) return;
-      const ano = parseInt(b.dataset.pmano, 10);
-      if (ano === (_pmDados && _pmDados.ano)) return;
-      pmState.ano = ano === _pmDados.ano_atual ? null : ano;
-      pmState.tab = "geral"; pmState.page = 1; pmState.search = "";
-      document.getElementById("pm-search").value = "";
-      sec.querySelectorAll("[data-pmtab]").forEach((x) => x.classList.toggle("active", x.dataset.pmtab === "geral"));
-      carregarPreMatricula();
-    });
-  }
-}
-
 async function carregarPreMatricula() {
   const sec = document.getElementById("sec-prematricula");
   ligarAcoesTela("prematricula");
   ligarPainelExecucaoPm();
   _pmExecSincronizar();
   try {
-    _pmDados = await apiGet("/prematricula/cadastros" + (pmState.ano ? `?ano=${pmState.ano}` : ""));
+    _pmDados = await apiGet("/prematricula/cadastros");
     const colunas = [{ chave: "nome_aluno", label: "Aluno" }, { chave: "cpf", label: "CPF" }, { chave: "nome_responsavel", label: "Responsável" },
-      { chave: "telefone", label: "Telefone" }, { chave: "situacao", label: "Situação" }, { chave: "_turmas", label: "Turma(s) de intenção" },
-      { chave: "_opcoes", label: "Escolas (1ª · 2ª · 3ª opção)" }];
+      { chave: "telefone", label: "Telefone" }, { chave: "situacao", label: "Situação" }, { chave: "_turmas", label: "Turma(s) de intenção" }];
     _tabelas.prematricula = { colunas, linhas: _pmDados.cadastros, extra: _pmDados };
-    _FILTRO_CUSTOM.prematricula = () => _pmFiltrados().map((c) => ({ ...c, _turmas: c.intencoes.map((i) => `${i.turma}${i.pos ? " #" + i.pos : ""}`).join(" | "), _opcoes: _pmOpcoesTexto(c) }));
+    _FILTRO_CUSTOM.prematricula = () => _pmFiltrados().map((c) => ({ ...c, _turmas: c.intencoes.map((i) => `${i.turma}${i.pos ? " #" + i.pos : ""}`).join(" | ") }));
   } catch (e) {
     _pmDados = { cadastros: [] };
     _carregarVazio("pm-tbody", "pm-empty", "pm-empty-msg", "Não foi possível carregar /prematricula/cadastros.");
@@ -1770,7 +1763,6 @@ async function carregarPreMatricula() {
     return;
   }
   desenharExtrasTabela("prematricula", _pmDados);
-  _pmDesenharAnos();
   const n = _pmDados.contagem || {};
   const rotulos = { geral: `Geral (${_pmDados.total})`, matriculados: `Matriculados (${n.matriculado || 0})`, cancelados: `Cancelados (${n.cancelado || 0})`, pendentes: `Pendentes (${n.pendente || 0})`, analise: `Fila de análise (${n.analise || 0})` };
   sec.querySelectorAll("[data-pmtab]").forEach((b) => { b.textContent = rotulos[b.dataset.pmtab]; });

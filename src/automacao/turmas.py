@@ -84,6 +84,7 @@ Uso:
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from playwright.async_api import async_playwright
@@ -295,6 +296,14 @@ async def coletar_turmas_e_alunos(page, output_file: Path = TURMAS_JSON) -> dict
         resultado[nome] = alunos
         log.info(f"Turma '{nome}' finalizada → {len(alunos)} aluno(s).")
 
+    # Coleta vazia (nenhum aluno em nenhuma turma) quase sempre é falha do SERE ou da navegação, não uma escola sem
+    # alunos: mantém o turmas.json anterior e NÃO mexe na ponte nem na fila de transferidos (que partem deste resultado).
+    if not any(resultado.values()):
+        msg = ("Coleta de turmas sem nenhum aluno: o turmas.json anterior foi mantido e nada foi alterado "
+               "(ponte de matrículas e fila de transferidos incluídas).")
+        log.error(msg)
+        raise RuntimeError(msg)
+
     # Ponte de IDs de matrícula (dados/<ano>/turmas_relacional.json): lembra, a cada coleta, quando cada
     # período começou e terminou (o SERE só mostra UMA data; ao transferir, a de entrada some) e acrescenta
     # ID_MATRICULA / Data Entrada / Data Transferência às linhas. "Data Matricula" NÃO muda.
@@ -306,8 +315,10 @@ async def coletar_turmas_e_alunos(page, output_file: Path = TURMAS_JSON) -> dict
     log.info(f"Todas as turmas coletadas. Salvando JSON em '{output_file}'...")
     try:
         output_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_file, "w", encoding="utf-8") as f:
+        tmp = output_file.with_suffix(output_file.suffix + ".tmp")        # grava ao lado e troca: queda no meio não corta o arquivo
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(resultado, f, ensure_ascii=False, indent=4)
+        os.replace(tmp, output_file)
         log.info(f"JSON salvo com sucesso em '{output_file}'.")
     except OSError as exc:
         log.error(f"ERRO ao salvar JSON: {exc}")

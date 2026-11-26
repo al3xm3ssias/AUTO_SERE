@@ -321,6 +321,10 @@
           <span class="nav-item-icon" data-icon="fileSearch"></span>
           <span class="nav-item-label">Consulta na Base ABC</span>
         </div>
+        <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="fluxo_geo">
+          <span class="nav-item-icon" data-icon="mapPin"></span>
+          <span class="nav-item-label">Direcionados GEO</span>
+        </div>
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="gerar_chaves">
           <span class="nav-item-icon" data-icon="key"></span>
           <span class="nav-item-label">Gerar chaves de acesso</span>
@@ -436,6 +440,7 @@
 <script src="{{ url_for('web.static', filename='js/vendor/jspdf.umd.min.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/corte_etario.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/previsao.js') }}"></script>
+<script src="{{ url_for('web.static', filename='js/direcionados_geo.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/whatsapp.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/ajuda.js') }}"></script>
 <script src="{{ url_for('web.static', filename='js/sw-registro.js') }}" data-sw="{{ url_for('web.service_worker') }}"></script>

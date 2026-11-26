@@ -29,7 +29,7 @@ def planos(monkeypatch):
 def test_componentes_expoem_modo_analise_e_pular_pendentes(c):
     r = c.get(f"/web/api/automacoes/{CHAVE}/componentes").get_json()
     assert r["registrado"] and r["recursos"] == ["debug"] and not r["confirmar"]
-    assert [e["nome"] for e in r["extras"]] == ["pular_pendentes", "enviar_google_contatos", "simular_google_contatos"]
+    assert [e["nome"] for e in r["extras"]] == ["pular_pendentes", "enviar_google_contatos", "simular_google_contatos", "sem_whatsapp"]
     assert r["ajuda_debug"]
 
 
@@ -51,3 +51,8 @@ def test_nao_inicia_duas_vezes_ao_mesmo_tempo(c, planos, monkeypatch):
                                                  "iniciado_em": "x", "resultado": None, "execucao": None})
     resp = c.post(f"/web/api/automacoes/{CHAVE}/executar", json={})
     assert resp.status_code == 409 and "já está em execução" in resp.get_json()["mensagem"] and planos == []
+
+
+def test_executar_sem_whatsapp_repassa_avisar_whatsapp_falso(c, planos):
+    c.post(f"/web/api/automacoes/{CHAVE}/executar", json={"sem_whatsapp": True})
+    assert planos[0][1].kwargs == {"analise": False, "pular_pendentes": False, "avisar_whatsapp": False}

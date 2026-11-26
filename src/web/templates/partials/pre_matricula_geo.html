@@ -1,0 +1,38 @@
+{# "Direcionados GEO" dentro da Pré matrícula: todos os dados de sere_sisgea_<ano>.json, com o telefone do responsável em destaque.
+   Dados: GET /web/api/direcionados-geo. JS: static/js/direcionados_geo.js (botão ao lado das abas de ano). #}
+<div id="pm-geo" style="display:none">
+  <div class="card">
+    <div class="card-header">
+      <span data-icon="mapPin" style="color:var(--txt3)"></span>
+      <span class="card-title">Direcionados GEO <span id="pg-ano"></span></span>
+      <span class="card-header-badge" id="pg-cnt">0</span>
+      <button class="btn-sm" id="pg-exportar" type="button" style="margin-left:auto"><span data-icon="download"></span> Exportar</button>
+    </div>
+    <div class="card-body">
+      <p class="campo-ajuda" style="margin:0 0 8px">Alunos que a rede direcionou para a escola no próximo ano (SERE → Planejamento Escolar). Direcionado não é matrícula
+        confirmada: o responsável pode desistir. Atualize com a automação "Direcionados GEO". <span id="pg-info"></span></p>
+      <div class="stat-grid" id="pg-cartoes"></div>
+      <div class="fbar">
+        <button class="pill active" type="button" data-pgtab="todos">Todos</button>
+        <button class="pill" type="button" data-pgtab="com_telefone">Com telefone</button>
+        <button class="pill" type="button" data-pgtab="sem_telefone">Sem telefone</button>
+        <button class="pill" type="button" data-pgtab="ausentes">Ausentes da lista</button>
+        <select class="pv-select" id="pg-etapa" title="Mostra só uma etapa"></select>
+        <div class="sbox-wrap" style="margin-left:auto">
+          <span data-icon="search"></span>
+          <input type="text" class="sbox" id="pg-busca" placeholder="Buscar aluno, responsável, telefone, CGM, escola…">
+        </div>
+      </div>
+    </div>
+    <div class="card-body no-pad">
+      <div class="tbl-wrap" style="border:none; border-radius:0">
+        <table>
+          <thead><tr><th>Telefone do responsável</th><th>Responsável</th><th>Aluno</th><th>CGM</th><th>Etapa / turma</th><th>Escola de origem</th>
+            <th>Matrícula</th><th>Documentos pendentes</th><th>Na lista</th></tr></thead>
+          <tbody id="pg-tbody"></tbody>
+        </table>
+        <div class="empty" id="pg-vazio" style="display:none"><span data-icon="search"></span><span id="pg-vazio-msg">Nenhum resultado.</span></div>
+      </div>
+    </div>
+  </div>
+</div>

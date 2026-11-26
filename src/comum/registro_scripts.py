@@ -208,6 +208,8 @@ def _plano_prematricula(o, p, tj, ctx) -> Plano:
         kwargs["enviar_google_contatos"] = True
     if p.get("simular_google_contatos"):
         kwargs["simular_google_contatos"] = True
+    if p.get("sem_whatsapp"):
+        kwargs["avisar_whatsapp"] = False
     return Plano("coroutine", processo_completo_via_login, kwargs)
 
 
@@ -525,28 +527,51 @@ def _extras_alunos() -> list[dict]:
         {"tipo": "caixa", "id": "campo-rapido", "nome": "rapido", "label": "Modo rápido",
          "descricao": "Pula os alunos já coletados nos últimos 2 meses e coleta só o que falta ou está desatualizado.",
          "visivelSe": {"campo": "campo-modo", "valor": "completo"}},
+        {"tipo": "texto", "id": "campo-cgms", "nome": "cgms", "label": "Só estes CGMs (opcional)",
+         "placeholder": "em branco = todos · ex.: 1234567890, 1234567891",
+         "descricao": "Coleta apenas estes alunos e mantém os dados dos demais. É o que a rotina diária usa para "
+                      "consultar só os alunos novos."},
     ]
+
+
+def _cgms_do_payload(p: dict) -> tuple[str, ...]:
+    """CGMs do campo opcional \"cgms\" das coletas de alunos (vazio = sem seleção). Levanta ValueError se inválidos."""
+    from src.comum.opcoes_execucao import analisar_cgms
+    r = analisar_cgms(p.get("cgms"))
+    if r.invalidos:
+        raise ValueError("CGM com formato inválido: " + ", ".join(r.invalidos[:5]) + (" …" if len(r.invalidos) > 5 else "")
+                         + " (use só números, de 5 a 12 dígitos).")
+    return tuple(r.validos)
+
+
+def _validar_alunos(p: dict) -> None:
+    _cgms_do_payload(p)
 
 
 def _plano_alunos(o, p, tj, ctx) -> Plano:
     modo = str(p.get("modo") or "basico").strip().lower()
+    cgms = list(_cgms_do_payload(p)) or None
     if modo == "basico":
         from src.automacao.alunos import coletar_alunos_via_login
-        return Plano("coroutine", coletar_alunos_via_login)
+        return Plano("coroutine", coletar_alunos_via_login, {"cgms": cgms} if cgms else {})
     if modo == "completo":
         if not tj:
             raise ValueError("O modo completo usa a lista de alunos de turmas.json, que ainda não existe ou está vazio: "
                              "execute primeiro a automação 'Turmas'.")
         from src.automacao.alunos_completo import coletar_cadastro_completo_via_login
-        return Plano("coroutine", coletar_cadastro_completo_via_login, {"modo_rapido": bool(p.get("rapido", False))})
+        kwargs = {"modo_rapido": bool(p.get("rapido", False))}
+        if cgms:
+            kwargs["cgms"] = cgms
+        return Plano("coroutine", coletar_cadastro_completo_via_login, kwargs)
     raise ValueError(f"Modo '{modo}' desconhecido: use 'basico' ou 'completo'.")
 
 
 def _plano_sus(o, p, tj, ctx) -> Plano:
     from src.automacao.sisreg import consultar_encaminhamentos_sisreg
-    sel = selecionar_alunos(tj, turmas=o.turmas, matriculados=o.matriculados, transferidos=o.transferidos)
+    sel = selecionar_alunos(tj, turmas=o.turmas, matriculados=o.matriculados, transferidos=o.transferidos,
+                            cgms=o.cgms)
     if not sel.alunos:
-        raise ValueError("Nenhum aluno na seleção: confira a turma e se Matriculados/Transferidos estão marcados.")
+        raise ValueError("Nenhum aluno na seleção: confira a turma, os CGMs e se Matriculados/Transferidos estão marcados.")
     return Plano("coroutine", consultar_encaminhamentos_sisreg, {"cgms": [a["CGM"] for a in sel.alunos]},
                  f"[OPÇÕES] consultando {sel.total} aluno(s); os demais mantêm o resultado anterior")
 
@@ -943,6 +968,17 @@ def _plano_base_abc(o, p, tj, ctx) -> Plano:
                  f"[OPÇÕES] {1 if o.modo_teste else len(consultas)} aluno(s) na Base ABC")
 
 
+def _plano_fluxo_geo(o, p, tj, ctx) -> Plano:
+    from src.automacao.fluxo_geo import fluxo_geo_via_login
+    return Plano("coroutine", fluxo_geo_via_login, {"mostrar_navegador": bool(p.get("mostrar_navegador", False))},
+                 "[OPÇÕES] direcionados GEO do próximo ano letivo")
+
+
+def _extras_fluxo_geo() -> list[dict]:
+    return [{"tipo": "caixa", "id": "campo-mostrar-navegador-geo", "nome": "mostrar_navegador", "label": "Mostrar o navegador",
+             "descricao": "Abre a janela do navegador para acompanhar a coleta."}]
+
+
 def _args_avisos(p: dict) -> dict:
     return {"publico": p.get("publico"), "canal": p.get("canal") or "email", "modo": p.get("modo") or "simular",
             "assunto": p.get("assunto"), "mensagem": p.get("mensagem"),
@@ -1171,7 +1207,13 @@ registrar(Script("prematricula_completa", (_D,), _plano_prematricula,
                                  {"tipo": "caixa", "id": "campo-google-contatos-simulacao", "nome": "simular_google_contatos",
                                   "label": "Simulação do Google Contatos (não envia nada)",
                                   "padrao": False,
-                                  "descricao": "Só mostra quantos contatos seriam criados e atualizados; não fala com o Google."}]))
+                                  "descricao": "Só mostra quantos contatos seriam criados e atualizados; não fala com o Google."},
+                                 {"tipo": "caixa", "id": "campo-sem-whatsapp", "nome": "sem_whatsapp",
+                                  "label": "Não enviar o comunicado por WhatsApp ao final",
+                                  "padrao": False,
+                                  "descricao": "A pré-matrícula termina avisando por WhatsApp os responsáveis dos alunos matriculados "
+                                               "(se estiver ligado em config_usuario.json). Marque para só coletar, sem avisar. "
+                                               "É o que a rotina diária usa."}]))
 
 registrar(Script("transferidos_fila", (), _plano_transferidos_fila, validar_extras=_validar_data_corte,
                  extras=lambda: [_extra_data_corte(),
@@ -1236,6 +1278,8 @@ registrar(Script("parecer_fund", (_T, _S, _C, _TE), _plano_parecer_fund,
 registrar(Script("base_abc", (_TE,), _plano_base_abc, validar_extras=_validar_base_abc, extras=_extras_base_abc,
                  ajuda_teste="Consulta só o primeiro aluno da lista, para você conferir a busca antes de consultar todos."))
 
+registrar(Script("fluxo_geo", (), _plano_fluxo_geo, extras=_extras_fluxo_geo))
+
 registrar(Script("avisos", (), _plano_avisos, validar_extras=_validar_avisos, extras=_extras_avisos,
                  previa=_previa_avisos, confirmar_quando=("modo", "enviar"),
                  aviso_confirmacao="Isto ENVIA e-mails de verdade aos destinatários. Depois de enviado não dá para desfazer. "
@@ -1243,10 +1287,10 @@ registrar(Script("avisos", (), _plano_avisos, validar_extras=_validar_avisos, ex
 
 # ── coletas e relatórios (sem opções compartilhadas, ou só as próprias) ──
 registrar(Script("turmas", (), _plano_turmas))
-registrar(Script("alunos", (), _plano_alunos, extras=_extras_alunos))
+registrar(Script("alunos", (), _plano_alunos, extras=_extras_alunos, validar_extras=_validar_alunos))
 registrar(Script("funcionarios", (), _plano_funcionarios, extras=_extras_funcionarios))
 registrar(Script("vinculos", (), _plano_vinculos, validar_extras=_validar_vinculos, extras=_extras_vinculos))
-registrar(Script("sus", (_T, _S), _plano_sus))
+registrar(Script("sus", (_T, _S, _C), _plano_sus))
 registrar(Script("sheets", (_T,), _plano_sheets, confirmar=True, validar_extras=_validar_sheets, extras=_extras_sheets,
                  previa=_previa_sheets,
                  aviso_confirmacao="Cria ou altera uma planilha do Google Sheets (só as células que mudaram; nada é apagado nem "
@@ -1333,6 +1377,7 @@ CONFIGS_DOS_SCRIPTS: dict[str, tuple[str, ...]] = {
     "parecer_rco": (_ANO, _RCO),
     "parecer_planilha": (_ANO, _ESC, _PLAN, _GOOG),
     "base_abc": (_ANO, _SERE, _ESC),
+    "fluxo_geo": (_ANO, _SERE, _ESC),
     # planilhas, avisos e utilitários
     "sheets": (_ANO, _ESC, _PLAN, _GOOG),
     "planilha_modelo": (_ANO, _PLAN, _GOOG),
@@ -1353,7 +1398,7 @@ NAVEGADOR_DOS_SCRIPTS: dict[str, tuple[str, bool]] = {
     "rematricula": ("chromium", False), "prematricula_completa": ("chromium", False),
     "transferidos_gerar": ("chromium", False), "transferidos": ("chromium", False),
     "parecer_rco": ("chromium", True),
-    "pareceres_digitalizados": ("firefox", False), "base_abc": ("firefox", False), "analisa_sere": ("firefox", False),
+    "pareceres_digitalizados": ("firefox", False), "base_abc": ("firefox", False), "fluxo_geo": ("firefox", False), "analisa_sere": ("firefox", False),
     "documentos": ("firefox", False), "limpeza": ("firefox", False), "validar": ("firefox", False),
     "aluno": ("firefox", False), "espec": ("firefox", False),
 }

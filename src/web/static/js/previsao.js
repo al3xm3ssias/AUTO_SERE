@@ -11,7 +11,7 @@
 
   const estado = {
     view: "lista", aba: "todos", busca: "", turma: "", agrupar: true,
-    turmaSel: "", foraCat: "fora", foraBusca: "", foraTurma: "", dados: null,
+    turmaSel: "", foraCat: "fora", foraBusca: "", foraTurma: "", dados: null, geo: null, geoBusca: "", geoTurma: "",
   };
   let ligada = false;
 
@@ -271,7 +271,10 @@
 
   function exportar() {
     const ano = estado.dados.ano;
-    if (estado.view === "fora") {
+    if (estado.view === "geo") {
+      baixarCsv(`previsao-${ano}-direcionados-geo.csv`, ["Turma", "Aluno", "CGM", "Responsável"],
+        geoFiltrados().map((a) => [geoRotuloTurma(a), a.nome, a.cgm, a.responsavel]));
+    } else if (estado.view === "fora") {
       baixarCsv(`previsao-${ano}-ficaram-de-fora.csv`,
         ["Nome", "Turma hoje", "Iria para", "CGM", "Nascimento", "Motivo", "Responsável", "Telefone"],
         foraFiltradas().map((l) => [l.nome, l.turma_atual, l.turma_prevista, l.cgm, l.nascimento, (CATEGORIAS[l.categoria] || {}).rotulo + " — " + l.motivo, l.responsavel, l.telefone]));
@@ -281,6 +284,38 @@
     } else {
       baixarCsv(`previsao-${ano}.csv`, CAB_PREVISAO, filtradas().map(linhaCsv));
     }
+  }
+
+  /* ───────────────────────── direcionados GEO (turma, aluno, CGM, responsável) ───────────────────────── */
+
+  const geoRotuloTurma = (a) => a.turma || a.etapa || "Sem turma";
+  const geoPresentes = () => ((estado.geo && estado.geo.alunos) || []).filter((a) => a.situacao_lista !== "ausente");
+
+  function geoFiltrados() {
+    const q = semAcento(estado.geoBusca);
+    return geoPresentes().filter((a) => (!estado.geoTurma || geoRotuloTurma(a) === estado.geoTurma)
+      && (!q || semAcento(`${a.nome} ${a.cgm} ${a.responsavel} ${geoRotuloTurma(a)}`).includes(q)));
+  }
+
+  function desenharGeo() {
+    const g = estado.geo || { alunos: [], existe: false };
+    const todos = geoPresentes();
+    const nomes = [...new Set(todos.map(geoRotuloTurma))].sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true }));
+    preencherFiltroTurma("pv-geo-turma", nomes, estado.geoTurma, "Todas as turmas");
+    const linhas = geoFiltrados();
+    $("pv-geo-cnt").textContent = linhas.length;
+    $("pv-geo-n").textContent = g.existe ? `(${todos.length})` : "";
+    $("pv-geo-info").textContent = g.existe
+      ? `${g.arquivo} · coletado em ${String(g.coletado_em || "—").replace("T", " ")}${g.coleta_completa === false ? " · coleta incompleta" : ""}`
+      : "";
+    $("pv-geo-tbody").innerHTML = linhas.map((a) => `<tr>
+      <td>${esc(geoRotuloTurma(a))}</td><td class="td-name">${esc(a.nome)}</td>
+      <td class="td-mono">${esc(a.cgm || "—")}</td><td>${esc(a.responsavel || "—")}</td></tr>`).join("");
+    const vazio = $("pv-geo-vazio");
+    vazio.style.display = linhas.length ? "none" : "";
+    $("pv-geo-vazio-msg").textContent = !g.existe
+      ? `Ainda não existe ${g.arquivo || "sere_sisgea"}. Rode a automação "Direcionados GEO" para coletar.`
+      : "Nenhum resultado.";
   }
 
   /* ───────────────────────── cartões, avisos, ligações ───────────────────────── */
@@ -306,10 +341,11 @@
   function mostrarVisao(v) {
     estado.view = v;
     document.querySelectorAll("#sec-previsao [data-pvview]").forEach((b) => b.classList.toggle("active", b.dataset.pvview === v));
-    ["lista", "turmas", "fora"].forEach((n) => { $(`pv-view-${n}`).style.display = n === v ? "" : "none"; });
+    ["lista", "turmas", "fora", "geo"].forEach((n) => { $(`pv-view-${n}`).style.display = n === v ? "" : "none"; });
     if (!estado.dados) return;
     if (v === "lista") desenharLinhas();
     else if (v === "turmas") desenharTurmas();
+    else if (v === "geo") desenharGeo();
     else desenharFora();
   }
 
@@ -327,6 +363,8 @@
     $("pv-agrupar").addEventListener("change", (e) => { estado.agrupar = e.target.checked; desenharLinhas(); });
     $("pv-fora-busca").addEventListener("input", (e) => { estado.foraBusca = e.target.value; desenharFora(); });
     $("pv-fora-turma").addEventListener("change", (e) => { estado.foraTurma = e.target.value; desenharFora(); });
+    $("pv-geo-busca").addEventListener("input", (e) => { estado.geoBusca = e.target.value; desenharGeo(); });
+    $("pv-geo-turma").addEventListener("change", (e) => { estado.geoTurma = e.target.value; desenharGeo(); });
     $("pv-exportar").addEventListener("click", () => { if (estado.dados) exportar(); });
   }
 
@@ -345,6 +383,7 @@
       console.warn("Previsão: erro ao carregar", e);
       return;
     }
+    try { estado.geo = await apiGet("/direcionados-geo"); } catch (e) { estado.geo = null; console.warn("Direcionados GEO: erro ao carregar", e); }
     const d = estado.dados;
     $("pv-ano").textContent = d.ano;
     const titulo = $("topbar-title");

@@ -16,6 +16,18 @@
     </button>
   </div>
 
+  <!-- Avisos da rotina diária (transferidos a documentar/enviar etc.). Fica escondido quando não há nada a avisar. -->
+  <div class="card" id="painel-avisos" hidden>
+    <div class="card-header">
+      <span data-icon="bell" style="color:var(--amber)"></span>
+      <span class="card-title">Avisos</span>
+      <div class="card-header-actions">
+        <button class="btn-sm" data-goto="transferidos">Abrir Transferidos <span data-icon="arrowRight"></span></button>
+      </div>
+    </div>
+    <div class="card-body" id="painel-avisos-lista"></div>
+  </div>
+
   <div class="metrics-grid" id="metrics-principais">
     <!-- preenchido via JS (stat-card) a partir de /web/api/painel/resumo -->
   </div>

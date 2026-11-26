@@ -801,7 +801,16 @@ async def executar_coleta(page, fila: list[dict], dados_existentes: dict, modo_r
 # 9. PONTO DE ENTRADA (pronto para uma futura GUI)
 # ══════════════════════════════════════════════
 
-async def coletar_cadastro_completo_via_login(modo_rapido: bool = False) -> dict:
+def filtrar_fila_por_cgms(fila: list[dict], cgms) -> list[dict]:
+    """Só os alunos da fila cujo CGM está em `cgms` (ex.: os alunos novos da rotina diária).
+    `cgms` vazio/None = a fila inteira, como sempre foi."""
+    alvo = {str(c).strip() for c in (cgms or ()) if str(c).strip()}
+    if not alvo:
+        return fila
+    return [a for a in fila if a["cgm"] in alvo]
+
+
+async def coletar_cadastro_completo_via_login(modo_rapido: bool = False, cgms=None) -> dict:
     """
     Ponto de entrada completo: carrega a fila e os dados existentes, abre o
     navegador, faz login, navega até 'Por Turma' e executa a coleta
@@ -812,6 +821,10 @@ async def coletar_cadastro_completo_via_login(modo_rapido: bool = False) -> dict
 
     `modo_rapido`: equivalente à antiga flag --rapido — ignora alunos já
     coletados há menos de MESES_CACHE meses.
+
+    `cgms`: se informado, coleta SÓ esses alunos (a rotina diária passa os alunos novos). Quem não está na fila
+    (não é "matriculado" em turmas.json) é avisado no log e não é coletado. Os demais dados do arquivo são
+    preservados. Sem `cgms`, coleta a fila inteira, como antes.
     """
     log.info("=" * 60)
     log.info("alunos_completo.py — iniciando")
@@ -820,6 +833,18 @@ async def coletar_cadastro_completo_via_login(modo_rapido: bool = False) -> dict
 
     fila             = carregar_fila(TURMAS_JSON)
     dados_existentes = carregar_json_existente(OUTPUT_JSON)
+
+    pedidos = [str(c).strip() for c in (cgms or ()) if str(c).strip()]
+    if pedidos:
+        fila = filtrar_fila_por_cgms(fila, pedidos)
+        fora = [c for c in dict.fromkeys(pedidos) if c not in {a["cgm"] for a in fila}]
+        log.info(f"Seleção por CGM: {len(fila)} de {len(set(pedidos))} aluno(s) pedido(s) estão na fila.")
+        if fora:
+            log.warning("CGM(s) fora da fila (não matriculados ou ausentes em turmas.json): " + ", ".join(fora[:20])
+                        + (" …" if len(fora) > 20 else ""))
+        if not fila:
+            log.info("Nenhum dos CGMs pedidos está na fila — nada a coletar.")
+            return dados_existentes
 
     if not fila:
         log.error("Fila vazia — nenhum aluno matriculado encontrado em turmas.json.")
