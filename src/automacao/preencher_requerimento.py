@@ -6,7 +6,7 @@ Preenche o REQUERIMENTO_MATRICULA_2027.docx a partir da planilha do Google
 
 Uso:
     pip install lxml
-    python preencher_requerimento.py                       # baixa a planilha pela URL abaixo
+    python preencher_requerimento.py                       # usa a planilha cadastrada com o tipo Matrícula
     python preencher_requerimento.py --csv respostas.csv   # usa um CSV baixado
     python preencher_requerimento.py --linha 3             # só a 3ª resposta (1 = primeira)
     python preencher_requerimento.py --nome "maria"        # só quem tiver "maria" no nome
@@ -17,13 +17,13 @@ Requisitos: Python 3.8+, lxml e LibreOffice (comando `soffice`) para converter e
 import argparse
 import csv
 import io
+import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import unicodedata
-import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -32,19 +32,22 @@ from lxml import etree
 # ----------------------------------------------------------------------------
 # CONFIGURAÇÃO  (ajuste aqui)
 # ----------------------------------------------------------------------------
-PLANILHA_URL = ("https://docs.google.com/spreadsheets/d/"
-                "1aBJCj-yZYIgGZHenmagG-QelY79ponHIcIaOYkXb6ww/edit?resourcekey=&gid=510310807#gid=510310807")
 TEMPLATE = "REQUERIMENTO_MATRICULA_2027.docx"
-PASTA_SAIDA = "pdfs_matricula"
+
+# Sem --saida, os PDFs vão para <base>/<ano letivo atual>/ (a mesma pasta-base dos modelos de parecer: dados/ ou
+# AUTO_SERE_PARECERES_BASE). O modelo enviado pela tela fica em <base>/MODELO/.
+PASTA_SAIDA_FALLBACK = "pdfs_matricula"       # só se o programa não estiver instalado (script solto)
+NOME_MODELO_ENVIADO = "REQUERIMENTO_MATRICULA.docx"
+LIMITE_MODELO_MB = 15
 
 # Valor da tag $ESCOLA (coloque o nome oficial completo da escola)
 ESCOLA = "ESCOLA JUDITH MACEDO SILVEIRA"
 
-# A planilha tem "Responsável 1" e "Responsável 2", mas o modelo tem MÃE / PAI.
-# Defina aqui quem é quem (valores: "MAE", "PAI" ou "TUTOR").
-# O Responsável 1 também preenche o bloco "Responsável legal" ($NOME_RESP, $V.x ...).
+# Filiação 1 e 2 do modelo = Responsável 1 e 2 da planilha ($NOME_RESP1, $NOME_RESP2 ...).
+# O Responsável 1 também preenche o bloco "Responsável legal" ($NOME_RESP, $V.x ...);
+# RESP1_PAPEL só decide qual vínculo ($V.M / $V.P / $V.T) fica marcado nesse bloco ("MAE", "PAI" ou "TUTOR").
+# A coluna "Documento do responsável 1" é IGNORADA (é a foto do RG): RG do responsável 1 e $DOC_RESP saem vazios.
 RESP1_PAPEL = "MAE"
-RESP2_PAPEL = "PAI"
 
 MARCADO = "X"      # o que entra no lugar da tag quando a opção está marcada
 DESMARCADO = " "   # o que entra quando não está
@@ -54,8 +57,8 @@ DESMARCADO = " "   # o que entra quando não está
 # ----------------------------------------------------------------------------
 TAGS_TEXTO = [
     "ESCOLA", "NOME_ALUNO", "CGM", "DT.N", "N_RG", "N_CIN", "N_CPF",
-    "NOME_MAE", "RG_MAE", "CPF_MAE", "TEL_MAE", "PROF_MAE",
-    "NOME_PAI", "RG_PAI", "CPF_PAI", "TEL_PAI", "PROF_PAI",
+    "NOME_RESP1", "RG_RESP1", "CPF_RESP1", "TEL_RESP1", "PROF_RESP1",    # Filiação 1
+    "NOME_RESP2", "RG_RESP2", "CPF_RESP2", "TEL_RESP2", "PROF_RESP2",    # Filiação 2
     "NOME_RESP", "DOC_RESP", "CPF_RESP", "TEL_RESP",
     "ENDERECO", "N", "BAIRRO", "CEP", "U.C",
 ]
@@ -86,6 +89,70 @@ ANY_DOLLAR_RE = re.compile(r"\$[A-Za-z0-9_.]+")
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 XML_SPACE = "{http://www.w3.org/XML/1998/namespace}space"
+
+
+# ----------------------------------------------------------------------------
+# PASTAS (modelo enviado pela tela e saída por ano letivo)
+# ----------------------------------------------------------------------------
+def _pasta_base():
+    """Pasta-base do programa (a mesma dos modelos de parecer); None se rodando fora do projeto."""
+    try:
+        from src.automacao import parecer_fund
+        return parecer_fund.pasta_base()
+    except Exception:  # noqa: BLE001 — script solto, sem o restante do projeto
+        return None
+
+
+def pasta_modelos():
+    base = _pasta_base()
+    return (base / "MODELO") if base else None
+
+
+def modelo_enviado():
+    """Caminho do modelo enviado pela tela (Configurações → Modelo do requerimento) ou None."""
+    pasta = pasta_modelos()
+    caminho = (pasta / NOME_MODELO_ENVIADO) if pasta else None
+    return caminho if caminho and caminho.is_file() else None
+
+
+def pasta_saida_padrao():
+    """<base>/<ano letivo atual>/ — ex.: dados/2027/."""
+    base = _pasta_base()
+    if base is None:
+        return Path(PASTA_SAIDA_FALLBACK)
+    from src.comum import paths
+    return base / paths.ano_atual() / "REQUERIMENTO_MATRICULA"
+
+
+def validar_modelo(conteudo):
+    """ValueError com mensagem pronta se o arquivo não serve de modelo do requerimento."""
+    if not conteudo:
+        raise ValueError("O arquivo está vazio.")
+    if len(conteudo) > LIMITE_MODELO_MB * 1024 * 1024:
+        raise ValueError(f"O arquivo passa de {LIMITE_MODELO_MB} MB.")
+    try:
+        with zipfile.ZipFile(io.BytesIO(conteudo)) as z:
+            xml = z.read("word/document.xml")
+        texto = "".join(t.text or "" for t in etree.fromstring(xml).iter("{%s}t" % W))
+    except Exception as exc:  # noqa: BLE001 — qualquer erro = não é um .docx
+        raise ValueError("Esse arquivo não é um documento Word (.docx) válido.") from exc
+    if "$NOME_ALUNO" not in texto:
+        raise ValueError("O modelo não tem o marcador $NOME_ALUNO. Escreva $NOME_ALUNO onde deve sair o nome do aluno.")
+
+
+def salvar_modelo(conteudo):
+    """Guarda o modelo em <base>/MODELO/REQUERIMENTO_MATRICULA.docx. Devolve {"arquivo", "substituiu"}."""
+    validar_modelo(conteudo)
+    pasta = pasta_modelos()
+    if pasta is None:
+        raise ValueError("Pasta de modelos indisponível (programa fora da instalação).")
+    pasta.mkdir(parents=True, exist_ok=True)
+    destino = pasta / NOME_MODELO_ENVIADO
+    substituiu = destino.exists()
+    tmp = destino.with_name(destino.name + ".tmp")
+    tmp.write_bytes(conteudo)
+    os.replace(tmp, destino)
+    return {"arquivo": str(destino), "substituiu": substituiu}
 
 
 # ----------------------------------------------------------------------------
@@ -133,35 +200,40 @@ def separar_endereco(end):
 # ----------------------------------------------------------------------------
 # LEITURA DA PLANILHA
 # ----------------------------------------------------------------------------
-def url_csv(url):
-    m = re.search(r"/spreadsheets/d/([^/]+)", url)
-    if not m:
-        sys.exit("URL de planilha inválida.")
-    g = re.search(r"gid=(\d+)", url)
-    u = f"https://docs.google.com/spreadsheets/d/{m.group(1)}/export?format=csv"
-    return u + (f"&gid={g.group(1)}" if g else "")
-
-
-def ler_planilha(csv_path=None):
-    if csv_path:
-        raw = Path(csv_path).read_text(encoding="utf-8-sig")
-    else:
-        try:
-            with urllib.request.urlopen(url_csv(PLANILHA_URL), timeout=60) as r:
-                raw = r.read().decode("utf-8-sig")
-        except Exception as e:
-            sys.exit(
-                f"Não consegui baixar a planilha ({e}).\n"
-                "Compartilhe como 'qualquer pessoa com o link' ou baixe em "
-                "Arquivo > Fazer download > CSV e rode com --csv arquivo.csv"
-            )
-        if raw.lstrip().lower().startswith("<!doctype html") or "<html" in raw[:200].lower():
-            sys.exit("O Google devolveu uma página de login: a planilha não está pública. "
-                     "Use --csv com o arquivo baixado.")
+def ler_planilha_csv(csv_path):
+    """(cabeçalho, linhas) de um CSV exportado da planilha. ValueError com mensagem pronta."""
+    raw = Path(csv_path).read_text(encoding="utf-8-sig")
     linhas = list(csv.reader(io.StringIO(raw)))
     if len(linhas) < 2:
-        sys.exit("A planilha não tem respostas.")
+        raise ValueError("A planilha não tem respostas.")
     return linhas[0], linhas[1:]
+
+
+def _escolher_aba(abas):
+    """A aba das respostas do formulário (a que tem 'respostas' no nome); sem ela, a primeira."""
+    return next((a for a in abas if "respostas" in norm(a)), abas[0])
+
+
+def ler_planilha_cadastrada(planilha_id=None):
+    """
+    (cabeçalho, linhas) da planilha cadastrada em 'Planilhas do Drive' com o tipo Matrícula (a ativa; ou a escolhida
+    por `planilha_id`). O link/ID nunca fica neste arquivo: quem sabe qual é a planilha é o gerenciador.
+    """
+    from src.comum import google_sheets as gs, planilhas_gerenciador as gp
+    try:
+        ref = gp.resolver(gp.FINALIDADE_MATRICULA, id_item=planilha_id, plataformas=["google_sheets"])
+    except LookupError as exc:                       # sem planilha cadastrada / mais de uma ativa / id inexistente
+        raise ValueError(str(exc)) from exc
+    print(f"Planilha de matrícula: {ref.nome}")
+    servico = gs.abrir_servico()
+    abas = gs.listar_abas(ref.planilha_id, servico=servico)
+    if not abas:
+        raise ValueError(f"A planilha '{ref.nome}' não tem abas.")
+    aba = _escolher_aba(abas)
+    dados = gs.ler_intervalo(ref.planilha_id, "'" + aba.replace("'", "''") + "'!A:ZZ", formatado=True, servico=servico)
+    if len(dados) < 2:
+        raise ValueError(f"A aba '{aba}' da planilha '{ref.nome}' não tem respostas.")
+    return dados[0], dados[1:]
 
 
 class Colunas:
@@ -192,15 +264,22 @@ def montar_getters(cab):
         "cep":       C.idx("cep", inicio=True),
         "geo":       C.idx("identificacao geo"),
         "r1_nome":   C.idx("responsavel 1 (nome)", inicio=True),
-        "r1_doc":    C.idx("documento do responsavel 1", inicio=True),
         "r1_tel":    C.idx("telefone responsavel 1", inicio=True),
         "r1_cpf":    C.idx("cpf responsavel 1", inicio=True),
         "r1_prof":   C.idx("profissao responsavel 1", inicio=True),
+        "r1_email":  C.idx("e-mail responsavel 1", inicio=True),
         "r2_nome":   C.idx("responsavel 2 (nome)", inicio=True),
         "r2_doc":    C.idx("documento responsavel 2", inicio=True),
         "r2_tel":    C.idx("telefone responsavel 2", inicio=True),
         "r2_cpf":    C.idx("cpf responsavel 2", inicio=True),
         "r2_prof":   C.idx("profissao responsavel 2", inicio=True),
+        "r2_email":  C.idx("e-mail responsavel 2", inicio=True),
+        "sus":       C.idx("cartao do sus", inicio=True),
+        "bolsa":     C.idx("recebe o bolsa", inicio=True),
+        "nis_aluno": C.idx("numero nis estudante", inicio=True),
+        "nis_resp":  C.idx("numero nis responsavel", inicio=True),
+        "total_res": C.idx("total de pessoas", inicio=True),
+        "deficiencia": C.idx("aluno apresenta algum tipo de deficiencia", inicio=True),
         "renda":     C.idx("renda familiar"),
         "moradia":   C.idx("tipo de moradia"),
         "ocupacao":  C.idx("forma de ocupacao"),
@@ -248,32 +327,24 @@ def valores_da_linha(g, avisos):
     if cor and not any(v[k] for k in ("A", "PD", "B", "PR", "N.R")) and not tem(cor, r"indigen"):
         avisos.append(f"cor/raça não reconhecida: '{cor}'")
 
-    # ---- responsáveis (R1 -> MAE/PAI/TUTOR conforme configuração)
-    r1 = dict(nome=g("r1_nome"), doc=extrair_rg(g("r1_doc")), cpf=g("r1_cpf") or "",
-              tel=g("r1_tel"), prof=g("r1_prof"))
-    r2 = dict(nome=g("r2_nome"), doc=extrair_rg(g("r2_doc")), cpf=g("r2_cpf") or "",
-              tel=g("r2_tel"), prof=g("r2_prof"))
-    if not r1["cpf"]:
-        m = CPF_RE.search(g("r1_doc"))
-        r1["cpf"] = m.group(0) if m else ""
+    # ---- responsáveis: Responsável 1 -> Filiação 1 ($..._RESP1), Responsável 2 -> Filiação 2 ($..._RESP2)
+    # A coluna "Documento do responsável 1" é uma foto do RG e é ignorada: sem RG nem documento do responsável 1.
+    r1 = dict(nome=g("r1_nome"), doc="", cpf=g("r1_cpf"), tel=g("r1_tel"), prof=g("r1_prof"))
+    r2 = dict(nome=g("r2_nome"), doc=extrair_rg(g("r2_doc")), cpf=g("r2_cpf"), tel=g("r2_tel"), prof=g("r2_prof"))
     if not r2["cpf"]:
         m = CPF_RE.search(g("r2_doc"))
         r2["cpf"] = m.group(0) if m else ""
 
-    for papel, r in ((RESP1_PAPEL, r1), (RESP2_PAPEL, r2)):
-        if papel in ("MAE", "PAI"):
-            v[f"NOME_{papel}"] = r["nome"].upper()
-            v[f"RG_{papel}"] = r["doc"]
-            v[f"CPF_{papel}"] = r["cpf"]
-            v[f"TEL_{papel}"] = r["tel"]
-            v[f"PROF_{papel}"] = r["prof"]
-    for t in ("NOME", "RG", "CPF", "TEL", "PROF"):   # o que ficar sem dono vira vazio
-        v.setdefault(f"{t}_MAE", "")
-        v.setdefault(f"{t}_PAI", "")
+    for sufixo, r in (("RESP1", r1), ("RESP2", r2)):
+        v[f"NOME_{sufixo}"] = r["nome"].upper()
+        v[f"RG_{sufixo}"] = r["doc"]
+        v[f"CPF_{sufixo}"] = r["cpf"]
+        v[f"TEL_{sufixo}"] = r["tel"]
+        v[f"PROF_{sufixo}"] = r["prof"]
 
     # bloco "Responsável legal" = Responsável 1
     v["NOME_RESP"] = r1["nome"].upper()
-    v["DOC_RESP"] = r1["doc"]
+    v["DOC_RESP"] = ""
     v["CPF_RESP"] = r1["cpf"]
     v["TEL_RESP"] = r1["tel"]
     v["V.P"] = RESP1_PAPEL == "PAI"
@@ -464,19 +535,37 @@ def achar_soffice():
     return None
 
 
-def docx_para_pdf(docx, pasta_pdf):
+LOTE_PDF = 25   # quantos .docx vão por vez ao LibreOffice (abrir leva alguns segundos)
+
+
+def docx_para_pdf_lote(docxs, pasta_pdf):
+    """
+    Converte os .docx em PDF (em `pasta_pdf`) de um lote por vez, SEM abrir janela de console no Windows.
+    Devolve {docx: pdf ou None se aquele não saiu}. RuntimeError se não há conversor instalado.
+    """
+    docxs = [Path(d) for d in docxs]
+    try:
+        from src.comum import conversao_pdf
+    except ImportError:                                       # script solto, fora do projeto
+        conversao_pdf = None
+    resultado = {}
+    if conversao_pdf is not None:
+        try:
+            for i in range(0, len(docxs), LOTE_PDF):
+                resultado.update(conversao_pdf.docx_para_pdf(docxs[i:i + LOTE_PDF], pasta_pdf))
+        except conversao_pdf.ConversaoPdfErro as exc:
+            raise RuntimeError(str(exc)) from exc
+        return resultado
     soffice = achar_soffice()
-    if soffice:
+    if not soffice:
+        raise RuntimeError("Instale o LibreOffice para gerar PDF.")
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    for docx in docxs:
         subprocess.run([soffice, "--headless", "--convert-to", "pdf", "--outdir", str(pasta_pdf), str(docx)],
-                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return Path(pasta_pdf) / (Path(docx).stem + ".pdf")
-    try:  # alternativa no Windows com Word instalado
-        from docx2pdf import convert
-        destino = Path(pasta_pdf) / (Path(docx).stem + ".pdf")
-        convert(str(docx), str(destino))
-        return destino
-    except ImportError:
-        sys.exit("Instale o LibreOffice (ou 'pip install docx2pdf' com Word) para gerar PDF.")
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
+        pdf = Path(pasta_pdf) / (docx.stem + ".pdf")
+        resultado[docx] = pdf if pdf.is_file() else None
+    return resultado
 
 
 def nome_arquivo(s):
@@ -486,60 +575,74 @@ def nome_arquivo(s):
 
 
 # ----------------------------------------------------------------------------
-# MAIN
+# GERAÇÃO (usada pela tela Automações → Documentos e pela linha de comando)
 # ----------------------------------------------------------------------------
-def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--csv", help="CSV exportado da planilha (em vez de baixar pela URL)")
-    ap.add_argument("--template", default=TEMPLATE)
-    ap.add_argument("--saida", default=PASTA_SAIDA)
-    ap.add_argument("--linha", type=int, help="só esta resposta (1 = primeira)")
-    ap.add_argument("--nome", help="só alunos cujo nome contenha este texto")
-    ap.add_argument("--juntar", action="store_true", help="gera também um PDF único com todos")
-    ap.add_argument("--manter-docx", action="store_true", help="não apaga os .docx intermediários")
-    a = ap.parse_args()
+def gerar_requerimentos(cab, linhas, *, modelo, saida, linha=None, nome=None, modo_teste=False, juntar=False,
+                        manter_docx=False):
+    """
+    Gera um PDF por resposta. `linha` = só essa resposta (1 = primeira); `nome` = só quem tem esse texto no nome;
+    `modo_teste` = só a primeira resposta que passar nos filtros. Devolve {"total", "gerados", "avisos", "pasta", "pdfs"}.
+    """
+    try:
+        from src.comum.execucao_gui import verificar_cancelamento
+    except Exception:  # noqa: BLE001 — script solto
+        def verificar_cancelamento():
+            return None
 
-    if not Path(a.template).exists():
-        sys.exit(f"Modelo não encontrado: {a.template}")
-
-    cab, linhas = ler_planilha(a.csv)
+    if not Path(modelo).exists():
+        raise ValueError(f"Modelo não encontrado: {modelo}. Envie o modelo em Configurações → Modelo do requerimento.")
     get = montar_getters(cab)
-    saida = Path(a.saida)
+    saida = Path(saida)
     saida.mkdir(parents=True, exist_ok=True)
 
-    pdfs = []
-    for n, linha in enumerate(linhas, start=1):
-        if not any(c.strip() for c in linha):
-            continue
-        if a.linha and n != a.linha:
-            continue
-        nome = get(linha, "nome")
-        if a.nome and norm(a.nome) not in norm(nome):
-            continue
+    pdfs, todos_avisos = [], []
+    with tempfile.TemporaryDirectory() as tmp:
+        pendentes = []                                   # (n, aluno, docx) preenchidos, à espera da conversão
+        for n, resposta in enumerate(linhas, start=1):
+            verificar_cancelamento()
+            if not any(c.strip() for c in resposta):
+                continue
+            if linha and n != linha:
+                continue
+            aluno = get(resposta, "nome")
+            if nome and norm(nome) not in norm(aluno):
+                continue
 
-        avisos = []
-        valores = valores_da_linha(lambda k, l=linha: get(l, k), avisos)
-        base = f"{n:03d}_{nome_arquivo(nome)}"
-
-        with tempfile.TemporaryDirectory() as tmp:
-            docx_tmp = Path(tmp) / f"{base}.docx"
-            preencher_docx(a.template, docx_tmp, valores)
+            avisos = []
+            valores = valores_da_linha(lambda k, l=resposta: get(l, k), avisos)
+            docx_tmp = Path(tmp) / f"{n:03d}_{nome_arquivo(aluno)}.docx"
+            preencher_docx(modelo, docx_tmp, valores)
             sobrou = tags_sobrando(docx_tmp)
             if sobrou:
                 avisos.append("tags não substituídas: " + ", ".join(sorted(sobrou)))
-            pdf = docx_para_pdf(docx_tmp, saida)
-            if a.manter_docx:
+            for av in avisos:
+                print(f"[{n}] {aluno or '(sem nome)'} AVISO:", av)
+                todos_avisos.append(f"{aluno or n}: {av}")
+            pendentes.append((n, aluno, docx_tmp))
+            if manter_docx:
                 shutil.copy(docx_tmp, saida / docx_tmp.name)
-        pdfs.append(pdf)
-        print(f"[{n}] {nome or '(sem nome)'} -> {pdf}")
-        for av in avisos:
-            print("     AVISO:", av)
+            if modo_teste:
+                print("Modo de teste: só a primeira resposta será gerada.")
+                break
 
-    if a.juntar and pdfs:
+        if pendentes:
+            print(f"Convertendo {len(pendentes)} requerimento(s) em PDF...")
+            verificar_cancelamento()
+            feitos = docx_para_pdf_lote([d for _, _, d in pendentes], saida)
+            for n, aluno, docx_tmp in pendentes:
+                pdf = feitos.get(docx_tmp)
+                if pdf is None:
+                    todos_avisos.append(f"{aluno or n}: o PDF não foi gerado")
+                    print(f"[{n}] {aluno or '(sem nome)'} -> ERRO: o PDF não foi gerado")
+                else:
+                    pdfs.append(pdf)
+                    print(f"[{n}] {aluno or '(sem nome)'} -> {pdf}")
+
+    if juntar and pdfs:
         try:
             from pypdf import PdfWriter
         except ImportError:
-            sys.exit("Para --juntar instale: pip install pypdf")
+            raise RuntimeError("Para juntar os PDFs instale: pip install pypdf") from None
         w = PdfWriter()
         for p in pdfs:
             w.append(str(p))
@@ -548,6 +651,43 @@ def main():
         print("PDF único:", destino)
 
     print(f"\nConcluído: {len(pdfs)} PDF(s) em {saida}/")
+    return {"total": len(pdfs), "gerados": len(pdfs), "avisos": todos_avisos, "pasta": str(saida),
+            "pdfs": [str(p) for p in pdfs]}
+
+
+def executar(planilha_id=None, *, nome=None, juntar=False, modo_teste=False):
+    """Ponto de entrada da tela: lê a planilha cadastrada (tipo Matrícula) e gera os PDFs em <base>/<ano>/."""
+    modelo = modelo_enviado() or TEMPLATE
+    if not Path(modelo).exists():
+        raise ValueError("Nenhum modelo do requerimento enviado. Envie o .docx em Configurações → Modelo do requerimento.")
+    cab, linhas = ler_planilha_cadastrada(planilha_id)
+    return gerar_requerimentos(cab, linhas, modelo=modelo, saida=pasta_saida_padrao(), nome=nome, juntar=juntar,
+                               modo_teste=modo_teste)
+
+
+# ----------------------------------------------------------------------------
+# MAIN
+# ----------------------------------------------------------------------------
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--csv", help="CSV exportado da planilha (sem isso, usa a planilha cadastrada com o tipo Matrícula)")
+    ap.add_argument("--template", default=None,
+                    help="modelo .docx (padrão: o enviado em Configurações → Modelo do requerimento; "
+                         f"se não houver, {TEMPLATE})")
+    ap.add_argument("--saida", default=None,
+                    help="pasta dos PDFs (padrão: <base>/<ano letivo atual>/, ex.: dados/2027/)")
+    ap.add_argument("--linha", type=int, help="só esta resposta (1 = primeira)")
+    ap.add_argument("--nome", help="só alunos cujo nome contenha este texto")
+    ap.add_argument("--juntar", action="store_true", help="gera também um PDF único com todos")
+    ap.add_argument("--manter-docx", action="store_true", help="não apaga os .docx intermediários")
+    a = ap.parse_args()
+    try:
+        modelo = a.template or modelo_enviado() or TEMPLATE
+        cab, linhas = ler_planilha_csv(a.csv) if a.csv else ler_planilha_cadastrada()
+        gerar_requerimentos(cab, linhas, modelo=modelo, saida=a.saida or pasta_saida_padrao(), linha=a.linha,
+                            nome=a.nome, juntar=a.juntar, manter_docx=a.manter_docx)
+    except (ValueError, RuntimeError) as exc:
+        sys.exit(str(exc))
 
 
 if __name__ == "__main__":

@@ -66,7 +66,9 @@ def docx_para_pdf(arquivos: Iterable[Path], pasta_saida: Path, tempo_limite: int
         comando = [soffice, f"-env:UserInstallation={Path(perfil).resolve().as_uri()}", "--headless", "--norestore",
                    "--convert-to", "pdf", "--outdir", str(pasta_saida), *map(str, arquivos)]
         try:
-            subprocess.run(comando, capture_output=True, timeout=tempo_limite, check=False)
+            # CREATE_NO_WINDOW (só existe no Windows): sem isso abre uma janela de cmd a cada conversão
+            subprocess.run(comando, capture_output=True, timeout=tempo_limite, check=False,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except subprocess.TimeoutExpired as exc:
             raise ConversaoPdfErro(f"O LibreOffice demorou mais de {tempo_limite} s para converter.") from exc
         except OSError as exc:

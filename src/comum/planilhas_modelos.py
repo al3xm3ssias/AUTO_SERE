@@ -57,6 +57,7 @@ class Contexto:
     turma: str = ""
     escola: str = ""
     selecionadas: tuple = ()             # turmas escolhidas para modelos com uma aba por turma (vazio = todas)
+    previsao: dict = field(default_factory=dict)   # só para modelos com usa_previsao: {"linhas": [...]} de previsao.alunos_para_planilha
 
 
 @dataclass
@@ -69,6 +70,7 @@ class Modelo:
     versao: int = 1
     uma_turma: bool = False               # True = a planilha é de UMA turma (a turma é obrigatória na criação)
     origem: str = "sistema"               # "sistema" (padrão) | "escola" (arquivo .json)
+    usa_previsao: bool = False            # True = os alunos vêm da Previsão do próximo ano (não do turmas.json)
 
 
 _MODELOS: dict[str, Modelo] = {}
@@ -113,7 +115,7 @@ def modelo_da_finalidade(finalidade: str) -> Optional[Modelo]:
 
 def listar() -> list[dict]:
     return [{"chave": m.chave, "nome": m.nome, "descricao": m.descricao, "finalidade": m.finalidade, "versao": m.versao,
-             "uma_turma": m.uma_turma, "origem": m.origem} for m in modelos().values()]
+             "uma_turma": m.uma_turma, "origem": m.origem, "usa_previsao": m.usa_previsao} for m in modelos().values()]
 
 
 # ───────────────────────────── utilitários de montagem ──────────────────────────
@@ -269,6 +271,45 @@ def _montar_imc(ctx: Contexto) -> list[Aba]:
     return abas
 
 
+# ───────────────────────────── modelo: Previsão do próximo ano ──────────────────
+
+ORIGENS_PREVISAO = ("Rematriculado", "Novo (pré-matrícula)", "Direcionado GEO")
+
+
+def _montar_previsao(ctx: Contexto) -> list[Aba]:
+    """
+    Aba "Resumo" + UMA ABA POR TURMA do ano que vem (Infantil IV, Infantil V, 1º Ano…), com os nomes de quem a Previsão
+    espera nela: rematriculados, novos da pré-matrícula e direcionados GEO. A turma é a SÉRIE (a seção A/B ainda não existe).
+    """
+    linhas_previsao = [l for l in (ctx.previsao.get("linhas") or []) if isinstance(l, dict)]
+    por_turma: dict[str, list[dict]] = {}
+    for l in linhas_previsao:
+        por_turma.setdefault(str(l.get("turma") or "Sem turma"), []).append(l)
+    escolhidas = list(ctx.selecionadas) if ctx.selecionadas else list(por_turma)
+    faltando = [t for t in escolhidas if t not in por_turma]
+    if faltando:
+        raise ValueError(f"Turma(s) que não existem na previsão: {', '.join(faltando)}.")
+    cabecalho = ["Nº", "CGM", "Nome do aluno", "Data de nascimento", "Origem", "Situação", "Turma atual", "Responsável", "Telefone"]
+    usados: set = set()
+    resumo = [["Turma", "Total", *ORIGENS_PREVISAO]]
+    abas = []
+    for turma in escolhidas:
+        alunos = por_turma[turma]
+        nome = nome_de_aba(turma, usados)
+        linhas = [cabecalho] + [[i, str(a.get("cgm") or "") or "-", str(a.get("nome") or "").strip(), a.get("nascimento", ""),
+                                 a.get("origem", ""), a.get("situacao", ""), a.get("turma_atual", ""), a.get("responsavel", ""),
+                                 a.get("telefone", "")] for i, a in enumerate(alunos, start=1)]
+        abas.append(Aba(nome=nome, linhas=linhas, larguras=[5, 12, 40, 18, 22, 22, 24, 30, 18], negrito_linhas=[1], congelar_linhas=1,
+                        formatos=[(f"B2:B{max(len(linhas) + LINHAS_EXTRAS, 60)}", "@")]))
+        resumo.append([turma, f"=COUNTA({_aspas(nome)}!C2:C1000)",
+                       *[f'=COUNTIF({_aspas(nome)}!E2:E1000,"{o}")' for o in ORIGENS_PREVISAO]])
+    ultima = len(resumo)
+    resumo.append(["Total", *[f"=SUM({_coluna(c)}2:{_coluna(c)}{ultima})" for c in range(1, 2 + len(ORIGENS_PREVISAO))]])
+    resumo_aba = Aba(nome=nome_de_aba("Resumo", usados), linhas=resumo, larguras=[34, 10, 16, 22, 18],
+                     negrito_linhas=[1, ultima + 1], congelar_linhas=1)
+    return [resumo_aba] + abas
+
+
 # ───────────────────────────── modelos feitos em .json ──────────────────────────
 
 def _modelo_de_json(bruto: dict, origem_arquivo: str) -> Modelo:
@@ -333,3 +374,5 @@ registrar_modelo(Modelo("listagem_alunos", "Listagem dos Alunos", "listagem_alun
                         descricao="Uma aba por turma com os dados dos alunos e uma aba Resumo com a contagem de cada turma."))
 registrar_modelo(Modelo("imc", "IMC", "imc", _montar_imc,
                         descricao="Uma aba por turma com peso, altura, IMC calculado e classificação escolhida numa lista."))
+registrar_modelo(Modelo("previsao", "Previsão do próximo ano", "previsao", _montar_previsao, usa_previsao=True,
+                        descricao="Uma aba por turma do ano que vem com os nomes (rematriculados, novos da pré-matrícula e direcionados GEO) e uma aba Resumo com a contagem."))

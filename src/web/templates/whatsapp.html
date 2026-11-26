@@ -142,6 +142,7 @@
           <div class="wa-seg" role="group" aria-label="Para quem enviar">
             <button class="btn-sm ativo" id="wa-destino-numero" type="button" data-destino="numero">Um número</button>
             <button class="btn-sm" id="wa-destino-alunos" type="button" data-destino="alunos">Alunos da pré-matrícula (próximo ano)</button>
+            <button class="btn-sm" id="wa-destino-geo" type="button" data-destino="geo">Direcionados GEO (próximo ano)</button>
           </div>
 
           <div id="wa-dest-numero">
@@ -168,6 +169,26 @@
           </div></div>
           <p class="campo-ajuda" id="wa-fila-pm-info" style="margin:6px 0 0"></p>
           <div class="checklist" id="wa-fila-pm-lista" style="margin-top:8px;max-height:240px;overflow:auto"></div>
+          </div>
+          <div id="wa-dest-geo" hidden>
+            <p class="campo-ajuda" style="margin-top:0">Pergunta aos responsáveis dos alunos direcionados pelo GEO se ainda querem a vaga
+            ou se já matricularam em outra escola. Use o modelo <em>GEO: confirmar interesse na vaga</em> (ou ajuste o texto acima).</p>
+            <div class="wa-acoes">
+              <button class="btn-sm" id="wa-fila-geo-carregar">Carregar alunos</button>
+              <button class="btn-sm" id="wa-fila-geo-todos" hidden>Marcar os da lista com telefone</button>
+              <button class="btn-primary" id="wa-fila-geo-por" hidden>Pôr marcados na fila</button>
+            </div>
+            <div id="wa-fila-geo-filtros" hidden><div class="wa-acoes" style="margin-top:8px">
+              <div class="field" style="margin:0;max-width:260px"><label for="wa-fila-geo-etapa">Etapa</label>
+                <select id="wa-fila-geo-etapa"></select></div>
+              <div class="field" style="margin:0;max-width:260px"><label for="wa-fila-geo-matricula">Matrícula</label>
+                <select id="wa-fila-geo-matricula">
+                  <option value="nao">Só quem ainda NÃO confirmou matrícula</option>
+                  <option value="todos">Todos</option>
+                </select></div>
+            </div></div>
+            <p class="campo-ajuda" id="wa-fila-geo-info" style="margin:6px 0 0"></p>
+            <div class="checklist" id="wa-fila-geo-lista" style="margin-top:8px;max-height:240px;overflow:auto"></div>
           </div>
         </div>
       </details>

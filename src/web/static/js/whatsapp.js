@@ -194,7 +194,7 @@
     $("wa-fila-modelo").value = atual || padrao;
     if (!atual && padrao && !$("wa-fila-texto").value.trim()) aplicarModelo();          // abre já com o texto do modelo escolhido
     $("wa-fila-marcadores").textContent = "Marcadores que valem nos modelos: " + (r.dados.marcadores || []).map((m) => "$" + m).join(", ")
-      + ". Para os alunos da pré-matrícula eles são trocados pelos dados de cada aluno; para um número avulso, só valem $ESCOLA, $ANO, $PROXIMO_ANO_LETIVO e $DATA, e $ALUNO se você preencher o Nome.";
+      + ". Para os alunos da pré-matrícula e do GEO eles são trocados pelos dados de cada aluno; para um número avulso, só valem $ESCOLA, $ANO, $PROXIMO_ANO_LETIVO e $DATA, e $ALUNO se você preencher o Nome.";
   }
 
   const TEXTO_COMUNICADO = "(Texto oficial gerado na hora pelo sistema, com o prazo contado a partir de hoje. Vale só para a lista de alunos da pré-matrícula.)";
@@ -209,6 +209,8 @@
   function mostrarDestino(destino) {
     $("wa-dest-numero").hidden = destino !== "numero";
     $("wa-dest-alunos").hidden = destino !== "alunos";
+    $("wa-dest-geo").hidden = destino !== "geo";
+    $("wa-destino-geo").classList.toggle("ativo", destino === "geo");
     $("wa-destino-numero").classList.toggle("ativo", destino === "numero");
     $("wa-destino-alunos").classList.toggle("ativo", destino === "alunos");
   }
@@ -217,6 +219,14 @@
     $("wa-fila-modelo").addEventListener("change", aplicarModelo);
     $("wa-destino-numero").addEventListener("click", () => mostrarDestino("numero"));
     $("wa-destino-alunos").addEventListener("click", () => mostrarDestino("alunos"));
+    $("wa-destino-geo").addEventListener("click", () => {
+      mostrarDestino("geo");
+      const sel = $("wa-fila-modelo");
+      if (ehComunicado() && [...sel.options].some((o) => o.value === "geo_confirmar_interesse")) {   // o comunicado oficial não vale para o GEO
+        sel.value = "geo_confirmar_interesse";
+        aplicarModelo();
+      }
+    });
     $("wa-fila-filtro").addEventListener("change", desenharItensFila);
 
     $("wa-fila-iniciar").addEventListener("click", async () => {
@@ -330,6 +340,49 @@
       if (!ids.length) { toast("Marque pelo menos um aluno."); return; }
       const r = await chamarFila("/da-prematricula", "POST", { ids, modelo_id: $("wa-fila-modelo").value, texto: ehComunicado() ? "" : $("wa-fila-texto").value });
       if (r) { resumoAdicao(r); $("wa-fila-pm-lista").querySelectorAll("input:checked").forEach((c) => { c.checked = false; }); }
+    });
+
+    let geoAlunos = [], geoArquivo = "";
+    function geoVisiveis() {
+      const etapa = $("wa-fila-geo-etapa").value;
+      const soNaoConfirmados = $("wa-fila-geo-matricula").value === "nao";
+      return geoAlunos.filter((a) => (!etapa || a.etapa === etapa) && (!soNaoConfirmados || !a.matricula_confirmada));
+    }
+    function desenharGeo() {
+      const marcados = new Set([...$("wa-fila-geo-lista").querySelectorAll("input:checked")].map((c) => c.dataset.geoId));
+      const vis = geoVisiveis();
+      $("wa-fila-geo-lista").innerHTML = vis.length ? vis.map((a) => `
+        <label class="checklist-item"><input type="checkbox" data-geo-id="${esc(a.id)}" data-tem="${a.tem_telefone ? 1 : 0}"${a.tem_telefone ? "" : " disabled"}${marcados.has(a.id) && a.tem_telefone ? " checked" : ""}>
+          ${esc(a.nome)} · ${esc(a.etapa || "sem etapa")}${a.matricula_confirmada ? " · matrícula confirmada" : ""}${a.tem_telefone ? "" : " · sem telefone"}</label>`).join("")
+        : `<div class="campo-ajuda">Ninguém com esse filtro.</div>`;
+      $("wa-fila-geo-info").textContent = `Arquivo ${geoArquivo}: ${geoAlunos.length} alunos; ${vis.length} com o filtro atual `
+        + `(${vis.filter((a) => a.tem_telefone).length} com telefone).`;
+      mostrar("wa-fila-geo-todos", vis.length > 0);
+      mostrar("wa-fila-geo-por", vis.length > 0);
+    }
+    $("wa-fila-geo-etapa").addEventListener("change", desenharGeo);
+    $("wa-fila-geo-matricula").addEventListener("change", desenharGeo);
+    $("wa-fila-geo-carregar").addEventListener("click", async () => {
+      const r = await chamar("/fila/geo");
+      if (!r.ok) { toast(r.dados.erro || "Não consegui ler os Direcionados GEO."); return; }
+      geoAlunos = r.dados.alunos || [];
+      geoArquivo = r.dados.arquivo || "";
+      const etapas = [...new Set(geoAlunos.map((a) => a.etapa).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true }));
+      const atual = $("wa-fila-geo-etapa").value;
+      $("wa-fila-geo-etapa").innerHTML = `<option value="">Todas as etapas</option>`
+        + etapas.map((e) => `<option value="${esc(e)}">${esc(e)}</option>`).join("");
+      if (etapas.includes(atual)) $("wa-fila-geo-etapa").value = atual;
+      $("wa-fila-geo-filtros").hidden = false;
+      desenharGeo();
+    });
+    $("wa-fila-geo-todos").addEventListener("click", () =>
+      $("wa-fila-geo-lista").querySelectorAll("input[data-tem='1']").forEach((c) => { c.checked = true; }));
+    $("wa-fila-geo-por").addEventListener("click", async () => {
+      const ids = [...$("wa-fila-geo-lista").querySelectorAll("input:checked")].map((c) => c.dataset.geoId);
+      if (!ids.length) { toast("Marque pelo menos um aluno."); return; }
+      if (ehComunicado()) { toast("O comunicado de matrícula não vale para o GEO. Escolha o modelo \"GEO: confirmar interesse na vaga\"."); return; }
+      const r = await chamarFila("/do-geo", "POST", { ids, modelo_id: $("wa-fila-modelo").value, texto: $("wa-fila-texto").value });
+      if (r) { resumoAdicao(r); $("wa-fila-geo-lista").querySelectorAll("input:checked").forEach((c) => { c.checked = false; }); }
     });
     carregarModelosFila();
   }

@@ -1704,6 +1704,7 @@ AUTOMACOES_DISPONIVEIS = [
     {"chave": "limpeza", "nome": "Limpeza total de documentos", "descricao": "Remove todos os arquivos de todos os alunos das turmas selecionadas."},
     {"chave": "aluno", "nome": "Alunos por CGM", "descricao": "Envia ao SERE os documentos da pasta de digitalização só dos alunos que você informar pelo CGM."},
     {"chave": "espec", "nome": "Upload de um tipo de documento", "descricao": "Envia ao SERE um tipo específico de documento (da pasta de digitalização) para os alunos escolhidos."},
+    {"chave": "requerimento", "nome": "Requerimento de matrícula", "descricao": "Preenche o modelo Word do requerimento com as respostas da planilha de matrícula (cadastrada com o tipo Matrícula) e salva um PDF por aluno na pasta do ano letivo. Envie o modelo em Configurações → Modelo do requerimento."},
     {"chave": "validar", "nome": "Validar documentos", "descricao": "Valida (✔) todos os documentos pendentes das turmas selecionadas."},
     {"chave": "cruzamento", "nome": "Cruzamento de docs", "descricao": "Cruza informações e valida documentações (SERE x pasta local)."},
     {"chave": "cep", "nome": "CEP", "descricao": "Consulta, valida e completa endereços via CEP; calcula distância aluno-escola."},
@@ -3045,6 +3046,41 @@ def configuracao_modelos_parecer_salvar():
     estado["status"] = "ok"
     estado["mensagem"] = (f"Modelo \"{resultado['arquivo']}\" " + ("atualizado" if resultado["substituiu"] else "salvo")
                           + f" para {len(resultado['turmas'])} turma(s)." + aviso)
+    return jsonify(estado)
+
+
+def _estado_modelo_requerimento() -> dict:
+    from src.automacao import preencher_requerimento as pr
+    caminho = pr.modelo_enviado()
+    return {"existe": caminho is not None, "arquivo": caminho.name if caminho else None,
+            "pasta": str(pr.pasta_modelos() or ""), "saida": str(pr.pasta_saida_padrao()),
+            "limite_mb": pr.LIMITE_MODELO_MB}
+
+
+@api_bp.route("/configuracoes/modelo-requerimento", methods=["GET"])
+def configuracao_modelo_requerimento_obter():
+    return jsonify(_estado_modelo_requerimento())
+
+
+@api_bp.route("/configuracoes/modelo-requerimento", methods=["POST"])
+def configuracao_modelo_requerimento_salvar():
+    """Upload do modelo do requerimento de matrícula (.docx), guardado na pasta de modelos. multipart: arquivo."""
+    from src.automacao import preencher_requerimento as pr
+    arquivo = request.files.get("arquivo")
+    if arquivo is None or not arquivo.filename:
+        return jsonify({"erro": "Escolha o arquivo do modelo (.docx)."}), 400
+    if not arquivo.filename.lower().endswith(".docx"):
+        return jsonify({"erro": "O modelo precisa ser um arquivo Word (.docx)."}), 400
+    conteudo = arquivo.read(pr.LIMITE_MODELO_MB * 1024 * 1024 + 1)
+    try:
+        resultado = pr.salvar_modelo(conteudo)
+    except ValueError as exc:
+        return jsonify({"erro": str(exc)}), 400
+    except OSError as exc:
+        return jsonify({"erro": f"Não foi possível gravar o modelo: {exc}"}), 500
+    estado = _estado_modelo_requerimento()
+    estado["status"] = "ok"
+    estado["mensagem"] = "Modelo do requerimento " + ("atualizado." if resultado["substituiu"] else "salvo.")
     return jsonify(estado)
 
 

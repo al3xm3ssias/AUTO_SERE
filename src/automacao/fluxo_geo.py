@@ -27,6 +27,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
+from playwright.async_api import Error as PlaywrightError, async_playwright
 
 from src.comum import navegador as _navegador
 from src.comum import paths
@@ -101,15 +102,22 @@ JS_LISTAR_ETAPAS = """
 
 # ---------------------------------------------------------------- navegação
 async def _abrir_criar_planejamento(page):
-    await page.get_by_text("Estrutura e Funcionamento", exact=True).first.hover()
+    # 1) Abre o menu principal (mouseover disparado via JS, igual ao Consulta Padrão)
+    menu = await page.wait_for_selector("#divoCMenu0_0", timeout=15_000)
+    await menu.evaluate(
+        "el => el.dispatchEvent(new MouseEvent('mouseover', {view: window, bubbles: true, cancelable: true}))"
+    )
     await page.wait_for_timeout(800)
+
+    # 2) Submenu: Planejamento Escolar
     await page.get_by_text("Planejamento Escolar", exact=True).first.hover()
     await page.wait_for_timeout(500)
+
+    # 3) Item final: Criar planejamento de turma, período
     await page.get_by_text("Criar planejamento de turma", exact=True).first.click()
     await page.wait_for_selector(SEL_PERIODO, timeout=30000)
     await page.wait_for_load_state("networkidle")
-
-
+    
 async def _selecionar_periodo(page, periodo):
     sel = page.locator(SEL_PERIODO)
     opcoes = await sel.evaluate(
@@ -120,7 +128,28 @@ async def _selecionar_periodo(page, periodo):
     if await sel.input_value() != valor:
         await sel.select_option(value=valor)       # dispara onchange
     await page.wait_for_load_state("networkidle")
-    await page.wait_for_timeout(1000)              # contadores recarregam por ajax
+
+    # Espera os links de etapa aparecerem (carregam por ajax depois do onchange)
+    try:
+        await page.wait_for_selector(
+            'a[href^="javascript:listarFluxo("]', state="visible", timeout=30_000)
+    except Exception:
+        pass  # quem chama decide o que fazer se continuar vazio
+    await page.wait_for_timeout(1500)              # deixa os contadores "Total:N" atualizarem
+
+
+async def _listar_etapas_com_espera(page, log, tentativas=5):
+    """Lê as etapas visíveis; se vier vazio, espera e tenta de novo."""
+    etapas = []
+    for i in range(tentativas):
+        etapas = await page.evaluate(JS_LISTAR_ETAPAS)
+        # só aceita quando todos os links já trazem o "Total:N" carregado
+        if etapas and all(_total_do_link(e["texto"]) is not None for e in etapas):
+            return etapas
+        log(f"  etapas ainda não carregaram (tentativa {i + 1}/{tentativas})...")
+        await page.wait_for_timeout(3000)
+    return etapas
+
 
 
 async def _fechar_modal(page):
@@ -213,7 +242,12 @@ async def coletar_fluxo_geo(page, ano_letivo=None, pasta_saida=None, sufixo_peri
     await _abrir_criar_planejamento(page)
     await _selecionar_periodo(page, periodo)
 
-    etapas = await page.evaluate(JS_LISTAR_ETAPAS)
+    etapas = await _listar_etapas_com_espera(page, log)
+    if not etapas:
+        raise RuntimeError(
+            "Nenhuma etapa carregou na tela de planejamento; nada foi gravado "
+            "(o arquivo anterior foi preservado)."
+        )
     log(f"{len(etapas)} etapa(s) visível(is): " + "; ".join(f"{e['etapa']} [{e['texto']}]" for e in etapas))
 
     todos, completo = {}, True

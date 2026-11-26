@@ -39,6 +39,8 @@ FINALIDADE_PLANILHA_TURMAS = _reg.FINALIDADE_PLANILHA_TURMAS
 FINALIDADE_CHAMADA = _reg.FINALIDADE_CHAMADA
 FINALIDADE_LISTAGEM_ALUNOS = _reg.FINALIDADE_LISTAGEM_ALUNOS
 FINALIDADE_IMC = _reg.FINALIDADE_IMC
+FINALIDADE_MATRICULA = _reg.FINALIDADE_MATRICULA
+FINALIDADE_PREVISAO = _reg.FINALIDADE_PREVISAO
 
 
 class PlanilhaNaoCadastrada(LookupError):
@@ -208,9 +210,15 @@ def _turmas_do_ano() -> dict:
         return {}
 
 
+def _previsao_do_proximo_ano() -> dict:
+    """Alunos da Previsão do ano letivo seguinte ao em uso (src.comum.previsao.alunos_para_planilha)."""
+    from . import previsao as _previsao
+    return _previsao.alunos_para_planilha(_paths.dados_ano_atual(), int(_paths.ano_atual()) + 1)
+
+
 def criar_de_modelo(modelo: str, plataforma: str = "google_sheets", nome: str = "", turma: str = "", turmas_selecionadas=(),
                     destino=None, tornar_vigente: bool = False, turmas: Optional[dict] = None, servico=None,
-                    escola: str = "") -> dict:
+                    escola: str = "", previsao: Optional[dict] = None) -> dict:
     """
     Cria uma planilha NOVA a partir de um modelo, na plataforma escolhida, e a cadastra (com finalidade, turma, modelo e
     versão). Alunos vêm do turmas.json do ano. Se já existe outra ativa para o mesmo uso, a nova entra INATIVA (o que
@@ -229,12 +237,21 @@ def criar_de_modelo(modelo: str, plataforma: str = "google_sheets", nome: str = 
     if motivo:
         raise _plat.PlataformaIndisponivel(motivo)
 
-    dados = turmas if turmas is not None else _turmas_do_ano()
-    if not dados:
-        raise ValueError("Ainda não existe turmas.json: execute primeiro a automação 'Turmas'.")
     ano = int(_paths.ano_atual())
+    dados_previsao: dict = {}
+    if m.usa_previsao:
+        ano += 1                                           # a previsão é do ano letivo seguinte ao em uso
+        dados_previsao = previsao if previsao is not None else _previsao_do_proximo_ano()
+        if not dados_previsao.get("linhas"):
+            raise ValueError(f"A previsão de {ano} ainda não tem alunos: rode a rematrícula, a pré-matrícula do próximo ano "
+                             "ou os Direcionados GEO para trazê-los.")
+        dados = {}
+    else:
+        dados = turmas if turmas is not None else _turmas_do_ano()
+        if not dados:
+            raise ValueError("Ainda não existe turmas.json: execute primeiro a automação 'Turmas'.")
     contexto = _modelos.Contexto(ano=ano, turmas=dados, turma=turma if m.uma_turma else "", escola=escola,
-                                 selecionadas=tuple(turmas_selecionadas or ()))
+                                 selecionadas=tuple(turmas_selecionadas or ()), previsao=dados_previsao)
     abas = m.montar(contexto)
     titulo = " ".join(str(nome or "").split()) or " ".join(p for p in (m.nome, turma if m.uma_turma else "", str(ano)) if p)
 
@@ -262,7 +279,8 @@ def criar_de_modelo(modelo: str, plataforma: str = "google_sheets", nome: str = 
 
 def _categoria_da(finalidade: str) -> str:
     return {FINALIDADE_PLANILHA_TURMAS: _reg.CATEGORIA_TURMAS, FINALIDADE_CHAMADA: "Chamada", FINALIDADE_IMC: "IMC",
-            FINALIDADE_LISTAGEM_ALUNOS: _reg.CATEGORIA_TURMAS}.get(finalidade, _reg.CATEGORIA_PADRAO)
+            FINALIDADE_LISTAGEM_ALUNOS: _reg.CATEGORIA_TURMAS, FINALIDADE_MATRICULA: "Matrícula",
+            FINALIDADE_PREVISAO: "Previsão"}.get(finalidade, _reg.CATEGORIA_PADRAO)
 
 
 def cadastrar_externa(nome: str, finalidade: str, turma: str = "", link: str = "", caminho: str = "",

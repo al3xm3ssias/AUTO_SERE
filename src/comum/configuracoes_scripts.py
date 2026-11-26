@@ -63,6 +63,15 @@ def _ler_pasta_modelos() -> tuple[bool, str]:
     return pasta.is_dir(), str(pasta) + ("" if pasta.is_dir() else " — a pasta não existe")
 
 
+def _ler_modelo_requerimento() -> tuple[bool, str]:
+    from src.automacao import preencher_requerimento as pr
+    caminho = pr.modelo_enviado()
+    pasta = pr.pasta_modelos()
+    if caminho is None:
+        return False, "nenhum modelo enviado" + (f" (vai para {pasta})" if pasta else "")
+    return True, str(caminho)
+
+
 def _ler_data_corte() -> tuple[bool, str]:
     from src.comum import configuracao as c
     data = c.data_corte_transferidos().strftime("%d/%m/%Y")
@@ -133,6 +142,8 @@ CATALOGO: dict[str, ConfigSistema] = {c.id: c for c in (
     ConfigSistema("escola", "Unidade escolar", "Nome, endereço e CEP da escola.", _ler_escola, "escola"),
     ConfigSistema("pasta_digitalizacao", "Pasta de digitalização", "Onde ficam os documentos escaneados dos alunos.",
                   _ler_pasta_digitalizacao, "pasta_digitalizacao"),
+    ConfigSistema("modelo_requerimento", "Modelo do requerimento", "Modelo .docx do requerimento de matrícula, enviado em Configurações.",
+                  _ler_modelo_requerimento, "modelo_requerimento"),
     ConfigSistema("pasta_modelos", "Pasta de modelos", "Onde ficam os modelos .docx (termos, pareceres).", _ler_pasta_modelos, "modelos_parecer"),
     ConfigSistema("data_corte_transferidos", "Data de corte dos transferidos",
                   "O processo automático vale para transferidos a partir dessa data.", _ler_data_corte, "data_corte_transferidos"),

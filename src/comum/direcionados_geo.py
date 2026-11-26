@@ -67,3 +67,34 @@ def carregar_direcionados(pasta, ano_letivo) -> dict:
             "matricula_confirmada": sum(1 for a in presentes if a["matricula_confirmada"]),
         },
     }
+
+
+def alunos_para_mensagem(pasta, ano_letivo) -> dict:
+    """
+    Alunos do arquivo GEO que ainda estão na lista (situacao_lista != "ausente"), no formato usado pela fila do WhatsApp:
+    ``{"ano", "arquivo", "alunos": [{id, nome, cgm, etapa, turma, responsavel, telefone, matricula_confirmada}]}``.
+    O id é o CGM (ou o nome, se faltar). ValueError (com o motivo) se o arquivo não existe, está ilegível ou vazio.
+    """
+    from src.comum.arquivos_json import ArquivoJsonCorrompidoError
+
+    arquivo = nome_arquivo(ano_letivo)
+    try:
+        dados = carregar_direcionados(pasta, ano_letivo)
+    except ArquivoJsonCorrompidoError as exc:
+        raise ValueError(f"{arquivo}: {exc}") from exc
+    if not dados["existe"]:
+        raise ValueError(f"Ainda não existe {arquivo}. Rode a coleta dos Direcionados GEO para gerá-lo.")
+    alunos = [
+        {"id": a["cgm"] or a["nome"], "nome": a["nome"], "cgm": a["cgm"], "etapa": a["etapa"], "turma": a["turma"],
+         "responsavel": a["responsavel"], "telefone": a["telefone"], "matricula_confirmada": a["matricula_confirmada"]}
+        for a in dados["alunos"] if a["situacao_lista"] != "ausente" and (a["cgm"] or a["nome"])
+    ]
+    if not alunos:
+        raise ValueError(f"{arquivo} não tem nenhum aluno na lista.")
+    return {"ano": int(ano_letivo), "arquivo": arquivo, "alunos": alunos}
+
+
+def primeiro_nome(nome: str) -> str:
+    """Primeiro nome em 'Título' (o SERE grava em MAIÚSCULAS): 'MARIA DA SILVA' -> 'Maria'. Vazio se não houver nome."""
+    partes = _txt(nome).split()
+    return partes[0].capitalize() if partes else ""

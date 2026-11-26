@@ -16,7 +16,7 @@ Um registro (linha da tabela):
     observacao    anotação livre (opcional, até 500 caracteres)
     status        "ativa" | "inativa" (inativa = guardada, mas fora de uso)
     finalidade    para que o SISTEMA usa a planilha: "" (só guardada) | parecer_infantil | planilha_turmas | chamada |
-                  listagem_alunos | imc (ver FINALIDADES_INFO). É por ela que os módulos acham a planilha vigente
+                  listagem_alunos | imc | matricula | previsao (ver FINALIDADES_INFO). É por ela que os módulos acham a planilha vigente
     turma         turma a que a planilha pertence (nome como em turmas.json); obrigatória nas finalidades "por turma"
     plataforma    "google_sheets" | "xlsx" | "ods" (planilhas_plataformas.py; registro antigo sem o campo = google_sheets)
     caminho       arquivo no computador (xlsx/ods); vazio no Google
@@ -60,6 +60,8 @@ FINALIDADE_PLANILHA_TURMAS = "planilha_turmas"
 FINALIDADE_CHAMADA = "chamada"
 FINALIDADE_LISTAGEM_ALUNOS = "listagem_alunos"
 FINALIDADE_IMC = "imc"
+FINALIDADE_MATRICULA = "matricula"
+FINALIDADE_PREVISAO = "previsao"
 # Para que o sistema usa cada planilha. por_turma: há uma planilha vigente POR TURMA (senão, uma só para a escola);
 # externa: a planilha vem pronta da Secretaria (nunca nasce de modelo); modelo vem de planilhas_modelos.py.
 FINALIDADES_INFO = {
@@ -68,9 +70,11 @@ FINALIDADES_INFO = {
     FINALIDADE_CHAMADA: {"nome": "Chamada", "por_turma": True, "externa": False},
     FINALIDADE_LISTAGEM_ALUNOS: {"nome": "Listagem dos Alunos", "por_turma": False, "externa": False},
     FINALIDADE_IMC: {"nome": "IMC", "por_turma": False, "externa": False},
+    FINALIDADE_MATRICULA: {"nome": "Matrícula (respostas do formulário)", "por_turma": False, "externa": True},
+    FINALIDADE_PREVISAO: {"nome": "Previsão do próximo ano (alunos por turma)", "por_turma": False, "externa": False},
 }
 FINALIDADES = {k: v["nome"] for k, v in FINALIDADES_INFO.items()}        # valor → nome na tela
-CATEGORIAS_SUGERIDAS = (CATEGORIA_TURMAS, "Pareceres do Infantil", "Pareceres do Fundamental", "Chamada", "IMC", "Matrícula",
+CATEGORIAS_SUGERIDAS = (CATEGORIA_TURMAS, "Pareceres do Infantil", "Pareceres do Fundamental", "Chamada", "IMC", "Matrícula", "Previsão",
                         "Funcionários", CATEGORIA_PADRAO)
 
 LIMITE_NOME = 250

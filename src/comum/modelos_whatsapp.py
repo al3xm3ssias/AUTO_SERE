@@ -79,6 +79,18 @@ PADROES: dict[str, dict] = {
         "nome": "Matrícula aprovada (próximo ano letivo)",
         "texto": TEXTO_MATRICULA_APROVADA,
     },
+    "geo_confirmar_interesse": {
+        "nome": "GEO: confirmar interesse na vaga (pais de aluno direcionado)",
+        "texto": ("Olá, $RESPONSAVEL! Aqui é da $ESCOLA.\n\n"
+                  "O(a) aluno(a) $ALUNO foi direcionado(a) à nossa escola para o ano letivo de $PROXIMO_ANO_LETIVO, "
+                  "mas a matrícula ainda não foi confirmada.\n\n"
+                  "Para organizarmos as vagas, precisamos saber: vocês ainda têm interesse na vaga em nossa escola "
+                  "ou já confirmaram a matrícula em outra unidade escolar?\n\n"
+                  "Por favor, responda esta mensagem com o número da opção:\n"
+                  "1 - Tenho interesse e vou confirmar a matrícula nesta escola\n"
+                  "2 - Já matriculei em outra escola\n\n"
+                  "Assim, se a vaga não for mais necessária, podemos oferecê-la a outra família. Obrigado!"),
+    },
     "chamada_matricula": {
         "nome": "Chamada para matrícula (pais de aluno novo)",
         "texto": ("Olá, $RESPONSAVEL! Aqui é da $ESCOLA.\n\n"

@@ -603,3 +603,54 @@ def montar_previsao(pasta, ano_letivo) -> dict:
         "turmas": resumo_por_turma(linhas),
         "fora": analisar_fora_da_rematricula(pasta, linhas, previsao_alunos),
     }
+
+
+def alunos_para_planilha(pasta, ano_letivo) -> dict:
+    """
+    Alunos da previsão do ``ano_letivo`` (o PRÓXIMO) prontos para virar planilha, uma lista só, por turma do ano que vem:
+    rematriculados e novos (``montar_previsao``) + direcionados GEO presentes (sere_sisgea_<ano>.json) que ainda não
+    estão na lista (mesmo CGM conta uma vez; a rematrícula e a pré-matrícula têm prioridade).
+
+    Devolve {"ano", "linhas": [{"turma","nome","cgm","nascimento","origem","situacao","turma_atual","responsavel","telefone"}],
+             "avisos": [str]}. ``origem``: "Rematriculado" | "Novo (pré-matrícula)" | "Direcionado GEO". Só lê arquivos.
+    """
+    from src.comum import direcionados_geo as _geo
+
+    base = montar_previsao(pasta, ano_letivo)
+    contatos = _contatos(Path(pasta))
+    linhas: list[dict] = []
+    cgms: set[str] = set()
+    for l in base["linhas"]:
+        cgm = str(l.get("cgm") or "").strip()
+        if cgm:
+            cgms.add(cgm)
+        contato = contatos.get(cgm, {})
+        linhas.append({
+            "turma": l["turma"] or "Sem turma", "nome": l["nome"], "cgm": cgm, "nascimento": l.get("nascimento", ""),
+            "origem": "Rematriculado" if l["tipo"] == TIPO_REMATRICULADO else "Novo (pré-matrícula)",
+            "situacao": "Rematrícula confirmada" if l["tipo"] == TIPO_REMATRICULADO
+            else ("Com vaga" if l["situacao"] == SITUACAO_MATRICULADO else "Aguardando vaga"),
+            "turma_atual": l.get("turma_atual", ""),
+            "responsavel": l.get("responsavel") or contato.get("responsavel", ""),
+            "telefone": l.get("telefone") or contato.get("telefone", ""),
+        })
+    avisos = list(base["avisos"])
+    geo = _geo.carregar_direcionados(pasta, ano_letivo)
+    repetidos = 0
+    for a in geo["alunos"]:
+        if a["situacao_lista"] == "ausente":
+            continue
+        if a["cgm"] and a["cgm"] in cgms:
+            repetidos += 1
+            continue
+        if a["cgm"]:
+            cgms.add(a["cgm"])
+        linhas.append({
+            "turma": rotulo_serie_da_turma(a["turma"] or a["etapa"]) or "Sem turma", "nome": a["nome"], "cgm": a["cgm"],
+            "nascimento": "", "origem": "Direcionado GEO", "situacao": "Matrícula confirmada" if a["matricula_confirmada"] else "Direcionado",
+            "turma_atual": "", "responsavel": a["responsavel"], "telefone": a["telefone"],
+        })
+    if repetidos:
+        avisos.append(f"{repetidos} direcionado(s) GEO já estavam na rematrícula/pré-matrícula; contados uma vez só.")
+    linhas.sort(key=lambda l: (_ordem_turma(l["turma"]), _sem_acento(l["turma"]), _sem_acento(l["nome"])))
+    return {"ano": int(ano_letivo), "linhas": linhas, "avisos": avisos}

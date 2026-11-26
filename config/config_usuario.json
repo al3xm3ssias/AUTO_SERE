@@ -33,13 +33,16 @@
     },
     "prematricula_completa": {
       "mostrar_janela": true
+    },
+    "fluxo_geo": {
+      "mostrar_janela": true
     }
   },
   "google_sheets": {},
   "google_oauth": {
     "conta": "judith@pontagrossa.pr.gov.br",
     "navegador": "chrome",
-    "perfil": "Profile 11",
+    "perfil": "",
     "abrir": true
   },
   "backup_automatico": null

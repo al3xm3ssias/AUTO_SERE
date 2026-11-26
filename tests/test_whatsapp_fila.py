@@ -230,7 +230,7 @@ def test_arquivo_corrompido_da_erro_claro_e_nao_apaga(amb):
 # ───────────── modelos ─────────────
 
 def test_modelos_prontos_criar_ajustar_excluir(amb):
-    assert [m["id"] for m in modelos.listar()] == ["livre", "matricula_aprovada", "chamada_matricula"]
+    assert [m["id"] for m in modelos.listar()] == ["livre", "matricula_aprovada", "geo_confirmar_interesse", "chamada_matricula"]
     novo = modelos.salvar("Lembrete", "Olá, $RESPONSAVEL! $ALUNO.")
     assert novo["id"] == "lembrete" and not novo["padrao"]
     with pytest.raises(ValueError, match="desconhecido"):

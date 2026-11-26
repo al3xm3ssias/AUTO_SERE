@@ -148,7 +148,7 @@ def test_o_guarda_nao_deixa_nenhum_arquivo_mudar(consulta, web):
     cred = consulta / "credenciais"
     for caminho, corpo in [("/web/api/automacoes/turmas/executar", {}), ("/web/api/configuracoes/gmail", {"email": "a@b.com", "senha": "abcd abcd abcd abcd"}),
                            ("/web/api/configuracoes/prematricula", {"login": "1", "senha": "2"}),
-                           ("/web/api/configuracoes/modelos-parecer", {}), ("/web/api/escola", {"nome": "X"})]:
+                           ("/web/api/configuracoes/modelos-parecer", {}), ("/web/api/configuracoes/modelo-requerimento", {}), ("/web/api/escola", {"nome": "X"})]:
         assert web.post(caminho, json=corpo).status_code in (403, 404, 405)
     assert {p.name: p.read_bytes() for p in pasta.iterdir()} == antes
     assert not cred.exists() or not (cred / ".env").exists()

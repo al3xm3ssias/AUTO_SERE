@@ -195,6 +195,52 @@ def test_catalogo_tem_os_quatro_modelos_padrao_e_nenhum_para_a_externa(amb):
         pm.modelo("inexistente")
 
 
+PREVISAO = {"linhas": [
+    {"turma": "2º Ano", "nome": "ANA", "cgm": "1001", "nascimento": "01/02/2019", "origem": "Rematriculado",
+     "situacao": "Rematrícula confirmada", "turma_atual": "1º Ano Integral A", "responsavel": "MÃE", "telefone": "4299"},
+    {"turma": "2º Ano", "nome": "BETO", "cgm": "", "nascimento": "", "origem": "Novo (pré-matrícula)", "situacao": "Com vaga",
+     "turma_atual": "", "responsavel": "", "telefone": ""},
+    {"turma": "Infantil IV", "nome": "DUDA", "cgm": "2001", "nascimento": "", "origem": "Direcionado GEO", "situacao": "Direcionado",
+     "turma_atual": "", "responsavel": "", "telefone": ""}]}
+
+
+def test_modelo_previsao_uma_aba_por_turma_com_resumo(amb):
+    assert pm.modelo("previsao").usa_previsao and pm.modelo_da_finalidade("previsao").chave == "previsao"
+    abas = pm.modelo("previsao").montar(pm.Contexto(ano=2027, previsao=PREVISAO))
+    assert [a.nome for a in abas] == ["Resumo", "2º Ano", "Infantil IV"]
+    dois = abas[1].linhas
+    assert dois[0][:3] == ["Nº", "CGM", "Nome do aluno"] and dois[1][1:3] == ["1001", "ANA"] and dois[2][1] == "-"   # sem CGM = "-"
+    assert abas[0].linhas[1][1].startswith("=COUNTA('2º Ano'!") and abas[0].linhas[-1][0] == "Total"
+    so_infantil = pm.modelo("previsao").montar(pm.Contexto(ano=2027, previsao=PREVISAO, selecionadas=("Infantil IV",)))
+    assert [a.nome for a in so_infantil] == ["Resumo", "Infantil IV"]
+    with pytest.raises(ValueError):
+        pm.modelo("previsao").montar(pm.Contexto(ano=2027, previsao=PREVISAO, selecionadas=("9º Ano",)))
+
+
+def test_criar_previsao_em_xlsx_cadastra_com_ano_seguinte(amb):
+    r = gp.criar_de_modelo("previsao", "xlsx", previsao=PREVISAO)
+    assert r["item"]["finalidade"] == "previsao" and r["item"]["status"] == "ativa" and "2027" in r["item"]["nome"]
+    with zipfile.ZipFile(r["item"]["caminho"]) as z:
+        assert z.read("xl/workbook.xml").decode().count("<sheet ") == 3
+    with pytest.raises(ValueError, match="ainda não tem alunos"):
+        gp.criar_de_modelo("previsao", "xlsx", previsao={"linhas": []})
+
+
+def test_previsao_junta_rematriculados_novos_e_geo_sem_repetir_cgm(amb):
+    from src.comum import previsao as pv
+    pasta = amb / "dados" / "2026"
+    (pasta / "rematriculas_sucesso.json").write_text(json.dumps([
+        {"cgm": "1001", "nome": "ANA", "data_nascimento": "01/02/2019", "turma": "1º Ano Integral A"}]), encoding="utf-8")
+    (pasta / "sere_sisgea_2027.json").write_text(json.dumps({"alunos": [
+        {"nome": "ANA", "cgm": "1001", "etapa": "2º ANO"},
+        {"nome": "DUDA", "cgm": "2001", "etapa": "INFANTIL 4"},
+        {"nome": "SUMIU", "cgm": "3", "etapa": "1º ANO", "situacao_lista": "ausente"}]}), encoding="utf-8")
+    d = pv.alunos_para_planilha(pasta, 2027)
+    assert [(l["turma"], l["nome"], l["origem"]) for l in d["linhas"]] == [
+        ("Infantil IV", "DUDA", "Direcionado GEO"), ("2º Ano Integral", "ANA", "Rematriculado")]
+    assert any("já estavam" in a for a in d["avisos"])
+
+
 def test_modelo_chamada_so_com_matriculados_em_ordem_e_formulas(amb):
     abas = pm.modelo("chamada").montar(pm.Contexto(ano=2026, turmas=TURMAS, turma=T1))
     assert [a.nome for a in abas][:2] == ["Fevereiro", "Março"] and len(abas) == 11

@@ -13,6 +13,8 @@ API do WhatsApp para a interface web  —  prefixo /web/api/whatsapp
     POST /fila/itens     põe mensagens na fila ({itens:[{numero,nome,texto}]})
     GET  /fila/prematricula          alunos de previsao_alunos_<ano+1>.json (próximo ano letivo), para filtrar por turma/posição
     POST /fila/da-prematricula       põe na fila os alunos escolhidos ({ids, modelo_id})
+    GET  /fila/geo                   alunos de sere_sisgea_<ano+1>.json (Direcionados GEO), para filtrar por etapa/matrícula
+    POST /fila/do-geo                põe na fila os alunos GEO escolhidos ({ids, modelo_id, texto})
     POST /fila/config    intervalo entre mensagens, limite por dia, continuar no dia seguinte
     POST /fila/iniciar | /fila/pausar | /fila/cancelar-pendentes | /fila/limpar-historico
     POST /fila/itens/<id>/cancelar | /fila/itens/<id>/repetir
@@ -415,6 +417,68 @@ def fila_da_prematricula():
                 continue
             itens.append({"numero": a["telefone"], "nome": a["nome"], "texto": texto})
         r = obter_fila().adicionar(itens, origem="prematricula") if itens else {"adicionados": 0, "duplicados": 0, "invalidos": []}
+        r["invalidos"] = list(r.get("invalidos") or []) + recusados
+        r["sem_telefone"] = sem_telefone
+        return _resposta_fila(resultado=r)
+    except ValueError as exc:
+        return _erro(str(exc))
+
+
+# ───────────── Direcionados GEO: perguntar aos pais se ainda querem a vaga ─────────────
+MODELO_GEO_ID = "geo_confirmar_interesse"
+
+
+def _geo_para_fila() -> dict:
+    """Alunos de dados/<ano em uso>/sere_sisgea_<ano+1>.json (ValueError com o motivo se faltar/estiver ilegível)."""
+    from src.comum import direcionados_geo as _geo
+    from src.comum import paths
+    return _geo.alunos_para_mensagem(paths.dados_ano_atual(), int(paths.ano_atual()) + 1)
+
+
+@whatsapp_bp.route("/fila/geo")
+def fila_geo():
+    try:
+        g = _geo_para_fila()
+    except ValueError as exc:
+        return _erro(str(exc))
+    return jsonify({"ano": g["ano"], "arquivo": g["arquivo"], "modelo_padrao": MODELO_GEO_ID,
+                    "alunos": [{"id": a["id"], "nome": a["nome"], "etapa": a["etapa"], "turma": a["turma"],
+                                "matricula_confirmada": a["matricula_confirmada"], "tem_telefone": bool(a["telefone"])}
+                               for a in g["alunos"]]})
+
+
+@whatsapp_bp.route("/fila/do-geo", methods=["POST"])
+def fila_do_geo():
+    from src.comum import direcionados_geo as _geo
+    from src.comum import modelos_whatsapp as _modelos
+    corpo = request.get_json(silent=True) or {}
+    ids = {str(i) for i in (corpo.get("ids") or [])}
+    modelo_id = str(corpo.get("modelo_id") or MODELO_GEO_ID)
+    if not ids:
+        return _erro("Marque pelo menos um aluno.")
+    if modelo_id == COMUNICADO_ID:
+        return _erro("O comunicado de matrícula é para quem já tem vaga. Para os Direcionados GEO, escolha outro modelo.")
+    try:
+        achado = _modelos.obter(modelo_id)
+        texto_base = str(corpo.get("texto") or "").strip() or (achado["texto"] if achado else "")
+        if not texto_base.strip():
+            return _erro("Escolha um modelo com texto.")
+        itens, sem_telefone, recusados = [], [], []
+        for a in _geo_para_fila()["alunos"]:
+            if a["id"] not in ids:
+                continue
+            if not a["telefone"]:
+                sem_telefone.append(a["nome"])
+                continue
+            ctx = {**_modelos.contexto_base(), "ALUNO": a["nome"], "TURMA": a["turma"],
+                   "RESPONSAVEL": _geo.primeiro_nome(a["responsavel"]) or "responsável"}
+            texto = _modelos.renderizar(texto_base, ctx)
+            sobra = _modelos.marcadores_sobrando(texto)
+            if sobra:
+                recusados.append({"nome": a["nome"], "erro": "faltou o dado de " + ", ".join("$" + m for m in sobra)})
+                continue
+            itens.append({"numero": a["telefone"], "nome": a["nome"], "texto": texto})
+        r = obter_fila().adicionar(itens, origem="geo") if itens else {"adicionados": 0, "duplicados": 0, "invalidos": []}
         r["invalidos"] = list(r.get("invalidos") or []) + recusados
         r["sem_telefone"] = sem_telefone
         return _resposta_fila(resultado=r)

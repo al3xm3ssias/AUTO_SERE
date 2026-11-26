@@ -849,6 +849,20 @@ CONFIGURACOES: dict[str, dict] = {
         "veja_tambem": [R("automacao", "gerar_pastas"), R("automacao", "aluno"), R("automacao", "analisa_pasta")],
     },
 
+    "modelo_requerimento": {
+        "titulo": "Painel: Modelo do requerimento", "icone": "files",
+        "resumo": "Envio do modelo Word (.docx) do requerimento de matrícula, guardado na pasta de modelos.",
+        "passos": [
+            "Escolha o arquivo .docx do modelo.",
+            "Clique em **Enviar modelo**.",
+        ],
+        "dicas": [
+            "O modelo precisa ter `$NOME_ALUNO`. A Filiação 1 e 2 usam `$NOME_RESP1`, `$NOME_RESP2`, `$CPF_RESP1` etc.",
+            "Reenviar substitui o modelo anterior. Os PDFs gerados vão para a pasta do ano letivo.",
+        ],
+        "veja_tambem": [R("automacao", "requerimento")],
+    },
+
     "modelos_parecer": {
         "titulo": "Painel: Modelos de parecer", "icone": "files",
         "resumo": "Envio do modelo Word (.docx) do parecer do Ensino Fundamental e ligação dele às turmas.",

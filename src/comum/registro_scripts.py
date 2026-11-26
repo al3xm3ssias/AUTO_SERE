@@ -809,7 +809,7 @@ def _plano_parecer_planilha(o, p, tj, ctx) -> Plano:
         "planilha_id": str(p.get("planilha_cadastro") or "").strip() or None, "turmas": list(o.turmas) or None})
 
 
-# ── Planilha a partir de um modelo (Chamada, Turmas, Listagem, IMC) ──────────────────────────────────
+# ── Planilha a partir de um modelo (Chamada, Turmas, Listagem, IMC, Previsão) ──────────────────────────────────
 
 def _extras_planilha_modelo() -> list[dict]:
     from src.comum import planilhas_gerenciador as gp
@@ -842,7 +842,9 @@ def _plano_planilha_modelo(o, p, tj, ctx) -> Plano:
     from src.comum import planilhas_gerenciador as gp
     modelo = str(p.get("modelo") or "")
     _validar_planilha_modelo({**p, "turmas": list(o.turmas)})
-    escolhidas = list(o.turmas)
+    from src.comum import planilhas_modelos as pm
+    # A Previsão tem as turmas do ano que vem (série, sem seção): o filtro de turmas de hoje não se aplica; ela sai completa.
+    escolhidas = [] if pm.modelo(modelo).usa_previsao else list(o.turmas)
     return Plano("sync", _executar_planilha_modelo, {
         "modelo": modelo, "plataforma": str(p.get("plataforma") or "google_sheets"), "nome": str(p.get("nome_planilha") or "").strip(),
         "turma": escolhidas[0] if escolhidas else "", "turmas_selecionadas": escolhidas,
@@ -1271,6 +1273,47 @@ registrar(Script("parecer_planilha", (_T, _TE), _plano_parecer_planilha, validar
                  ajuda_teste="Gera só o parecer do primeiro aluno de cada planilha do Infantil, para você conferir o acesso ao "
                              "Google, o PDF e a pasta antes de gerar todos."))
 
+# ── Requerimento de matrícula (planilha cadastrada com o tipo Matrícula → PDF por aluno) ──────────
+
+def _extras_requerimento() -> list[dict]:
+    from src.comum.planilhas_gerenciador import FINALIDADE_MATRICULA
+    return [
+        {"tipo": "select", "id": "campo-planilha-matricula", "nome": "planilha_cadastro", "label": "Planilha de matrícula (cadastrada)",
+         "semVazio": True, "padrao": "", "opcoes": _opcoes_planilha(FINALIDADE_MATRICULA, "A ativa (tipo Matrícula)"),
+         "descricao": "As respostas do formulário de matrícula. Cadastre a planilha em 'Planilhas do Drive' com o tipo Matrícula."},
+        {"tipo": "texto", "id": "campo-nome-requerimento", "nome": "nome_aluno", "label": "Só o aluno (opcional)",
+         "placeholder": "parte do nome; em branco = todas as respostas"},
+        {"tipo": "caixa", "id": "campo-juntar-requerimento", "nome": "juntar", "label": "Gerar também um PDF único (TODOS.pdf)",
+         "descricao": "Junta todos os requerimentos gerados num só arquivo, para imprimir de uma vez."},
+    ]
+
+
+def _validar_requerimento(p: dict) -> None:
+    from src.automacao import preencher_requerimento as pr
+    from src.comum import planilhas_gerenciador as gp
+    try:
+        gp.resolver(gp.FINALIDADE_MATRICULA, id_item=str(p.get("planilha_cadastro") or "").strip() or None,
+                    plataformas=["google_sheets"])
+    except LookupError as exc:                       # sem planilha / mais de uma / id inexistente: vira aviso na tela
+        raise ValueError(str(exc)) from exc
+    if pr.modelo_enviado() is None:
+        raise ValueError("Nenhum modelo do requerimento foi enviado. Envie o .docx em Configurações → Modelo do requerimento.")
+
+
+def _plano_requerimento(o, p, tj, ctx) -> Plano:
+    from src.automacao import preencher_requerimento as pr
+    return Plano("sync", pr.executar, {
+        "planilha_id": str(p.get("planilha_cadastro") or "").strip() or None,
+        "nome": str(p.get("nome_aluno") or "").strip() or None,
+        "juntar": bool(p.get("juntar", False)), "modo_teste": o.modo_teste},
+        "[OPÇÕES] Requerimento de matrícula (planilha tipo Matrícula)")
+
+
+registrar(Script("requerimento", (_TE,), _plano_requerimento, validar_extras=_validar_requerimento,
+                 extras=_extras_requerimento,
+                 ajuda_teste="Gera só o requerimento da primeira resposta (ou do primeiro aluno que bater com o nome), "
+                             "para você conferir o modelo e a pasta antes de gerar todos."))
+
 registrar(Script("parecer_fund", (_T, _S, _C, _TE), _plano_parecer_fund,
                  ajuda_teste="Gera só o parecer do primeiro aluno da seleção, para você conferir o resultado antes de gerar todos.",
                  extras=_extras_parecer_fund))
@@ -1339,6 +1382,7 @@ registrar(Script("backup", (), _plano_sync("src.comum.backup", "executar_backup"
 _ANO, _SERE, _RCO, _PRE, _MAIL = "ano_letivo", "credenciais_sere", "credenciais_rco", "credenciais_prematricula", "email_envio"
 _ESC, _DIG, _MOD, _CORTE, _OBS = "escola", "pasta_digitalizacao", "pasta_modelos", "data_corte_transferidos", "observacao_historico"
 _CGM, _PLAN, _GOOG, _RAIO = "cgm_upload", "planilhas_drive", "google_credenciais", "raio_cep"
+_REQ = "modelo_requerimento"
 
 CONFIGS_DOS_SCRIPTS: dict[str, tuple[str, ...]] = {
     # coletas do SERE
@@ -1376,6 +1420,7 @@ CONFIGS_DOS_SCRIPTS: dict[str, tuple[str, ...]] = {
     "parecer_fund": (_ANO, _ESC, _MOD),
     "parecer_rco": (_ANO, _RCO),
     "parecer_planilha": (_ANO, _ESC, _PLAN, _GOOG),
+    "requerimento": (_ANO, _PLAN, _GOOG, _REQ),
     "base_abc": (_ANO, _SERE, _ESC),
     "fluxo_geo": (_ANO, _SERE, _ESC),
     # planilhas, avisos e utilitários

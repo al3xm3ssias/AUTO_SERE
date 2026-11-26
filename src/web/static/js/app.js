@@ -2061,6 +2061,7 @@ const ICONES_AUTOMACAO = {
   analisa_pasta: "fileSearch",
   analisa_sere: "fileSearch",
   documentos: "files",
+  requerimento: "files",
   cruzamento: "compare",
   cep: "mapPin",
   sus: "heart",
@@ -3626,6 +3627,13 @@ const DETALHE_CONFIG = {
     </div>
     <div id="cfg-mp-status" style="font-family:var(--mono); font-size:.72rem; color:var(--txt3); margin-bottom:14px;"></div>
     <button class="btn-primary" id="cfg-mp-enviar">Enviar modelo</button>`,
+  modelo_requerimento: `
+    <h4 style="margin-bottom:14px; font-size:.9rem;">Modelo do requerimento de matrícula</h4>
+    <p style="color:var(--txt3); font-size:.82rem; margin-bottom:12px;">Envie o modelo Word (.docx) com os marcadores (<code>$NOME_ALUNO</code>, <code>$NOME_RESP1</code>, <code>$NOME_RESP2</code>, <code>$CPF_RESP1</code> etc.). Reenviar substitui o modelo anterior. Os PDFs gerados vão para a pasta do ano letivo atual.</p>
+    <div class="field"><label>Arquivo do modelo (.docx)</label><input type="file" id="cfg-mr-arquivo" accept=".docx"></div>
+    <div id="cfg-mr-status" style="font-family:var(--mono); font-size:.72rem; color:var(--txt3); margin-bottom:6px;">Carregando…</div>
+    <div id="cfg-mr-pastas" style="font-family:var(--mono); font-size:.68rem; color:var(--txt3); margin-bottom:14px; word-break:break-all;"></div>
+    <button class="btn-primary" id="cfg-mr-enviar">Enviar modelo</button>`,
   senha_prematricula: `
     <h4 style="margin-bottom:14px; font-size:.9rem;">Salvar senha da Pré-matrícula</h4>
     <p style="color:var(--txt3); font-size:.82rem; margin-bottom:12px;">Login e senha do portal da pré-matrícula (diferentes dos do SERE). Ficam em <code>credenciais/.env</code> neste computador.</p>
@@ -3695,6 +3703,9 @@ function initConfiguracoes() {
       }
       if (row.dataset.config === "modelos_parecer") {
         conectarFormModelosParecer();
+      }
+      if (row.dataset.config === "modelo_requerimento") {
+        conectarFormModeloRequerimento();
       }
       if (row.dataset.config === "senha_rco") {
         conectarFormRco();
@@ -4471,6 +4482,48 @@ async function conectarFormModelosParecer() {
       if (!res.ok) throw new Error((r && (r.erro || r.mensagem)) || "Não foi possível enviar o modelo");
       inArquivo.value = "";
       desenhar(r);
+      toast(r.mensagem || "Modelo salvo");
+    } catch (e) {
+      toast(e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  });
+}
+
+async function conectarFormModeloRequerimento() {
+  const inArquivo = document.getElementById("cfg-mr-arquivo");
+  const status = document.getElementById("cfg-mr-status");
+  const pastas = document.getElementById("cfg-mr-pastas");
+  const btn = document.getElementById("cfg-mr-enviar");
+  if (!inArquivo || !status || !pastas || !btn) return;
+
+  const mostrar = (d) => {
+    status.textContent = d.existe ? `✓ Modelo salvo: ${d.arquivo}` : "Nenhum modelo enviado ainda.";
+    pastas.textContent = `Modelo em: ${d.pasta}  |  PDFs em: ${d.saida}`;
+  };
+  try {
+    mostrar(await apiGet("/configuracoes/modelo-requerimento"));
+  } catch (e) {
+    status.textContent = "Não foi possível carregar o estado do modelo.";
+  }
+
+  btn.addEventListener("click", async () => {
+    const arquivo = inArquivo.files[0];
+    if (!arquivo) { toast("Escolha o arquivo do modelo (.docx)"); return; }
+    const dados = new FormData();
+    dados.append("arquivo", arquivo);
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Enviando...";
+    try {
+      const res = await fetch(`${API_BASE}/configuracoes/modelo-requerimento`, { method: "POST", body: dados });
+      let r = null;
+      try { r = await res.json(); } catch (e) { /* resposta sem JSON */ }
+      if (!res.ok) throw new Error((r && (r.erro || r.mensagem)) || "Não foi possível enviar o modelo");
+      inArquivo.value = "";
+      mostrar(r);
       toast(r.mensagem || "Modelo salvo");
     } catch (e) {
       toast(e.message);
