@@ -690,7 +690,11 @@ def prematricula_cadastros():
     derivada das escolas escolhidas e as turmas de intenção (posição na fila, pontuação). Tentativas antigas
     substituídas por uma nova (aluno que voltou noutra turma) não entram: vale a última, como em BUGS_CONHECIDOS.md.
     """
-    dados = _carregar_json("pre_matricula.json", {})
+    ano_atual = int(_paths.ano_atual())
+    ano_pedido = request.args.get("ano", type=int) or ano_atual
+    if ano_pedido not in (ano_atual, ano_atual + 1):
+        return jsonify({"erro": f"Só há pré-matrícula de {ano_atual} e {ano_atual + 1}."}), 400
+    dados, arquivo, existe = _dados_prematricula_do_ano(ano_pedido, ano_atual)
     dados = dados if isinstance(dados, dict) else {}
     cadastros = dados.get("cadastros") if isinstance(dados.get("cadastros"), dict) else {}
     turmas_intencao = dados.get("turmas_intencao") if isinstance(dados.get("turmas_intencao"), dict) else {}
@@ -728,7 +732,7 @@ def prematricula_cadastros():
         cpf = str(c.get("cpf") or cid)
         com_cadastro.update({str(cid), cpf, str(c.get("tr_id") or "")} - {""})
         escolhas = c.get("escolas_escolhidas") if isinstance(c.get("escolas_escolhidas"), dict) else {}
-        opcoes = [o for o in (escolhas.get("opcoes") or []) if isinstance(o, dict)]
+        opcoes = _opcoes_com_numero([o for o in (escolhas.get("opcoes") or []) if isinstance(o, dict)])
         situacao = _situacao_prematricula(opcoes)
         turma_pedida = escolhas.get("turma") or c.get("turma_matriculada") or ""
         aceita = next((o for o in opcoes if str(o.get("situacao") or "").strip()
@@ -799,7 +803,42 @@ def prematricula_cadastros():
         "contagem": n,
         "total": len(registros),
         "atualizado_em": "" if not atualizado or atualizado.lower().startswith("x") else atualizado,
+        "ano": ano_pedido, "ano_atual": ano_atual, "arquivo": arquivo, "existe": existe,
+        "somente_leitura": ano_pedido != ano_atual,          # a previsão do próximo ano só se consulta; correções valem para o ano em uso
+        "anos": [{"ano": ano_atual, "rotulo": f"{ano_atual}", "detalhe": "ano em uso"},
+                 {"ano": ano_atual + 1, "rotulo": f"{ano_atual + 1}", "detalhe": "próximo ano"}],
     })
+
+
+def _dados_prematricula_do_ano(ano: int, ano_atual: int):
+    """(dados, nome do arquivo, existe). Ano em uso: pre_matricula.json. Próximo ano: previsao_alunos_<ano>.json (mesmo formato)."""
+    if ano == ano_atual:
+        return _carregar_json("pre_matricula.json", {}), "pre_matricula.json", (_dados_dir() / "pre_matricula.json").exists()
+    from src.comum import previsao as _previsao
+    from src.comum.arquivos_json import ArquivoJsonCorrompidoError
+    nome = _previsao.nome_arquivo(ano)
+    try:
+        dados = _previsao.carregar_previsao_alunos(_dados_dir(), ano)
+    except ArquivoJsonCorrompidoError:
+        dados = {}
+    return dados, nome, bool(dados)
+
+
+def _opcoes_com_numero(opcoes: list[dict]) -> list[dict]:
+    """Cada escola escolhida com o número da opção (1ª, 2ª, 3ª) e a marca de qual é a NOSSA escola, na ordem das opções."""
+    try:
+        from src.automacao.pre_matricula import NOME_ESCOLA_ALVO   # import tardio: o módulo carrega o Playwright
+    except Exception:                                              # noqa: BLE001
+        NOME_ESCOLA_ALVO = "Judith Macedo Silveira"
+    alvo = _sem_acento(NOME_ESCOLA_ALVO)
+    saida = []
+    for i, o in enumerate(opcoes, 1):
+        try:
+            n = int(o.get("opcao")) if o.get("opcao") not in (None, "") else i
+        except (TypeError, ValueError):
+            n = i
+        saida.append({**o, "opcao": n, "nossa": bool(alvo) and alvo in _sem_acento(o.get("escola") or "")})
+    return sorted(saida, key=lambda o: o["opcao"])
 
 
 MOTIVO_NAO_PRIMEIRA = "CADASTRO REFEITO: NOSSA ESCOLA NÃO É A 1ª OPÇÃO"

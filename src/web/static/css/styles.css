@@ -2071,4 +2071,29 @@ tbody td{padding:11px 14px;vertical-align:middle}
   body.ajuda-aberta .ajuda-corpo{overflow:visible}
   body.ajuda-aberta .ajuda-btn,body.ajuda-aberta .ajuda-rodape,body.ajuda-aberta .aj-mostrar,body.ajuda-aberta .ajuda-niveis,body.ajuda-aberta .aj-indice{display:none!important}
 }
+
+
+/* ══ BOTÕES E CAMPOS (acabamento) ══
+   Antes: "Sair", "Sair do sistema", o filtro da fila e os campos numéricos/e-mail apareciam com o visual cru do navegador,
+   e o nome de quem entrou ficava por cima do botão F1 (a caixa era um círculo de 34 px). */
+.topbar-user.logado{width:auto;max-width:230px;height:34px;padding:0 14px 0 10px;border-radius:17px;gap:8px;justify-content:flex-start}
+.topbar-user-nome{display:flex;flex-direction:column;line-height:1.15;text-align:left;font-family:var(--sans);font-size:.76rem;
+  color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.topbar-user-nome small{font-family:var(--mono);font-size:.6rem;color:var(--txt3);overflow:hidden;text-overflow:ellipsis}
+.topbar-user.logado:hover .topbar-user-nome{color:var(--cyan)}
+.topbar-sair,.usr-btn{background:none;border:1px solid var(--border);color:var(--txt2);font-family:var(--mono);font-size:.72rem;
+  height:34px;padding:0 14px;border-radius:17px;cursor:pointer;flex-shrink:0;white-space:nowrap;transition:all var(--transition)}
+.topbar-sair:hover,.topbar-sair:focus-visible,.usr-btn:hover,.usr-btn:focus-visible{border-color:var(--rose);color:var(--rose);outline:none}
+.usr-btn{height:auto;padding:7px 14px;border-radius:6px}
+.field input[type=number],.field input[type=email],.field input[type=search],.field input[type=tel],.field input[type=url],
+.wa-acoes select,.wa-acoes input[type=number]{
+  padding:9px 12px;border-radius:6px;border:1px solid var(--border);background:var(--input-bg);color:var(--txt);
+  font-family:var(--sans);font-size:.84rem}
+.field input[type=email],.field input[type=search],.field input[type=tel],.field input[type=url]{width:100%}
+.field input[type=number]{width:100%;max-width:100%}
+.wa-acoes select:focus{outline:none;border-color:var(--cyan)}
+.wa-seg{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 12px}
+.btn-sm.ativo{border-color:var(--cyan);color:var(--cyan);background:rgba(0,201,177,.1)}
+.wa-seg .btn-sm{padding:7px 14px;font-size:.74rem}
+.pm-anos{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
 #painel-avisos[hidden]{display:none}
