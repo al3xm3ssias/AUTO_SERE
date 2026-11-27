@@ -58,3 +58,11 @@ body.perfil-operador [data-requer="admin"] { display: none !important; }
 .usr-linha-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; align-items: end; }
 .usr-audit { max-height: 260px; overflow: auto; font-family: var(--mono); font-size: .7rem; color: var(--txt2); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 8px 10px; background: var(--bg); }
+
+/* Pedagoga (perfil restrito): nada de "opções guardadas", navegador ou apagar histórico nas telas de automação, nem item que exija
+   operador/admin. É só a vitrine; o servidor recusa essas ações de qualquer jeito. */
+body[data-perfil-restrito] [data-requer],
+body[data-perfil-restrito] #cfg-flags,
+body[data-perfil-restrito] #cfg-navegador,
+body[data-perfil-restrito] #btn-historico-limpar { display: none !important; }
+.usr-selo.pedagoga { background: var(--badge-lime-bg); border-color: var(--badge-lime-brd); color: var(--lime); }

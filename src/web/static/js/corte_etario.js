@@ -269,10 +269,11 @@
   /* ---------- Eventos ---------- */
 
   function telaAtiva() {
-    return $("sec-corte-etario").classList.contains("active");
+    return !!$("sec-corte-etario") && $("sec-corte-etario").classList.contains("active");
   }
 
   function init() {
+    if (!$("ce-anterior")) return;    // tela não existe neste perfil (a Pedagoga não a recebe)
     $("ce-anterior").addEventListener("click", () => mudarAno(-1));
     $("ce-proximo").addEventListener("click", () => mudarAno(1));
     $("ce-voltar").addEventListener("click", () => { anoSelecionado = anoPadrao(); renderTudo(); });

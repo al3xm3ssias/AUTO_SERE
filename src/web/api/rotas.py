@@ -54,6 +54,8 @@ from src.comum import opcoes_execucao as _opcoes
 from src.comum import registro_scripts as _registro
 from src.comum import historico_execucoes as _historico
 from src.comum import navegador as _navegador
+from src.seguranca import politica as _politica
+from src.seguranca.web import perfil_atual as _perfil_atual
 from src.comum import configuracoes_scripts as _cfgs
 from src.comum.registros_aluno import casar_com_turmas, registro_principal
 
@@ -119,12 +121,15 @@ def painel_resumo():
     Um dado que depende de um arquivo ainda inexistente (automação nunca
     rodada) aparece como 0, não como um valor inventado.
     """
+    # Pedagoga: versão reduzida, montada AQUI (e não escondida na tela): ela só recebe o que as telas dela mostram (alunos, turmas e
+    # encaminhamentos). Pré-matrícula, documentos, raio e transferidos nem são lidos para ela.
+    restrito = _perfil_atual() == _politica.PEDAGOGA
     turmas = _carregar_json("turmas.json", {})
-    documentos_alunos = _carregar_json("documentos-alunos.json", [])
-    pre_matricula = _carregar_json("pre_matricula.json", {})
-    alunos_fora_raio, _meta_raio = _alunos_fora_do_raio()
+    documentos_alunos = [] if restrito else _carregar_json("documentos-alunos.json", [])
+    pre_matricula = {} if restrito else _carregar_json("pre_matricula.json", {})
+    alunos_fora_raio, _meta_raio = ([], {}) if restrito else _alunos_fora_do_raio()
     alunos_encaminhamento, _cpf_invalidos = _alunos_com_encaminhamento()
-    transferidos = _carregar_json("transferidos.json", {})
+    transferidos = {} if restrito else _carregar_json("transferidos.json", {})
 
     total_alunos = 0
     meninos = 0
@@ -172,6 +177,19 @@ def painel_resumo():
             ultima_atualizacao = m
             break
 
+    if restrito:
+        return jsonify({
+            "atualizado_em": ultima_atualizacao or datetime.now().strftime("%d/%m/%Y %H:%M"),
+            "principais": [
+                {"chave": "total_alunos", "label": "Total de alunos", "valor": total_alunos},
+                {"chave": "meninos", "label": "Meninos", "valor": meninos, "sub": pct_meninos},
+                {"chave": "meninas", "label": "Meninas", "valor": meninas, "sub": pct_meninas},
+                {"chave": "turmas", "label": "Turmas", "valor": len(turmas)},
+            ],
+            "secundarias": [
+                {"chave": "encaminhamentos", "label": "Qtd. encaminhamentos SUS", "valor": len(alunos_encaminhamento)},
+            ],
+        })
     return jsonify({
         "atualizado_em": ultima_atualizacao or datetime.now().strftime("%d/%m/%Y %H:%M"),
         "principais": [
@@ -1746,7 +1764,10 @@ AUTOMACOES_NAO_IMPLEMENTADAS = {
 @api_bp.route("/automacoes/lista")
 def automacoes_lista():
     itens = []
+    perfil = _perfil_atual()
     for item in AUTOMACOES_DISPONIVEIS:
+        if not _politica.automacao_permitida(perfil, item["chave"]):     # Pedagoga: só as automações dela (a lista nem chega à tela)
+            continue
         script = _registro.obter(item["chave"])
         itens.append(dict(item, recursos=list(script.recursos)) if script else item)
     return jsonify({"itens": itens})
@@ -2002,6 +2023,10 @@ def cgm_analisar():
 
 @api_bp.route("/automacoes/<string:chave>/executar", methods=["POST"])
 def automacoes_executar(chave):
+    # Segunda trava (a primeira é o guarda de toda requisição, em src/seguranca/web.py): quem dispara uma automação confere aqui,
+    # também, se o perfil pode executá-la. Assim um caminho novo até esta função não abre uma automação para a Pedagoga.
+    if not _politica.automacao_permitida(_perfil_atual(), chave):
+        return jsonify({"status": "erro", "mensagem": "O seu perfil não tem permissão para executar esta automação.", "permissao": True}), 403
     if chave in AUTOMACOES_NAO_IMPLEMENTADAS:
         return jsonify({
             "status": "erro",

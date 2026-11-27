@@ -27,6 +27,17 @@ No Windows a pimenta é cifrada pela conta do Windows (DPAPI): quem copiar só a
 | **Administrador** | tudo: usuários, auditoria, senhas e integrações (SERE, Gmail, Google, WhatsApp), data de corte, restaurar ano letivo, assistente de 1ª execução, escolher pastas |
 | **Operador** | o dia a dia: executar automações, editar registros, enviar mensagens, trocar o ano letivo para consultar, "Turmas do QR antigo" |
 | **Consulta** | só ver telas e tabelas |
+| **Pedagoga** | perfil **independente** (fora da escada acima): só consulta **Painel, Turmas, Alunos e Encaminhamentos SUS** e executa **apenas** as coletas **Turmas** (`turmas.py`) e **Alunos** (modo básico `alunos.py` e completo `alunos_completo.py`) |
+
+### Perfil Pedagoga
+
+- **Lista de permissões, não escada.** Em `politica.py`, `_REGRAS_PEDAGOGA` enumera o que ela pode chamar; **tudo o que não está na lista é negado** (403), inclusive rotas criadas no futuro. O teste `tests/test_perfil_pedagoga.py` percorre todas as rotas do app e trava a lista.
+- **Validado no servidor**, no mesmo guarda de toda requisição, e de novo na própria rota de execução (`automacoes_executar`). Esconder menu é só vitrine: o HTML dela já nasce sem as telas e automações proibidas, e o painel principal é reduzido no servidor (sem pré-matrícula, documentos, raio nem transferidos).
+- **Somente leitura.** Ela não grava registro nem configuração, não apaga histórico, não salva opções do script nem navegador, não envia mensagem. Só troca a **própria** senha. As coletas Turmas e Alunos apenas **leem** do SERE (navegam e consultam; não enviam, alteram nem apagam nada lá) e atualizam o cache local (`turmas.json`, `alunos.json`, `alunos_completo.json`).
+- **Configurações** que ela vê, em **somente consulta**: Dados da escola, Ano letivo, Navegador, Backup automático e Senha do SERE (a senha nunca é mostrada), mais Minha conta, Temas e Perfil. Quem grava é o administrador.
+- Para liberar mais algo: `AUTOMACOES_PEDAGOGA`, `TELAS_PEDAGOGA`, `CONFIGURACOES_PEDAGOGA` e `_REGRAS_PEDAGOGA` em `src/seguranca/politica.py` (e atualizar `PERMITIDAS` no teste).
+- Criação: na **instalação**, depois de criar o administrador, o instalador pergunta "Deseja cadastrar agora um usuário com o perfil PEDAGOGA? (S/N)" (o primeiro usuário é sempre administrador). Ou, a qualquer hora, `python -m src.seguranca criar-usuario --perfil pedagoga`, ou Configurações → Usuários e segurança (perfil "Pedagoga"). Mudar o perfil derruba a sessão na hora.
+- Limite: a linha de comando e o Agendador (`python -m src.comum.cli`) não passam pelo login, então não têm perfil. A Central de ajuda (F1) mostra a ela só os textos das telas, automações e configurações que ela usa.
 
 A regra está em **um lugar só** (`src/seguranca/politica.py`) e vale para toda rota, inclusive as que alguém criar depois. Mudar o perfil, desativar ou apagar um usuário **derruba a sessão dele na hora**. Nunca fica sem administrador ativo (o sistema não deixa apagar, desativar ou rebaixar o último). Tenha pelo menos dois administradores.
 

@@ -277,6 +277,11 @@ function abrirSubgrupoDaAutomacao(chaveAuto) {
 
 /* ---------- Navegação entre telas ---------- */
 
+/* Perfil com permissões próprias (Pedagoga): só consulta + as coletas liberadas. O servidor monta o menu só com o que ela pode usar e
+   barra o resto em toda rota (src/seguranca/politica.py); aqui o navegador só evita pedidos que ele já sabe que seriam negados. */
+const PERFIL_RESTRITO = document.body.dataset.perfilRestrito === "1";
+const CONFIG_EDITAVEIS = (document.body.dataset.configEditaveis || "").split(",").filter(Boolean);
+
 const TITULOS = {
   painel: "Painel principal",
   turmas: "Turmas",
@@ -436,6 +441,7 @@ async function carregarPainel() {
     console.warn("Painel: usando dados de exemplo (endpoint ainda não conectado)", e);
   }
 
+  if (PERFIL_RESTRITO) return;       // avisos de transferidos e fila da pré-matrícula não são dela
   await carregarAvisosPainel();
 
   try {
@@ -3689,12 +3695,59 @@ const DETALHE_CONFIG = {
     <button class="btn-primary">Salvar perfil</button>`,
 };
 
+const PAINEL_SENHA_SERE_RESTRITO = `
+  <h4 style="margin-bottom:14px; font-size:.9rem;">Senha do SERE</h4>
+  <p style="color:var(--txt3); font-size:.82rem; max-width:560px;">A senha do SERE é guardada e trocada pelo administrador. Para saber se ela está configurada, abra
+  Automações → Turmas (ou Alunos) e veja “Configurações do script”.</p>`;
+
+/** Painel somente leitura: o conteúdo entra num <fieldset disabled>, que desabilita todo campo e botão dentro dele (mesmo os que o
+ *  código do painel reabilite depois). A proteção de verdade está no servidor, que recusa a gravação. */
+function tornarSomenteConsulta(detalhe) {
+  const campos = document.createElement("fieldset");
+  campos.disabled = true;
+  campos.style.cssText = "border:0; padding:0; margin:0; min-width:0;";
+  while (detalhe.firstChild) campos.appendChild(detalhe.firstChild);
+  const aviso = document.createElement("p");
+  aviso.style.cssText = "color:var(--amber); font-size:.8rem; margin-bottom:12px;";
+  aviso.textContent = "Somente consulta: o seu perfil não altera esta configuração. Peça a um administrador.";
+  detalhe.appendChild(aviso);
+  detalhe.appendChild(campos);
+}
+
+/** "Perfil" da Pedagoga: quem é e o que pode (só texto, via textContent). */
+function montarPerfilRestrito(detalhe) {
+  const b = document.body.dataset;
+  const linhas = [
+    ["Nome", b.usuarioNome || ""], ["Usuário", b.usuarioLogin || ""], ["Perfil", b.perfilRotulo || ""],
+    ["Pode", "consultar Turmas, Alunos e Encaminhamentos SUS; executar as coletas Turmas e Alunos (básico e completo)."],
+    ["Não pode", "alterar dados ou configurações, nem usar as demais automações. As coletas só leem do SERE."],
+  ];
+  detalhe.textContent = "";
+  const h = document.createElement("h4"); h.style.cssText = "margin-bottom:14px; font-size:.9rem;"; h.textContent = "Perfil";
+  detalhe.appendChild(h);
+  linhas.forEach(([rotulo, valor]) => {
+    const p = document.createElement("p"); p.style.cssText = "font-size:.84rem; margin-bottom:8px; max-width:620px;";
+    const r = document.createElement("b"); r.textContent = rotulo + ": ";
+    p.appendChild(r); p.appendChild(document.createTextNode(valor)); detalhe.appendChild(p);
+  });
+}
+
 function initConfiguracoes() {
   document.querySelectorAll(".config-row[data-config]").forEach((row) => {
     row.addEventListener("click", () => {
-      document.getElementById("config-detalhe").innerHTML =
-        DETALHE_CONFIG[row.dataset.config] || "<p>Configuração não encontrada.</p>";
-      aplicarIconesDOM(document.getElementById("config-detalhe"));
+      const detalhe = document.getElementById("config-detalhe");
+      const soConsulta = PERFIL_RESTRITO && !CONFIG_EDITAVEIS.includes(row.dataset.config);
+      if (soConsulta && row.dataset.config === "senha_sere") {
+        detalhe.innerHTML = PAINEL_SENHA_SERE_RESTRITO;           // sem formulário: a senha do SERE é guardada pelo administrador
+        return;
+      }
+      if (soConsulta && row.dataset.config === "perfil") {
+        montarPerfilRestrito(detalhe);
+        return;
+      }
+      detalhe.innerHTML = DETALHE_CONFIG[row.dataset.config] || "<p>Configuração não encontrada.</p>";
+      if (soConsulta) tornarSomenteConsulta(detalhe);
+      aplicarIconesDOM(detalhe);
       if (row.dataset.config === "senha_sere") {
         conectarFormSenhaSere();
       }
@@ -5609,11 +5662,13 @@ document.addEventListener("DOMContentLoaded", () => {
   initNavegacao();
   initAutomacoes();
   initConfiguracoes();
-  conectarPainelWizard();
+  if (!PERFIL_RESTRITO) conectarPainelWizard();
   carregarPainel();
   iniciarContextoAno();
-  abrirAssistenteSeNecessario();
-  iniciarMonitorAutorizacaoGoogle();
+  if (!PERFIL_RESTRITO) {          // assistente de 1ª execução e autorização do Google são do administrador
+    abrirAssistenteSeNecessario();
+    iniciarMonitorAutorizacaoGoogle();
+  }
 });
 
 /* Cliques delegados no lugar dos antigos handlers escritos dentro do HTML (a política de segurança do sistema não aceita

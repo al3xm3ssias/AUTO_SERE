@@ -1,3 +1,4 @@
+{% if pode_tela('turmas') %}
 <section class="section" id="sec-turmas" data-title="Turmas">
   <div class="page-header">
     <div class="page-header-icon violet"><span data-icon="users"></span></div>
@@ -9,7 +10,9 @@
   {% set entity = "turmas" %}
   {% include "partials/turmas_cards.html" %}
 </section>
+{% endif %}
 
+{% if pode_tela('alunos') %}
 <section class="section" id="sec-alunos" data-title="Alunos">
   <div class="page-header">
     <div class="page-header-icon cyan"><span data-icon="student"></span></div>
@@ -21,7 +24,9 @@
   {% set entity = "alunos" %}
   {% include "partials/alunos_cards.html" %}
 </section>
+{% endif %}
 
+{% if pode_tela('prematricula') %}
 <section class="section" id="sec-prematricula" data-title="Pré matrícula">
   <div class="page-header">
     <div class="page-header-icon amber"><span data-icon="clipboard"></span></div>
@@ -40,7 +45,9 @@
   {% include "partials/pre_matricula_cards.html" %}
   {% include "partials/pre_matricula_geo.html" %}
 </section>
+{% endif %}
 
+{% if pode_tela('transferidos') %}
 <section class="section" id="sec-transferidos" data-title="Transferidos">
   <div class="page-header">
     <div class="page-header-icon rose"><span data-icon="transfer"></span></div>
@@ -49,14 +56,18 @@
       <p>Controle dos documentos de transferência (guia, histórico e parecer)</p>
     </div>
     <div class="page-header-actions">
+      {% if pode_automacao('transferidos') %}
       <button class="btn-sm js-atualizar" data-auto="transferidos" title="Abre a automação que coleta estes dados"><span data-icon="refresh"></span> Atualizar dados</button>
+      {% endif %}
       <button class="btn-sm js-exportar"><span data-icon="download"></span> Exportar</button>
     </div>
   </div>
   {% set entity = "transferidos" %}
   {% include "partials/transferidos_cards.html" %}
 </section>
+{% endif %}
 
+{% if pode_tela('funcionarios') %}
 <section class="section" id="sec-funcionarios" data-title="Funcionários">
   <div class="page-header">
     <div class="page-header-icon blue"><span data-icon="badge"></span></div>
@@ -71,7 +82,9 @@
   {% set entity = "funcionarios" %}
   {% include "partials/funcionarios_cards.html" %}
 </section>
+{% endif %}
 
+{% if pode_tela('encaminhamentos') %}
 <section class="section" id="sec-encaminhamentos" data-title="Encaminhamentos do SUS">
   <div class="page-header">
     <div class="page-header-icon lime"><span data-icon="heart"></span></div>
@@ -80,7 +93,9 @@
       <p>Alunos com procedimentos na fila de espera do SISREG (consulta pelo CPF)</p>
     </div>
     <div class="page-header-actions">
+      {% if pode_automacao('sus') %}
       <button class="btn-sm js-atualizar" data-auto="sus" title="Abre a automação que coleta estes dados"><span data-icon="refresh"></span> Atualizar dados</button>
+      {% endif %}
       <button class="btn-sm js-exportar"><span data-icon="download"></span> Exportar</button>
     </div>
   </div>
@@ -89,7 +104,9 @@
   {% set acao_auto = "sus" %}
   {% include "partials/encaminhamentos_cards.html" %}
 </section>
+{% endif %}
 
+{% if pode_tela('fora-do-raio') %}
 <section class="section" id="sec-fora-do-raio" data-title="Alunos fora do raio">
   <div class="page-header">
     <div class="page-header-icon rose"><span data-icon="mapPinOff"></span></div>
@@ -98,7 +115,9 @@
       <p>Alunos cujo CEP fica além do raio de atendimento da escola</p>
     </div>
     <div class="page-header-actions">
+      {% if pode_automacao('cep') %}
       <button class="btn-sm js-atualizar" data-auto="cep" title="Abre a automação que coleta estes dados"><span data-icon="refresh"></span> Atualizar dados</button>
+      {% endif %}
       <button class="btn-sm js-exportar"><span data-icon="download"></span> Exportar</button>
     </div>
   </div>
@@ -107,7 +126,9 @@
   {% set acao_auto = "cep" %}
   {% include "partials/fora_do_raio_cards.html" %}
 </section>
+{% endif %}
 
+{% if pode_tela('documentos') %}
 <section class="section" id="sec-documentos" data-title="Análise de documentos">
   <div class="page-header">
     <div class="page-header-icon cyan"><span data-icon="files"></span></div>
@@ -119,3 +140,4 @@
   {% set entity = "documentos" %}
   {% include "partials/documentos_cards.html" %}
 </section>
+{% endif %}

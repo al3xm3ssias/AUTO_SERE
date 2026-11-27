@@ -9,6 +9,10 @@ Perfis (do menor para o maior poder):
     operador   o uso do dia a dia: executa as automações, edita registros, envia mensagens
     admin      tudo do operador + usuários, senhas e integrações (SERE, Gmail, Google, WhatsApp), ano letivo, dados de teste
 
+Perfil independente (fora dessa escada):
+    pedagoga   só consulta (Turmas, Alunos, Encaminhamentos SUS) e só executa as coletas `turmas` e `alunos` (que apenas leem do
+               SERE). Permissões próprias, em src/seguranca/politica.py; o que não está lá é negado.
+
 Regras que este módulo garante, em qualquer porta de entrada (tela, instalador, linha de comando):
   • o PRIMEIRO usuário criado é administrador, e só se não houver nenhum usuário;
   • nunca fica sem pelo menos 1 administrador ATIVO (não dá para apagar, desativar ou rebaixar o último);
@@ -28,11 +32,11 @@ from datetime import datetime, timedelta, timezone
 
 from src.comum import paths
 
-from . import auditoria, senhas
+from . import auditoria, politica, senhas
 
-PERFIS = ("consulta", "operador", "admin")
-NIVEL = {"consulta": 1, "operador": 2, "admin": 3}
-ROTULO_PERFIL = {"consulta": "Consulta", "operador": "Operador", "admin": "Administrador"}
+PERFIS = ("consulta", "operador", "admin", politica.PEDAGOGA)
+NIVEL = politica.NIVEL                      # só a escada hierárquica: a Pedagoga fica de fora de propósito (ver politica.py)
+ROTULO_PERFIL = {"consulta": "Consulta", "operador": "Operador", "admin": "Administrador", politica.PEDAGOGA: "Pedagoga"}
 
 RE_USUARIO = re.compile(r"^[a-z0-9][a-z0-9._-]{2,31}$")
 MAX_FALHAS = 5
@@ -98,7 +102,12 @@ class Usuario:
         return bool(ate and ate > _agora())
 
     def tem_perfil(self, minimo: str) -> bool:
+        """Só para a escada consulta < operador < admin. A Pedagoga NUNCA passa aqui (nível 0): o que ela pode está em `pode`."""
         return NIVEL.get(self.perfil, 0) >= NIVEL.get(minimo, 99)
+
+    def pode(self, metodo: str, caminho: str) -> bool:
+        """Este usuário pode fazer este método neste caminho? É a pergunta que o guarda de toda requisição faz."""
+        return politica.permite(self.perfil, metodo, caminho)
 
     def publico(self) -> dict:
         return {"id": self.id, "usuario": self.usuario, "nome": self.nome, "perfil": self.perfil,
@@ -207,7 +216,7 @@ def _validar_nome(nome: str, padrao: str) -> str:
 
 def _validar_perfil(perfil: str) -> str:
     if perfil not in PERFIS:
-        raise ErroUsuarios("Perfil inválido. Use: consulta, operador ou admin.")
+        raise ErroUsuarios("Perfil inválido. Use: consulta, operador, admin ou pedagoga.")
     return perfil
 
 

@@ -346,6 +346,7 @@
   }
 
   function init() {
+    if (!$("cal-prev")) return;      // tela não existe neste perfil (a Pedagoga não a recebe)
     $("cal-prev").onclick = () => {
       if (st.vista === "ano") return ir(st.ano - 1);
       st.mes === 0 ? ir(st.ano - 1, 11) : ir(st.ano, st.mes - 1);

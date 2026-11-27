@@ -317,6 +317,10 @@ if ($estadoUsuarios -eq 0) {
     & $pyExe -m src.seguranca criar-admin
     if ($LASTEXITCODE -ne 0) {
         Write-Host "O administrador não foi criado agora. O sistema vai pedir isso no primeiro acesso." -ForegroundColor Yellow
+    } else {
+        # Perfil Pedagoga (só consulta + coletas Turmas e Alunos). Opcional; também dá para criar depois em Configurações > Usuários.
+        $resp = Read-Host "Deseja cadastrar agora um usuário com o perfil PEDAGOGA? (S/N)"
+        if ($resp -match '^[sS]') { & $pyExe -m src.seguranca criar-usuario --perfil pedagoga }
     }
 }
 # Só o usuário atual do Windows (e administradores) enxerga credenciais\ (usuários, hashes, senhas das integrações).

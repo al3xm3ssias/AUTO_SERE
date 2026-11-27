@@ -50,14 +50,14 @@
     raiz.textContent = "";
     raiz.appendChild(el("h4", { texto: "Usuários e segurança", style: "margin-bottom:6px;font-size:.9rem;" }));
     raiz.appendChild(el("p", { style: "color:var(--txt3);font-size:.82rem;margin-bottom:8px;max-width:640px;",
-      texto: "Administrador: tudo. Operador: executa as automações e edita registros. Consulta: só vê. As senhas são guardadas só como hash (Argon2id); ninguém, nem o sistema, consegue ler uma senha." }));
+      texto: "Administrador: tudo. Operador: executa as automações e edita registros. Consulta: só vê. Pedagoga: só consulta Turmas, Alunos e Encaminhamentos SUS e roda as coletas Turmas e Alunos. As senhas são guardadas só como hash (Argon2id); ninguém, nem o sistema, consegue ler uma senha." }));
     var aviso = el("p", { style: "font-size:.8rem;min-height:1.2em;", role: "status" });
     var segredo = el("div", {});
     var tabelaBox = el("div", {});
     var auditoriaBox = el("div", {});
 
     var selPerfil = el("select", { id: "usr-novo-perfil" }, [
-      el("option", { value: "operador", texto: "Operador" }), el("option", { value: "consulta", texto: "Consulta" }), el("option", { value: "admin", texto: "Administrador" })]);
+      el("option", { value: "operador", texto: "Operador" }), el("option", { value: "consulta", texto: "Consulta" }), el("option", { value: "admin", texto: "Administrador" }), el("option", { value: "pedagoga", texto: "Pedagoga" })]);
     var inUsuario = el("input", { type: "text", id: "usr-novo-usuario", autocomplete: "off", autocapitalize: "none" });
     var inNome = el("input", { type: "text", id: "usr-novo-nome", autocomplete: "off", maxlength: "80" });
     var btnCriar = el("button", { classe: "btn-primary", type: "button", texto: "Criar usuário" });

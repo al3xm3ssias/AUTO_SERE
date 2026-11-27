@@ -19,7 +19,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('web.static', filename='css/styles.css') }}">
 </head>
-<body class="{{ 'modo-consulta' if somente_consulta else '' }}" data-ano-letivo="{{ ano_letivo }}"{% if usuario_atual %} data-perfil="{{ usuario_atual.perfil }}" data-perfil-rotulo="{{ usuario_atual.perfil_rotulo }}" data-usuario-nome="{{ usuario_atual.nome }}" data-usuario-login="{{ usuario_atual.usuario }}"{% endif %}>
+<body class="{{ 'modo-consulta' if somente_consulta else '' }}" data-ano-letivo="{{ ano_letivo }}"{% if usuario_atual %} data-perfil="{{ usuario_atual.perfil }}" data-perfil-rotulo="{{ usuario_atual.perfil_rotulo }}" data-usuario-nome="{{ usuario_atual.nome }}" data-usuario-login="{{ usuario_atual.usuario }}"{% endif %}{% if perfil_restrito %} data-perfil-restrito="1" data-config-editaveis="{{ config_editaveis }}"{% endif %}>
 
 <div id="app" style="position:relative; min-height:100vh;">
 
@@ -38,62 +38,89 @@
 
     <nav class="sidebar-nav" id="sidebar-nav">
       <div class="nav-section-label">Painel</div>
+      {% if pode_tela('painel') %}
       <div class="nav-item active" data-view="painel">
         <span class="nav-item-icon" data-icon="dashboard"></span>
         <span class="nav-item-label">Painel principal</span>
       </div>
+      {% endif %}
 
       <div class="nav-section-label">Menu</div>
+      {% if pode_tela('turmas') %}
       <div class="nav-item" data-view="turmas">
         <span class="nav-item-icon" data-icon="users"></span>
         <span class="nav-item-label">Turmas</span>
       </div>
+      {% endif %}
+      {% if pode_tela('alunos') %}
       <div class="nav-item" data-view="alunos">
         <span class="nav-item-icon" data-icon="student"></span>
         <span class="nav-item-label">Alunos</span>
       </div>
+      {% endif %}
+      {% if pode_tela('prematricula') %}
       <div class="nav-item" data-view="prematricula">
         <span class="nav-item-icon" data-icon="clipboard"></span>
         <span class="nav-item-label">Pré matrícula</span>
       </div>
+      {% endif %}
+      {% if pode_tela('previsao') %}
       <div class="nav-item" data-view="previsao">
         <span class="nav-item-icon" data-icon="users"></span>
         <span class="nav-item-label">Previsão {{ (ano_letivo | int) + 1 }}</span>
       </div>
+      {% endif %}
+      {% if pode_tela('transferidos') %}
       <div class="nav-item" data-view="transferidos">
         <span class="nav-item-icon" data-icon="transfer"></span>
         <span class="nav-item-label">Transferidos</span>
       </div>
+      {% endif %}
+      {% if pode_tela('funcionarios') %}
       <div class="nav-item" data-view="funcionarios">
         <span class="nav-item-icon" data-icon="badge"></span>
         <span class="nav-item-label">Funcionários</span>
       </div>
+      {% endif %}
+      {% if pode_tela('encaminhamentos') %}
       <div class="nav-item" data-view="encaminhamentos">
         <span class="nav-item-icon" data-icon="heart"></span>
         <span class="nav-item-label">Encaminhamentos SUS</span>
       </div>
+      {% endif %}
+      {% if pode_tela('fora-do-raio') %}
       <div class="nav-item" data-view="fora-do-raio">
         <span class="nav-item-icon" data-icon="mapPinOff"></span>
         <span class="nav-item-label">Alunos fora do raio</span>
       </div>
+      {% endif %}
+      {% if pode_tela('calendario') %}
       <div class="nav-item" data-view="calendario">
         <span class="nav-item-icon" data-icon="calendar"></span>
         <span class="nav-item-label">Calendário letivo</span>
       </div>
+      {% endif %}
+      {% if pode_tela('corte-etario') %}
       <div class="nav-item" data-view="corte-etario">
         <span class="nav-item-icon" data-icon="ageCut"></span>
         <span class="nav-item-label">Corte etário</span>
       </div>
+      {% endif %}
+      {% if pode_tela('planilhas') %}
       <div class="nav-item" data-view="planilhas">
         <span class="nav-item-icon" data-icon="database"></span>
         <span class="nav-item-label">Planilhas do Drive</span>
       </div>
+      {% endif %}
 
+      {% if pode_tela('documentos') %}
       <div class="nav-item" data-view="documentos">
         <span class="nav-item-icon" data-icon="files"></span>
         <span class="nav-item-label">Análise de documentos</span>
       </div>
+      {% endif %}
 
+      {% if pode_tela('automacoes') %}
       <div class="nav-group-toggle" id="toggle-automacoes">
         <span class="nav-group-toggle-label">
           <span class="nav-item-icon" data-icon="bolt"></span>
@@ -102,6 +129,7 @@
         <span class="nav-group-chev" data-icon="chevronRight"></span>
       </div>
       <div class="nav-subitems" id="sub-automacoes">
+        {% if pode_grupo_automacao('cadastros') %}
         <div class="nav-group-toggle nav-subgroup-toggle" data-subgroup="cadastros">
           <span class="nav-group-toggle-label">
             <span class="nav-item-icon" data-icon="users"></span>
@@ -110,35 +138,51 @@
           <span class="nav-group-chev" data-icon="chevronRight"></span>
         </div>
         <div class="nav-subitems nav-subgroup-items" data-subgroup-items="cadastros">
+        {% if pode_automacao('turmas') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="turmas">
           <span class="nav-item-icon" data-icon="school"></span>
           <span class="nav-item-label">Turmas</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('alunos') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="alunos">
           <span class="nav-item-icon" data-icon="users"></span>
           <span class="nav-item-label">Alunos</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('aluno') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="aluno">
           <span class="nav-item-icon" data-icon="userCircle"></span>
           <span class="nav-item-label">Alunos por CGM</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('funcionarios') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="funcionarios">
           <span class="nav-item-icon" data-icon="badge"></span>
           <span class="nav-item-label">Funcionários / Servidores</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('vinculos') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="vinculos">
           <span class="nav-item-icon" data-icon="compare"></span>
           <span class="nav-item-label">Vínculos dos funcionários</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('compara_anos') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="compara_anos">
           <span class="nav-item-icon" data-icon="scale"></span>
           <span class="nav-item-label">Compara anos</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('sheets') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="sheets">
           <span class="nav-item-icon" data-icon="database"></span>
           <span class="nav-item-label">Planilha Google Sheets</span>
         </div>
+        {% endif %}
         </div>
+        {% endif %}
+        {% if pode_grupo_automacao('matricula') %}
         <div class="nav-group-toggle nav-subgroup-toggle" data-subgroup="matricula">
           <span class="nav-group-toggle-label">
             <span class="nav-item-icon" data-icon="clipboard"></span>
@@ -147,15 +191,21 @@
           <span class="nav-group-chev" data-icon="chevronRight"></span>
         </div>
         <div class="nav-subitems nav-subgroup-items" data-subgroup-items="matricula">
+        {% if pode_automacao('prematricula_completa') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="prematricula_completa">
           <span class="nav-item-icon" data-icon="clipboard"></span>
           <span class="nav-item-label">Pré-matrícula completa</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('rematricula') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="rematricula">
           <span class="nav-item-icon" data-icon="refresh"></span>
           <span class="nav-item-label">Rematrícula no SERE</span>
         </div>
+        {% endif %}
         </div>
+        {% endif %}
+        {% if pode_grupo_automacao('transferidos') %}
         <div class="nav-group-toggle nav-subgroup-toggle" data-subgroup="transferidos">
           <span class="nav-group-toggle-label">
             <span class="nav-item-icon" data-icon="transfer"></span>
@@ -164,23 +214,33 @@
           <span class="nav-group-chev" data-icon="chevronRight"></span>
         </div>
         <div class="nav-subitems nav-subgroup-items" data-subgroup-items="transferidos">
+        {% if pode_automacao('transferidos_fila') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="transferidos_fila">
           <span class="nav-item-icon" data-icon="transfer"></span>
           <span class="nav-item-label">Fila de transferidos</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('transferidos_gerar') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="transferidos_gerar">
           <span class="nav-item-icon" data-icon="transfer"></span>
           <span class="nav-item-label">Gerar guia e histórico</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('transferidos') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="transferidos">
           <span class="nav-item-icon" data-icon="transfer"></span>
           <span class="nav-item-label">Enviar transferidos ao SERE</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('pareceres_transferidos') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="pareceres_transferidos">
           <span class="nav-item-icon" data-icon="certificate"></span>
           <span class="nav-item-label">Pareceres dos transferidos</span>
         </div>
+        {% endif %}
         </div>
+        {% endif %}
+        {% if pode_grupo_automacao('pareceres') %}
         <div class="nav-group-toggle nav-subgroup-toggle" data-subgroup="pareceres">
           <span class="nav-group-toggle-label">
             <span class="nav-item-icon" data-icon="certificate"></span>
@@ -189,31 +249,45 @@
           <span class="nav-group-chev" data-icon="chevronRight"></span>
         </div>
         <div class="nav-subitems nav-subgroup-items" data-subgroup-items="pareceres">
+        {% if pode_automacao('parecer_fund') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="parecer_fund">
           <span class="nav-item-icon" data-icon="certificate"></span>
           <span class="nav-item-label">Pareceres fundamental</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('pareceres_digitalizados') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="pareceres_digitalizados">
           <span class="nav-item-icon" data-icon="certificate"></span>
           <span class="nav-item-label">Pareceres digitalizados</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('parecer_rco') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="parecer_rco">
           <span class="nav-item-icon" data-icon="certificate"></span>
           <span class="nav-item-label">Pareceres infantil</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('parecer_planilha') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="parecer_planilha">
           <span class="nav-item-icon" data-icon="certificate"></span>
           <span class="nav-item-label">Pareceres infantil (planilha)</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('planilha_modelo') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="planilha_modelo">
           <span class="nav-item-icon" data-icon="database"></span>
           <span class="nav-item-label">Criar planilha de modelo</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('termos') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="termos">
           <span class="nav-item-icon" data-icon="certificate"></span>
           <span class="nav-item-label">Termos de ciência</span>
         </div>
+        {% endif %}
         </div>
+        {% endif %}
+        {% if pode_grupo_automacao('documentos') %}
         <div class="nav-group-toggle nav-subgroup-toggle" data-subgroup="documentos">
           <span class="nav-group-toggle-label">
             <span class="nav-item-icon" data-icon="files"></span>
@@ -222,51 +296,75 @@
           <span class="nav-group-chev" data-icon="chevronRight"></span>
         </div>
         <div class="nav-subitems nav-subgroup-items" data-subgroup-items="documentos">
+        {% if pode_automacao('validar') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="validar">
           <span class="nav-item-icon" data-icon="circleCheck"></span>
           <span class="nav-item-label">Validar documentos</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('requerimento') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="requerimento">
           <span class="nav-item-icon" data-icon="files"></span>
           <span class="nav-item-label">Requerimento de matrícula</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('espec') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="espec">
           <span class="nav-item-icon" data-icon="send"></span>
           <span class="nav-item-label">Upload de um documento</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('limpeza') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="limpeza">
           <span class="nav-item-icon" data-icon="alertFile"></span>
           <span class="nav-item-label">Limpeza de documentos</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('analisa_pasta') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="analisa_pasta">
           <span class="nav-item-icon" data-icon="fileSearch"></span>
           <span class="nav-item-label">Analisa docs da pasta</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('analisa_sere') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="analisa_sere">
           <span class="nav-item-icon" data-icon="fileSearch"></span>
           <span class="nav-item-label">Analisa docs do SERE</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('documentos') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="documentos">
           <span class="nav-item-icon" data-icon="files"></span>
           <span class="nav-item-label">Documentos</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('cruzamento') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="cruzamento">
           <span class="nav-item-icon" data-icon="compare"></span>
           <span class="nav-item-label">Cruzamento de docs</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('comprimir') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="comprimir">
           <span class="nav-item-icon" data-icon="zip"></span>
           <span class="nav-item-label">Comprimir documentos</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('gerar_pastas') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="gerar_pastas">
           <span class="nav-item-icon" data-icon="folderPlus"></span>
           <span class="nav-item-label">Gerar pastas</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('mapear_pastas') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="mapear_pastas">
           <span class="nav-item-icon" data-icon="map"></span>
           <span class="nav-item-label">Mapear pastas</span>
         </div>
+        {% endif %}
         </div>
+        {% endif %}
+        {% if pode_grupo_automacao('saude') %}
         <div class="nav-group-toggle nav-subgroup-toggle" data-subgroup="saude">
           <span class="nav-group-toggle-label">
             <span class="nav-item-icon" data-icon="heart"></span>
@@ -275,15 +373,21 @@
           <span class="nav-group-chev" data-icon="chevronRight"></span>
         </div>
         <div class="nav-subitems nav-subgroup-items" data-subgroup-items="saude">
+        {% if pode_automacao('sus') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="sus">
           <span class="nav-item-icon" data-icon="heart"></span>
           <span class="nav-item-label">Encaminhamentos SUS</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('cep') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="cep">
           <span class="nav-item-icon" data-icon="mapPin"></span>
           <span class="nav-item-label">CEP</span>
         </div>
+        {% endif %}
         </div>
+        {% endif %}
+        {% if pode_grupo_automacao('comunicacao') %}
         <div class="nav-group-toggle nav-subgroup-toggle" data-subgroup="comunicacao">
           <span class="nav-group-toggle-label">
             <span class="nav-item-icon" data-icon="mail"></span>
@@ -292,15 +396,21 @@
           <span class="nav-group-chev" data-icon="chevronRight"></span>
         </div>
         <div class="nav-subitems nav-subgroup-items" data-subgroup-items="comunicacao">
+        {% if pode_automacao('avisos') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="avisos">
           <span class="nav-item-icon" data-icon="send"></span>
           <span class="nav-item-label">Mandar avisos</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('coleta_emails') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="coleta_emails">
           <span class="nav-item-icon" data-icon="mail"></span>
           <span class="nav-item-label">Coleta e-mails</span>
         </div>
+        {% endif %}
         </div>
+        {% endif %}
+        {% if pode_grupo_automacao('sistema') %}
         <div class="nav-group-toggle nav-subgroup-toggle" data-subgroup="sistema">
           <span class="nav-group-toggle-label">
             <span class="nav-item-icon" data-icon="settings"></span>
@@ -309,50 +419,72 @@
           <span class="nav-group-chev" data-icon="chevronRight"></span>
         </div>
         <div class="nav-subitems nav-subgroup-items" data-subgroup-items="sistema">
+        {% if pode_automacao('agendador') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="agendador">
           <span class="nav-item-icon" data-icon="clock"></span>
           <span class="nav-item-label">Rotinas no agendador</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('backup') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="backup">
           <span class="nav-item-icon" data-icon="database"></span>
           <span class="nav-item-label">Backup dos dados</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('mascara') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="mascara">
           <span class="nav-item-icon" data-icon="shieldLock"></span>
           <span class="nav-item-label">Máscara de dados</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('base_abc') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="base_abc">
           <span class="nav-item-icon" data-icon="fileSearch"></span>
           <span class="nav-item-label">Consulta na Base ABC</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('fluxo_geo') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="fluxo_geo">
           <span class="nav-item-icon" data-icon="mapPin"></span>
           <span class="nav-item-label">Direcionados GEO</span>
         </div>
+        {% endif %}
+        {% if pode_automacao('gerar_chaves') %}
         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="gerar_chaves">
           <span class="nav-item-icon" data-icon="key"></span>
           <span class="nav-item-label">Gerar chaves de acesso</span>
         </div>
+        {% endif %}
         </div>
+        {% endif %}
       </div>
+      {% endif %}
 
       <div class="nav-section-label">Sistema</div>
+      {% if pode_tela('whatsapp') %}
       <div class="nav-item" data-view="whatsapp">
         <span class="nav-item-icon" data-icon="whatsapp"></span>
         <span class="nav-item-label">WhatsApp</span>
       </div>
+      {% endif %}
+      {% if pode_tela('configuracoes') %}
       <div class="nav-item" data-view="configuracoes">
         <span class="nav-item-icon" data-icon="settings"></span>
         <span class="nav-item-label">Configurações</span>
       </div>
+      {% endif %}
+      {% if pode_tela('primeira-execucao') %}
       <div class="nav-item" data-view="primeira-execucao">
         <span class="nav-item-icon" data-icon="rocket"></span>
         <span class="nav-item-label">1ª execução</span>
       </div>
+      {% endif %}
+      {% if pode_tela('ajuda') %}
       <div class="nav-item" data-view="ajuda">
         <span class="nav-item-icon" data-icon="help"></span>
         <span class="nav-item-label">Ajuda</span>
       </div>
+      {% endif %}
     </nav>
 
     <div class="sidebar-footer">
@@ -395,14 +527,14 @@
       <main id="main-content">
         {% include "painel.html" %}
         {% include "menu.html" %}
-        {% include "calendario.html" %}
-        {% include "corte_etario.html" %}
-        {% include "previsao.html" %}
-        {% include "planilhas.html" %}
+        {% if pode_tela('calendario') %}{% include "calendario.html" %}{% endif %}
+        {% if pode_tela('corte-etario') %}{% include "corte_etario.html" %}{% endif %}
+        {% if pode_tela('previsao') %}{% include "previsao.html" %}{% endif %}
+        {% if pode_tela('planilhas') %}{% include "planilhas.html" %}{% endif %}
         {% include "automacoes.html" %}
         {% include "configuracoes.html" %}
-        {% include "primeira_execucao.html" %}
-        {% include "whatsapp.html" %}
+        {% if pode_tela('primeira-execucao') %}{% include "primeira_execucao.html" %}{% endif %}
+        {% if pode_tela('whatsapp') %}{% include "whatsapp.html" %}{% endif %}
         {% include "ajuda.html" %}
       </main>
     </div>

@@ -11,6 +11,7 @@
   <div class="sec-hdr"><span class="sec-ttl">Acesso e segurança</span></div>
   <div class="config-grid">
 
+    {% if pode_configuracao('minha_conta') %}
     <div class="config-row" data-config="minha_conta">
       <div class="ic" style="background:var(--badge-lime-bg); color:var(--lime);"><span data-icon="userCircle"></span></div>
       <div class="txt">
@@ -18,7 +19,9 @@
         <div class="desc">Quem está logado, trocar a minha senha e sair do sistema.</div>
       </div>
     </div>
+    {% endif %}
 
+    {% if pode_configuracao('usuarios') %}
     <div class="config-row" data-config="usuarios" data-requer="admin">
       <div class="ic" style="background:var(--badge-violet-bg); color:var(--violet);"><span data-icon="key"></span></div>
       <div class="txt">
@@ -26,12 +29,14 @@
         <div class="desc">Cadastre usuários, defina perfis, redefina senhas, desbloqueie contas e veja o registro de segurança.</div>
       </div>
     </div>
+    {% endif %}
 
   </div>
 
   <div class="sec-hdr" style="margin-top:32px;"><span class="sec-ttl">Escola</span></div>
   <div class="config-grid">
 
+    {% if pode_configuracao('escola') %}
     <div class="config-row" data-config="escola">
       <div class="ic" style="background:var(--badge-amber-bg); color:var(--amber);"><span data-icon="school"></span></div>
       <div class="txt">
@@ -39,7 +44,9 @@
         <div class="desc">Nome, CEP, endereço e identificação. Usados por todos os scripts.</div>
       </div>
     </div>
+    {% endif %}
 
+    {% if pode_configuracao('ano_letivo') %}
     <div class="config-row" data-config="ano_letivo">
       <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="calendar"></span></div>
       <div class="txt">
@@ -47,7 +54,9 @@
         <div class="desc">Escolha o ano de trabalho, volte a um ano anterior ou restaure os dados de um ano.</div>
       </div>
     </div>
+    {% endif %}
 
+    {% if pode_configuracao('data_corte_transferidos') %}
     <div class="config-row" data-config="data_corte_transferidos" data-requer="admin">
       <div class="ic" style="background:var(--badge-amber-bg); color:var(--amber);"><span data-icon="calendar"></span></div>
       <div class="txt">
@@ -55,7 +64,9 @@
         <div class="desc">A partir de que data o processo de transferidos (guia, histórico e parecer) é automático.</div>
       </div>
     </div>
+    {% endif %}
 
+    {% if pode_configuracao('mapeamento_turmas_qr') %}
     <div class="config-row" data-config="mapeamento_turmas_qr">
       <div class="ic" style="background:var(--badge-amber-bg); color:var(--amber);"><span data-icon="compare"></span></div>
       <div class="txt">
@@ -63,7 +74,9 @@
         <div class="desc">Ensina o sistema a reconhecer o nome da turma escrito no QR antigo dos pareceres (ex.: INF 4 A).</div>
       </div>
     </div>
+    {% endif %}
 
+    {% if pode_configuracao('navegador') %}
     <div class="config-row" data-config="navegador">
       <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="eye"></span></div>
       <div class="txt">
@@ -71,7 +84,9 @@
         <div class="desc">Escolha Chrome ou Firefox para todos os scripts que abrem navegador (ou deixe automático).</div>
       </div>
     </div>
+    {% endif %}
 
+    {% if pode_configuracao('backup_automatico') %}
     <div class="config-row" data-config="backup_automatico">
       <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="database"></span></div>
       <div class="txt">
@@ -79,12 +94,14 @@
         <div class="desc">Liga ou desliga o backup que o sistema faz ao fim das coletas de turmas, alunos e funcionários.</div>
       </div>
     </div>
+    {% endif %}
 
   </div>
 
   <div class="sec-hdr" style="margin-top:32px;"><span class="sec-ttl">Credenciais e integrações</span></div>
   <div class="config-grid">
 
+    {% if pode_configuracao('senha_sere') %}
     <div class="config-row" data-config="senha_sere" data-requer="admin">
       <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="lock"></span></div>
       <div class="txt">
@@ -92,7 +109,9 @@
         <div class="desc">Armazena credenciais de acesso ao SERE.</div>
       </div>
     </div>
+    {% endif %}
 
+    {% if pode_configuracao('senha_prematricula') %}
     <div class="config-row" data-config="senha_prematricula" data-requer="admin">
       <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="lock"></span></div>
       <div class="txt">
@@ -100,7 +119,9 @@
         <div class="desc">Armazena o login e a senha do portal da pré-matrícula.</div>
       </div>
     </div>
+    {% endif %}
 
+    {% if pode_configuracao('senha_rco') %}
     <div class="config-row" data-config="senha_rco" data-requer="admin">
       <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="lock"></span></div>
       <div class="txt">
@@ -108,7 +129,9 @@
         <div class="desc">Login e senha do RCO (por padrão, os mesmos do SERE).</div>
       </div>
     </div>
+    {% endif %}
 
+    {% if pode_configuracao('google_conta') %}
     <div class="config-row" data-config="google_conta" data-requer="admin">
       <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="lock"></span></div>
       <div class="txt">
@@ -116,7 +139,9 @@
         <div class="desc">Escolha a conta, o navegador e o perfil em que o link de autorização do Google abre.</div>
       </div>
     </div>
+    {% endif %}
 
+    {% if pode_configuracao('chave_gmail') %}
     <div class="config-row" data-config="chave_gmail" data-requer="admin">
       <div class="ic" style="background:var(--badge-rose-bg); color:var(--rose);"><span data-icon="mail"></span></div>
       <div class="txt">
@@ -124,7 +149,9 @@
         <div class="desc">Armazena o e-mail e a senha de app do Gmail (envio de e-mails).</div>
       </div>
     </div>
+    {% endif %}
 
+    {% if pode_configuracao('planilhas_google') %}
     <div class="config-row" data-config="planilhas_google">
       <div class="ic" style="background:var(--badge-lime-bg); color:var(--lime);"><span data-icon="files"></span></div>
       <div class="txt">
@@ -132,7 +159,9 @@
         <div class="desc">Guarda o link e o nome das planilhas, cada uma com um id. As planilhas criadas pelo sistema entram aqui.</div>
       </div>
     </div>
+    {% endif %}
 
+    {% if pode_configuracao('outras_credenciais') %}
     <div class="config-row" data-config="outras_credenciais" data-requer="admin">
       <div class="ic" style="background:var(--badge-violet-bg); color:var(--violet);"><span data-icon="key"></span></div>
       <div class="txt">
@@ -140,7 +169,9 @@
         <div class="desc">Outras chaves e tokens de acesso.</div>
       </div>
     </div>
+    {% endif %}
 
+    {% if pode_configuracao('temas') %}
     <div class="config-row" data-config="temas">
       <div class="ic" style="background:var(--badge-amber-bg); color:var(--amber);"><span data-icon="palette"></span></div>
       <div class="txt">
@@ -148,7 +179,9 @@
         <div class="desc">Escolha o tema do sistema.</div>
       </div>
     </div>
+    {% endif %}
 
+    {% if pode_configuracao('perfil') %}
     <div class="config-row" data-config="perfil">
       <div class="ic" style="background:var(--badge-lime-bg); color:var(--lime);"><span data-icon="userCircle"></span></div>
       <div class="txt">
@@ -156,12 +189,15 @@
         <div class="desc">Dados do usuário e permissões.</div>
       </div>
     </div>
+    {% endif %}
 
   </div>
 
+  {% if pode_configuracao('pasta_digitalizacao') or pode_configuracao('modelos_parecer') or pode_configuracao('modelo_requerimento') %}
   <div class="sec-hdr" style="margin-top:32px;"><span class="sec-ttl">Pastas</span></div>
   <div class="config-grid">
 
+    {% if pode_configuracao('pasta_digitalizacao') %}
     <div class="config-row" data-config="pasta_digitalizacao" data-requer="admin">
       <div class="ic" style="background:var(--badge-blue-bg); color:var(--blue);"><span data-icon="folder"></span></div>
       <div class="txt">
@@ -169,7 +205,9 @@
         <div class="desc">Define a pasta raiz dos documentos digitalizados dos alunos.</div>
       </div>
     </div>
+    {% endif %}
 
+    {% if pode_configuracao('modelos_parecer') %}
     <div class="config-row" data-config="modelos_parecer" data-requer="admin">
       <div class="ic" style="background:var(--badge-violet-bg); color:var(--violet);"><span data-icon="files"></span></div>
       <div class="txt">
@@ -177,7 +215,9 @@
         <div class="desc">Envie o modelo Word do parecer do Fundamental e ligue-o às turmas.</div>
       </div>
     </div>
+    {% endif %}
 
+    {% if pode_configuracao('modelo_requerimento') %}
     <div class="config-row" data-config="modelo_requerimento" data-requer="admin">
       <div class="ic" style="background:var(--badge-violet-bg); color:var(--violet);"><span data-icon="files"></span></div>
       <div class="txt">
@@ -185,8 +225,10 @@
         <div class="desc">Envie o modelo Word do requerimento de matrícula; ele fica guardado na pasta de modelos.</div>
       </div>
     </div>
+    {% endif %}
 
   </div>
+  {% endif %}
 
   <div class="sec-hdr" style="margin-top:32px;"><span class="sec-ttl">Painel selecionado</span></div>
   <div class="form-card" id="config-detalhe">

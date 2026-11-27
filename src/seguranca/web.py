@@ -9,7 +9,7 @@ Tudo passa por UM guarda (`before_request`), na ordem:
   3. Sessão    sem sessão válida: páginas vão para o login, a API responde 401. Exceções: login, criação do administrador,
                arquivos estáticos, ping do launcher e o webhook do WhatsApp (esse tem token próprio).
   4. Troca     se a senha é temporária, só a tela de troca de senha funciona.
-  5. Perfil    politica.perfil_exigido(): consulta / operador / admin.
+  5. Perfil    politica.permite(): consulta / operador / admin pela escada; a Pedagoga por lista de permissões própria (nega o que não está nela).
   6. CSRF      escrita autenticada exige o cabeçalho X-CSRF-Token igual ao da sessão (static/js/seguranca.js põe em todo fetch).
 
 E, em toda resposta: Content-Security-Policy estrita (só scripts do próprio sistema), X-Frame-Options, nosniff, sem cache dos
@@ -127,6 +127,12 @@ def usuario_atual():
     return getattr(g, "usuario", None)
 
 
+def perfil_atual() -> str | None:
+    """Perfil de quem fez a requisição (None fora do login: testes antigos com o guarda desligado, linha de comando)."""
+    u = usuario_atual()
+    return u.perfil if u else None
+
+
 # ───────────────────────────── o guarda ─────────────────────────────
 
 def _guarda():
@@ -175,9 +181,8 @@ def _guarda():
             return _resposta_erro(403, "Você precisa trocar a senha temporária antes de continuar.", trocar_senha=True)
         return redirect("/web/trocar-senha")
 
-    exigido = politica.perfil_exigido(request.method, caminho)
-    if not usuario.tem_perfil(exigido):
-        auditoria.registrar("acesso_negado", usuario.usuario, _ip(), f"{request.method} {caminho} (precisa {exigido})")
+    if not usuario.pode(request.method, caminho):                       # a decisão única: escada (consulta/operador/admin) ou lista da Pedagoga
+        auditoria.registrar("acesso_negado", usuario.usuario, _ip(), politica.motivo_da_negativa(usuario.perfil, request.method, caminho))
         texto = f"O seu perfil ({usuarios.ROTULO_PERFIL.get(usuario.perfil, usuario.perfil)}) não tem permissão para isso. Peça a um administrador."
         return (_resposta_erro(403, texto, permissao=True) if _quer_json()
                 else _pagina_erro(403, "Sem permissão", texto))
@@ -214,9 +219,17 @@ def _cabecalhos(resp: Response) -> Response:
 def _contexto():
     u = usuario_atual()
     s = getattr(g, "sessao", None)
+    perfil = u.perfil if u else None
     return {"csrf_token": s.csrf if s else "", "usuario_atual": u.publico() if u else None,
             "inatividade_cliente_s": max(60, _sessoes.inatividade_s() - 120),
-            "seguranca_ativa": ATIVA}
+            "seguranca_ativa": ATIVA,
+            # vitrine do HTML (o menu só mostra o que o perfil pode usar). Para administrador, operador e consulta tudo continua à mostra.
+            "pode_tela": lambda tela: politica.pode_ver_tela(perfil, tela),
+            "pode_automacao": lambda chave: politica.automacao_permitida(perfil, chave),
+            "pode_grupo_automacao": lambda grupo: politica.pode_ver_grupo_automacao(perfil, grupo),
+            "pode_configuracao": lambda id_config: politica.pode_ver_configuracao(perfil, id_config),
+            "perfil_restrito": perfil == politica.PEDAGOGA,
+            "config_editaveis": ",".join(sorted(politica.CONFIGURACOES_PEDAGOGA_EDITAVEIS))}
 
 
 # ───────────────────────────── páginas ─────────────────────────────

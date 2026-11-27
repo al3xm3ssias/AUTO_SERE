@@ -16,6 +16,7 @@
     </button>
   </div>
 
+  {% if pode_tela('transferidos') %}
   <!-- Avisos da rotina diária (transferidos a documentar/enviar etc.). Fica escondido quando não há nada a avisar. -->
   <div class="card" id="painel-avisos" hidden>
     <div class="card-header">
@@ -27,6 +28,7 @@
     </div>
     <div class="card-body" id="painel-avisos-lista"></div>
   </div>
+  {% endif %}
 
   <div class="metrics-grid" id="metrics-principais">
     <!-- preenchido via JS (stat-card) a partir de /web/api/painel/resumo -->
@@ -39,6 +41,7 @@
     <!-- preenchido via JS -->
   </div>
 
+  {% if pode_tela('prematricula') %}
   <div class="card">
     <div class="card-header">
       <span data-icon="clipboard" style="color:var(--amber)"></span>
@@ -67,5 +70,6 @@
       </div>
     </div>
   </div>
+  {% endif %}
 
 </section>

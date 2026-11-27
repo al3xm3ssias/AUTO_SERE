@@ -104,6 +104,45 @@ def cmd_criar_admin(args) -> int:
     return OK
 
 
+def cmd_criar_usuario(args) -> int:
+    """Cadastra um usuário comum (pedagoga, operador, consulta ou admin) depois que o administrador já existe."""
+    estado = usuarios.estado()
+    if estado == "ilegivel":
+        _escrever("O cadastro de usuários está ilegível (veja documentacao/Seguranca.md).")
+        return ILEGIVEL
+    if estado == "sem_usuarios":
+        _escrever("Ainda não há administrador. Crie-o primeiro: python -m src.seguranca criar-admin")
+        return ERRO
+    perfil = args.perfil
+    rotulo = usuarios.ROTULO_PERFIL[perfil]
+    try:
+        _escrever("")
+        _escrever(f"=== Criar usuário com perfil {rotulo} ===")
+        padrao = args.usuario or perfil
+        if args.senha_stdin:
+            usuario, nome, senha = padrao, args.nome or rotulo, _senha_da_entrada_padrao()
+        else:
+            usuario = _ler_texto(f"Nome de usuário [{padrao}]: ").strip() or padrao
+            nome = _ler_texto(f"Nome completo [{args.nome or rotulo}]: ").strip() or args.nome or rotulo
+            senha = _pedir_senha_nova(usuario, nome)
+            if senha is None:
+                return ERRO
+        usuarios.criar(usuario, nome, perfil, senha, por="instalador", trocar_senha=True)
+    except (KeyboardInterrupt, EOFError):
+        _escrever("\nCancelado. O usuário poderá ser criado depois, em Configurações → Usuários e segurança.")
+        return CANCELADO
+    except ErroUsuarios as e:
+        _escrever("ERRO: " + e.mensagem)
+        for pr in e.problemas:
+            _escrever("  - " + pr)
+        return ERRO
+    except segredo.ChaveIndisponivel as e:
+        _escrever(f"ERRO: não foi possível proteger a senha ({e}).")
+        return ERRO
+    _escrever(f"Usuário '{usuario}' ({rotulo}) criado. No primeiro acesso o sistema pede para trocar a senha.")
+    return OK
+
+
 def cmd_redefinir_senha(args) -> int:
     try:
         usuario = (args.usuario or _ler_texto("Usuário que vai receber a nova senha: ")).strip().lower()
@@ -215,6 +254,13 @@ def construir_parser() -> argparse.ArgumentParser:
     a.add_argument("--nome", default="")
     a.add_argument("--senha-stdin", action="store_true", help="lê a senha da entrada padrão (instalação sem janela)")
     a.set_defaults(f=cmd_criar_admin)
+    u = sub.add_parser("criar-usuario", help="cria um usuário (pedagoga, operador, consulta ou admin); o administrador já precisa existir")
+    u.add_argument("--perfil", choices=usuarios.PERFIS, default="pedagoga")
+    u.add_argument("--usuario", default="")
+    u.add_argument("--nome", default="")
+    u.add_argument("--senha-stdin", action="store_true", help="lê a senha da entrada padrão (sem janela)")
+    u.set_defaults(f=cmd_criar_usuario)
+
     r = sub.add_parser("redefinir-senha", help="recuperação de senha perdida (exige estar no computador)")
     r.add_argument("--usuario", default="")
     r.add_argument("--criar", action="store_true", help="cria o usuário como administrador se ele não existir")
