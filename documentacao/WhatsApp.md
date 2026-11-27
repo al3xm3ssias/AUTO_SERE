@@ -95,3 +95,15 @@ horário e canal WhatsApp em `avisos`. Ganchos prontos: `enviar_midia`, `simular
 real e criar o lock de execução.
 
 Testes: `tests/test_whatsapp.py`, `test_whatsapp_blake.py`, `test_whatsapp_whatsplay.py` (servidor SSE falso e WhatsApp Web de mentira em localhost).
+
+## Mensagem em massa aos Direcionados GEO (26/11/2026)
+
+Em **Pré matrícula → Direcionados GEO → Mensagem em massa** o sistema pergunta aos responsáveis dos alunos de `sere_sisgea_<ano+1>.json`
+se ainda querem a vaga ou se já matricularam em outra unidade (modelo pronto `confirmar_interesse_geo`, editável na própria tela).
+
+- **Só enfileira.** O envio é feito pela fila de sempre (pausa de 5 min, limite por dia, trava `WHATSAPP_ENVIO_REAL`), iniciada na tela WhatsApp.
+- **Uma mensagem por telefone:** irmãos com o mesmo número recebem uma só, com os nomes juntos em `$ALUNO`.
+- **Ficam de fora:** ausentes da lista, matrícula já confirmada aqui (dá para incluir), sem telefone e telefone inválido.
+- Filtro por etapa; repetir o pedido não duplica (mesmo número + mesmo texto).
+- API: `GET /web/api/whatsapp/fila/geo/resumo` e `POST /web/api/whatsapp/fila/geo/em-massa` (`{modelo_id, texto, etapa, incluir_confirmados, confirmo}`).
+- A escolha aluno a aluno na tela WhatsApp ("Direcionados GEO (próximo ano)") continua como era: `GET /fila/geo` e `POST /fila/do-geo`, modelo `geo_confirmar_interesse`.

@@ -73,6 +73,7 @@ PERMITIDAS = {
     ("GET", "/web/api/automacoes/x/historico/x"), ("GET", "/web/api/automacoes/x/flags"),
     ("POST", "/web/api/automacoes/x/executar"), ("POST", "/web/api/automacoes/x/previa"),
     ("POST", "/web/api/automacoes/x/resposta"), ("POST", "/web/api/automacoes/x/cancelar"),
+    ("POST", "/web/api/pedagoga/atualizar-dados"), ("GET", "/web/api/pedagoga/atualizar-dados/status"),
 }
 
 
@@ -157,7 +158,8 @@ def test_somente_leitura_nada_de_escrita_nem_configuracao(app):
     h = _h(c)
     for metodo, caminho in [("POST", "/web/api/configuracoes/escola"), ("POST", "/web/api/configuracoes/ano-letivo"),
                             ("POST", "/web/api/configuracoes/navegador"), ("POST", "/web/api/configuracoes/backup-automatico"),
-                            ("POST", "/web/api/wizard/credenciais_sere/executar"), ("POST", "/web/api/prematricula/registro/1"),
+                            ("POST", "/web/api/wizard/escola/executar"), ("POST", "/web/api/wizard/funcionarios/executar"),
+                            ("POST", "/web/api/prematricula/registro/1"),
                             ("POST", "/web/api/transferidos/destino/1"), ("POST", "/web/api/whatsapp/enviar"),
                             ("POST", "/web/api/seguranca/usuarios"), ("PATCH", "/web/api/seguranca/usuarios/x"),
                             ("DELETE", "/web/api/seguranca/usuarios/x"), ("POST", "/web/api/painel/avisos/x/resolver")]:
@@ -250,3 +252,93 @@ def test_instalador_cria_admin_e_depois_pedagoga(monkeypatch):
     assert cli.main(["criar-usuario", "--perfil", "pedagoga"]) == 0
     u = usuarios.obter_por_usuario("pedagoga")
     assert u.perfil == "pedagoga" and u.trocar_senha is True
+
+
+def test_pedagoga_salva_usuario_e_senha_do_sere_e_so_isso_no_assistente(app, monkeypatch):
+    gravado = {}
+    monkeypatch.setattr(rotas, "_persistir_env", lambda valores: gravado.update(valores))
+    monkeypatch.setattr(rotas, "_recarregar_credenciais_em_runtime", lambda: True)
+    c = _cliente(app, "pedagoga")
+    h = _h(c)
+    r = c.post("/web/api/wizard/credenciais_sere/executar", json={"login": "maria.sere", "senha": "segredo-123"}, headers=h)
+    assert r.status_code == 200 and gravado == {"SERE_LOGIN": "maria.sere", "SERE_SENHA": "segredo-123"}
+    assert "segredo-123" not in r.get_data(as_text=True)                    # a senha nunca volta na resposta
+    for passo in ("escola", "funcionarios", "turmas", "alunos", "credenciais_rco"):    # os demais passos seguem só do administrador
+        assert c.post(f"/web/api/wizard/{passo}/executar", json={}, headers=h).status_code == 403, passo
+    html = c.get("/web").get_data(as_text=True)
+    assert 'data-config-editaveis="' in html and "senha_sere" in html.split('data-config-editaveis="')[1].split('"')[0]
+    linha = re.search(r'<div class="config-row" data-config="senha_sere"[^>]*>', html).group(0)
+    assert "data-requer" not in linha                                        # senão o CSS da vitrine esconderia a linha dela
+
+
+@pytest.fixture()
+def auto_zerada(monkeypatch):
+    monkeypatch.setattr(rotas, "_AUTO_PEDAGOGA", {"estado": "nao_iniciado", "etapa": "", "mensagem": "", "iniciado_em": None, "terminado_em": None})
+    monkeypatch.delenv("PEDAGOGA_COLETA_AUTOMATICA", raising=False)
+    iniciadas = []
+    monkeypatch.setattr(rotas, "_auto_pedagoga_trabalho", lambda: iniciadas.append(1))
+    return iniciadas
+
+
+def test_atualizacao_automatica_so_da_pedagoga_e_so_uma_vez(app, monkeypatch, auto_zerada):
+    monkeypatch.setenv("SERE_LOGIN", "maria.sere")
+    monkeypatch.setenv("SERE_SENHA", "segredo-123")
+    assert _cliente(app, "admin").post("/web/api/pedagoga/atualizar-dados", json={}, headers=_h(_cliente(app, "admin"))).status_code == 403
+    c = _cliente(app, "pedagoga")
+    h = _h(c)
+    r1 = c.post("/web/api/pedagoga/atualizar-dados", json={}, headers=h)
+    assert r1.status_code == 200 and r1.get_json()["estado"] == "executando"
+    import time as _t
+    _t.sleep(0.2)
+    assert c.post("/web/api/pedagoga/atualizar-dados", json={}, headers=h).get_json()["estado"] == "executando"
+    assert len(auto_zerada) == 1                                            # a segunda chamada (F5) não inicia outra coleta
+    assert c.get("/web/api/pedagoga/atualizar-dados/status").get_json()["estado"] == "executando"
+
+
+def test_atualizacao_automatica_sem_senha_do_sere_avisa_e_tenta_de_novo_depois(app, monkeypatch, auto_zerada):
+    monkeypatch.setenv("SERE_LOGIN", "cpf")
+    monkeypatch.setenv("SERE_SENHA", "senha_sere")
+    c = _cliente(app, "pedagoga")
+    h = _h(c)
+    assert c.post("/web/api/pedagoga/atualizar-dados", json={}, headers=h).get_json()["estado"] == "sem_credenciais"
+    assert auto_zerada == []
+    monkeypatch.setenv("SERE_LOGIN", "maria.sere")
+    monkeypatch.setenv("SERE_SENHA", "segredo-123")                          # ela salvou a senha: agora começa
+    assert c.post("/web/api/pedagoga/atualizar-dados", json={}, headers=h).get_json()["estado"] == "executando"
+
+
+def test_atualizacao_automatica_pode_ser_desligada(app, monkeypatch, auto_zerada):
+    monkeypatch.setenv("PEDAGOGA_COLETA_AUTOMATICA", "0")
+    monkeypatch.setenv("SERE_LOGIN", "maria.sere")
+    monkeypatch.setenv("SERE_SENHA", "segredo-123")
+    c = _cliente(app, "pedagoga")
+    assert c.post("/web/api/pedagoga/atualizar-dados", json={}, headers=_h(c)).get_json()["estado"] == "desativado"
+    assert auto_zerada == []
+
+
+def _trabalhador(monkeypatch, status_por_chave):
+    """Roda o trabalhador de verdade, com a execução trocada por um fantoche que só registra o status final."""
+    monkeypatch.setattr(rotas, "_AUTO_PEDAGOGA", {"estado": "executando", "etapa": "", "mensagem": "", "iniciado_em": 1, "terminado_em": None})
+    monkeypatch.setattr(rotas, "_EXECUCOES", {})
+    chamadas = []
+
+    def falsa(script, chave, payload, turmas_json):
+        chamadas.append((chave, dict(payload)))
+        rotas._EXECUCOES[chave] = {"status": status_por_chave[chave]}
+
+    monkeypatch.setattr(rotas, "_executar_registrado", falsa)
+    monkeypatch.setattr(rotas.time, "sleep", lambda s: None)
+    rotas._auto_pedagoga_trabalho()
+    return chamadas, rotas._auto_pedagoga_copia()
+
+
+def test_trabalhador_roda_turmas_e_depois_alunos_basico(monkeypatch):
+    chamadas, estado = _trabalhador(monkeypatch, {"turmas": "concluido", "alunos": "concluido"})
+    assert chamadas == [("turmas", {}), ("alunos", {"modo": "basico"})]
+    assert estado["estado"] == "concluido"
+
+
+def test_trabalhador_para_na_primeira_falha_sem_derrubar_nada(monkeypatch):
+    chamadas, estado = _trabalhador(monkeypatch, {"turmas": "erro", "alunos": "concluido"})
+    assert [c for c, _ in chamadas] == ["turmas"]                              # Alunos não roda sobre Turmas que falhou
+    assert estado["estado"] == "erro" and "Turmas" in estado["mensagem"]

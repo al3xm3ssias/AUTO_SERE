@@ -858,7 +858,7 @@ CONFIGURACOES: dict[str, dict] = {
         ],
         "dicas": [
             "O modelo precisa ter `$NOME_ALUNO`. A Filiação 1 e 2 usam `$NOME_RESP1`, `$NOME_RESP2`, `$CPF_RESP1` etc.",
-            "Reenviar substitui o modelo anterior. Os PDFs gerados vão para a pasta do ano letivo.",
+            "Reenviar substitui o modelo anterior. Os PDFs gerados vão para a subpasta REQUERIMENTO_MATRICULA da pasta do ano letivo.",
         ],
         "veja_tambem": [R("automacao", "requerimento")],
     },

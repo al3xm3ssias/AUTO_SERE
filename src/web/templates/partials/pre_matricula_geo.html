@@ -6,7 +6,26 @@
       <span data-icon="mapPin" style="color:var(--txt3)"></span>
       <span class="card-title">Direcionados GEO <span id="pg-ano"></span></span>
       <span class="card-header-badge" id="pg-cnt">0</span>
-      <button class="btn-sm" id="pg-exportar" type="button" style="margin-left:auto"><span data-icon="download"></span> Exportar</button>
+      <button class="btn-sm" id="pg-massa-abrir" type="button" style="margin-left:auto" title="Pergunta aos responsáveis se ainda querem a vaga"><span data-icon="whatsapp"></span> Mensagem em massa</button>
+      <button class="btn-sm" id="pg-exportar" type="button"><span data-icon="download"></span> Exportar</button>
+    </div>
+    <div class="card-body" id="pg-massa" style="display:none; border-bottom:1px solid var(--brd)">
+      <p class="campo-ajuda" style="margin:0 0 8px"><b>Confirmar interesse na vaga.</b> Põe na fila do WhatsApp <b>uma mensagem por telefone</b> (irmãos com o mesmo
+        número recebem uma só). Ficam de fora: ausentes da lista, matrícula já confirmada aqui, sem telefone e telefone inválido. Nada é enviado agora:
+        quem envia é a fila (pausa entre mensagens e limite por dia), que você inicia na tela WhatsApp.</p>
+      <div class="stat-grid" id="pg-massa-cartoes"></div>
+      <div class="fbar" style="margin-top:8px">
+        <select class="pv-select" id="pg-massa-modelo" title="Modelo da mensagem"></select>
+        <select class="pv-select" id="pg-massa-etapa" title="Só uma etapa"></select>
+        <label style="display:flex; gap:6px; align-items:center"><input type="checkbox" id="pg-massa-confirmados"> incluir matrícula já confirmada</label>
+      </div>
+      <textarea id="pg-massa-texto" rows="9" style="width:100%; margin-top:8px" spellcheck="true" aria-label="Texto da mensagem"></textarea>
+      <p class="campo-ajuda" id="pg-massa-amostra" style="margin:6px 0"></p>
+      <div style="display:flex; gap:8px; flex-wrap:wrap">
+        <button class="btn-sm" id="pg-massa-enfileirar" type="button"><span data-icon="send"></span> Pôr na fila</button>
+        <button class="btn-sm" id="pg-massa-fechar" type="button">Fechar</button>
+        <button class="btn-sm" id="pg-massa-ir" type="button" hidden>Abrir a fila do WhatsApp</button>
+      </div>
     </div>
     <div class="card-body">
       <p class="campo-ajuda" style="margin:0 0 8px">Alunos que a rede direcionou para a escola no próximo ano (SERE → Planejamento Escolar). Direcionado não é matrícula

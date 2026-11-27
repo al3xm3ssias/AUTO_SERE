@@ -73,6 +73,22 @@ O não comparecimento implicará no cancelamento da vaga.
 * 16h00 (segunda a quinta)
 * 11h30 (sexta-feira – regime parcial)"""
 
+TEXTO_CONFIRMAR_INTERESSE_GEO = """Olá, $RESPONSAVEL! Tudo bem? 🌟
+Aqui é o Claudio, escriturário da $ESCOLA.
+
+O(A) aluno(a) $ALUNO foi direcionado(a) pela rede de ensino para a nossa escola no ano letivo de $PROXIMO_ANO_LETIVO.
+
+Para organizarmos as turmas e liberarmos a vaga para outra família caso necessário, precisamos saber:
+
+Vocês querem a vaga em nossa escola?
+
+Responda com uma das opções:
+1️⃣ SIM, quero a vaga na $ESCOLA
+2️⃣ NÃO, já confirmei a matrícula em outra escola
+3️⃣ Ainda não decidi
+
+Se já matriculou em outra unidade, é só avisar — assim cancelamos o direcionamento sem nenhum problema. 🙏"""
+
 PADROES: dict[str, dict] = {
     "livre": {"nome": "Mensagem livre (escrever na hora)", "texto": ""},
     "matricula_aprovada": {
@@ -90,6 +106,10 @@ PADROES: dict[str, dict] = {
                   "1 - Tenho interesse e vou confirmar a matrícula nesta escola\n"
                   "2 - Já matriculei em outra escola\n\n"
                   "Assim, se a vaga não for mais necessária, podemos oferecê-la a outra família. Obrigado!"),
+    },
+    "confirmar_interesse_geo": {
+        "nome": "Confirmar interesse na vaga (direcionados GEO)",
+        "texto": TEXTO_CONFIRMAR_INTERESSE_GEO,
     },
     "chamada_matricula": {
         "nome": "Chamada para matrícula (pais de aluno novo)",

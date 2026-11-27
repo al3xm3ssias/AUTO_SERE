@@ -3635,7 +3635,7 @@ const DETALHE_CONFIG = {
     <button class="btn-primary" id="cfg-mp-enviar">Enviar modelo</button>`,
   modelo_requerimento: `
     <h4 style="margin-bottom:14px; font-size:.9rem;">Modelo do requerimento de matrícula</h4>
-    <p style="color:var(--txt3); font-size:.82rem; margin-bottom:12px;">Envie o modelo Word (.docx) com os marcadores (<code>$NOME_ALUNO</code>, <code>$NOME_RESP1</code>, <code>$NOME_RESP2</code>, <code>$CPF_RESP1</code> etc.). Reenviar substitui o modelo anterior. Os PDFs gerados vão para a pasta do ano letivo atual.</p>
+    <p style="color:var(--txt3); font-size:.82rem; margin-bottom:12px;">Envie o modelo Word (.docx) com os marcadores (<code>$NOME_ALUNO</code>, <code>$NOME_RESP1</code>, <code>$NOME_RESP2</code>, <code>$CPF_RESP1</code> etc.). Reenviar substitui o modelo anterior. Os PDFs gerados vão para a subpasta REQUERIMENTO_MATRICULA da pasta do ano letivo atual.</p>
     <div class="field"><label>Arquivo do modelo (.docx)</label><input type="file" id="cfg-mr-arquivo" accept=".docx"></div>
     <div id="cfg-mr-status" style="font-family:var(--mono); font-size:.72rem; color:var(--txt3); margin-bottom:6px;">Carregando…</div>
     <div id="cfg-mr-pastas" style="font-family:var(--mono); font-size:.68rem; color:var(--txt3); margin-bottom:14px; word-break:break-all;"></div>
@@ -3695,11 +3695,6 @@ const DETALHE_CONFIG = {
     <button class="btn-primary">Salvar perfil</button>`,
 };
 
-const PAINEL_SENHA_SERE_RESTRITO = `
-  <h4 style="margin-bottom:14px; font-size:.9rem;">Senha do SERE</h4>
-  <p style="color:var(--txt3); font-size:.82rem; max-width:560px;">A senha do SERE é guardada e trocada pelo administrador. Para saber se ela está configurada, abra
-  Automações → Turmas (ou Alunos) e veja “Configurações do script”.</p>`;
-
 /** Painel somente leitura: o conteúdo entra num <fieldset disabled>, que desabilita todo campo e botão dentro dele (mesmo os que o
  *  código do painel reabilite depois). A proteção de verdade está no servidor, que recusa a gravação. */
 function tornarSomenteConsulta(detalhe) {
@@ -3737,10 +3732,6 @@ function initConfiguracoes() {
     row.addEventListener("click", () => {
       const detalhe = document.getElementById("config-detalhe");
       const soConsulta = PERFIL_RESTRITO && !CONFIG_EDITAVEIS.includes(row.dataset.config);
-      if (soConsulta && row.dataset.config === "senha_sere") {
-        detalhe.innerHTML = PAINEL_SENHA_SERE_RESTRITO;           // sem formulário: a senha do SERE é guardada pelo administrador
-        return;
-      }
       if (soConsulta && row.dataset.config === "perfil") {
         montarPerfilRestrito(detalhe);
         return;
@@ -4647,6 +4638,7 @@ function conectarFormSenhaSere() {
     try {
       const resposta = await apiPost("/wizard/credenciais_sere/executar", { login, senha });
       toast(resposta.mensagem || "Credenciais salvas");
+      if (PERFIL_RESTRITO) iniciarAtualizacaoSilenciosa();      // agora que o SERE tem login, a Pedagoga já atualiza os dados
     } catch (e) {
       toast(e.message);
     } finally {
@@ -5652,6 +5644,39 @@ async function abrirAssistenteSeNecessario() {
   }
 }
 
+/* ---------- Pedagoga: atualização silenciosa de Turmas e Alunos ---------- */
+// Ao abrir o sistema, o servidor começa (uma vez por abertura) as coletas de Turmas e Alunos em segundo plano. Aqui só se mostra um
+// aviso discreto no canto e, quando termina, as telas são recarregadas sem toast nem janela. Falha ou falta de senha: só o aviso.
+let _atualSilenciosaPolling = null;
+
+function _avisoAtualizacao(texto, ruim) {
+  let el = document.getElementById("aviso-atualizacao");
+  if (!texto) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement("div"); el.id = "aviso-atualizacao"; el.setAttribute("role", "status"); document.body.appendChild(el); }
+  el.textContent = texto;
+  el.classList.toggle("ruim", !!ruim);
+}
+
+async function iniciarAtualizacaoSilenciosa() {
+  if (!PERFIL_RESTRITO || _atualSilenciosaPolling) return;
+  let estado;
+  try { estado = await apiPost("/pedagoga/atualizar-dados", {}); } catch (e) { return; }
+  const tratar = (d) => {
+    if (d.estado === "executando") { _avisoAtualizacao("Atualizando dados do SERE em segundo plano…"); return false; }
+    if (d.estado === "concluido") { _avisoAtualizacao(""); carregarPainel(); return true; }
+    if (d.estado === "erro") { _avisoAtualizacao("Não foi possível atualizar agora. Use Automações → Turmas/Alunos.", true); setTimeout(() => _avisoAtualizacao(""), 15000); return true; }
+    if (d.estado === "sem_credenciais") { _avisoAtualizacao(d.mensagem, true); return true; }
+    _avisoAtualizacao(""); return true;
+  };
+  if (tratar(estado)) return;
+  _atualSilenciosaPolling = setInterval(async () => {
+    try {
+      const d = await apiGet("/pedagoga/atualizar-dados/status");
+      if (tratar(d)) { clearInterval(_atualSilenciosaPolling); _atualSilenciosaPolling = null; }
+    } catch (e) { /* sem rede por um instante: tenta no próximo ciclo */ }
+  }, 5000);
+}
+
 /* ---------- Init ---------- */
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -5665,6 +5690,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (!PERFIL_RESTRITO) conectarPainelWizard();
   carregarPainel();
   iniciarContextoAno();
+  if (PERFIL_RESTRITO) iniciarAtualizacaoSilenciosa();       // Pedagoga: atualiza Turmas e Alunos sozinha, sem avisos
   if (!PERFIL_RESTRITO) {          // assistente de 1ª execução e autorização do Google são do administrador
     abrirAssistenteSeNecessario();
     iniciarMonitorAutorizacaoGoogle();

@@ -1,7 +1,7 @@
 # Alterações — perfil PEDAGOGA (mesclagem de 27/11/2026)
 
 Base: `AUTO_SERE_mesclado_final (2).zip`. Mesclado: `perfil_pedagoga.patch` (aplicado com `patch -p1`, sem conflitos, sem rejeições).
-Resultado: 18 arquivos alterados/criados, ~600 linhas adicionadas. Nenhum arquivo existente teve comportamento mudado para Administrador, Operador ou Consulta.
+Resultado: 19 arquivos alterados/criados, ~600 linhas adicionadas. Nenhum arquivo existente teve comportamento mudado para Administrador, Operador ou Consulta.
 
 ## Resumo
 
@@ -45,7 +45,18 @@ camadas; esconder menu é só vitrine.
 | Arquivo | O que mudou |
 |---|---|
 | `documentacao/Seguranca.md` | Linha do perfil na tabela e seção "Perfil Pedagoga" (regras, criação, como liberar mais algo). |
-| `tests/test_perfil_pedagoga.py` (novo) | 15 testes: lista fechada, 403 em toda rota fora da lista (percorre todas as rotas do app), não herda a escada, só Turmas/Alunos (básico e completo), segunda trava, somente leitura, troca da própria senha, painel reduzido, painel/menu do admin inalterados, mudar perfil derruba a sessão, ajuda filtrada, instalador. |
+| `tests/test_perfil_pedagoga.py` (novo) | 21 testes: lista fechada, 403 em toda rota fora da lista (percorre todas as rotas do app), não herda a escada, só Turmas/Alunos (básico e completo), segunda trava, somente leitura, troca da própria senha, painel reduzido, painel/menu do admin inalterados, mudar perfil derruba a sessão, ajuda filtrada, instalador. |
+
+## Correção extra: visual da tela "Usuários e segurança" (27/11/2026)
+- **Causa:** `base.html` (tela principal) nunca carregava `auth.css`, onde ficam os estilos `.usr-*`. Por isso select e botões apareciam crus e o log sem formatação. Isso também impedia as regras `body[data-perfil-restrito]` e `body.perfil-consulta` de esconder itens na vitrine (o servidor já bloqueava de qualquer forma).
+- `src/web/templates/base.html`: passa a carregar `css/auth.css` depois de `styles.css`.
+- `src/web/static/js/usuarios.js`: auditoria vira **tabela** (Hora, Evento, Usuário, IP, Detalhe), agrupada por **dia** com cabeçalho "quinta-feira, 27/11/2026", mais novo primeiro; eventos de recusa/bloqueio ganham selo vermelho.
+- `src/web/static/css/auth.css`: estilo de select, botões, cabeçalho fixo e linhas da auditoria no tema do sistema.
+
+## Ajustes de 27/11/2026 (2): senha do SERE e atualização automática
+1. **Pedagoga pode salvar o usuário e a senha do SERE.** `politica.py`: `senha_sere` entra em `CONFIGURACOES_PEDAGOGA_EDITAVEIS` e a regra `POST /web/api/wizard/credenciais_sere/executar` entra na lista dela. Em `rotas.py`, `wizard_executar_passo` tem segunda trava: para a Pedagoga, qualquer outro passo do assistente dá 403. `app.js`: some o painel "guardada pelo administrador" e aparece o formulário normal; `configuracoes.html`: a linha `senha_sere` não leva `data-requer="admin"` para ela (senão o CSS a esconderia). Atenção: o login do SERE é **um só para o sistema** (`credenciais/.env`); o que ela salvar vale para todos.
+2. **Atualização silenciosa de Turmas e Alunos.** `rotas.py`: `POST /pedagoga/atualizar-dados` e `GET /pedagoga/atualizar-dados/status`; um trabalhador em segundo plano roda `turmas` e depois `alunos` (básico) pelas mesmas automações da tela (histórico, navegador conforme configurado, por padrão sem janela). Roda uma vez por abertura do sistema, para quando uma etapa falha (Alunos não roda sobre Turmas com erro) e nunca derruba o sistema. Sem senha do SERE salva, avisa e tenta de novo quando ela salvar. `app.js`: `iniciarAtualizacaoSilenciosa()` dispara ao abrir a tela da Pedagoga, mostra só um aviso discreto no canto e recarrega o painel ao terminar. Desligar: `PEDAGOGA_COLETA_AUTOMATICA=0`.
+3. Testes: `test_perfil_pedagoga.py` agora tem 21 testes (senha do SERE, demais passos do wizard negados, atualização uma vez só, sem credenciais, desligada, ordem Turmas→Alunos e parada na falha).
 
 ## Como liberar mais algo para a Pedagoga
 Editar `AUTOMACOES_PEDAGOGA`, `TELAS_PEDAGOGA`, `CONFIGURACOES_PEDAGOGA` e `_REGRAS_PEDAGOGA` em `src/seguranca/politica.py` e atualizar `PERMITIDAS` em `tests/test_perfil_pedagoga.py`.

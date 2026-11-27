@@ -102,7 +102,7 @@
   <div class="config-grid">
 
     {% if pode_configuracao('senha_sere') %}
-    <div class="config-row" data-config="senha_sere" data-requer="admin">
+    <div class="config-row" data-config="senha_sere"{% if not perfil_restrito %} data-requer="admin"{% endif %}>
       <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="lock"></span></div>
       <div class="txt">
         <div class="name">Salvar senha do SERE</div>

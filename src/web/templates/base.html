@@ -18,6 +18,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('web.static', filename='css/styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('web.static', filename='css/auth.css') }}">
 </head>
 <body class="{{ 'modo-consulta' if somente_consulta else '' }}" data-ano-letivo="{{ ano_letivo }}"{% if usuario_atual %} data-perfil="{{ usuario_atual.perfil }}" data-perfil-rotulo="{{ usuario_atual.perfil_rotulo }}" data-usuario-nome="{{ usuario_atual.nome }}" data-usuario-login="{{ usuario_atual.usuario }}"{% endif %}{% if perfil_restrito %} data-perfil-restrito="1" data-config-editaveis="{{ config_editaveis }}"{% endif %}>
 

@@ -2079,6 +2079,93 @@ def automacoes_executar(chave):
     })
 
 
+# ── Pedagoga: atualização silenciosa de Turmas e Alunos ao abrir o sistema ──
+# O front (app.js) chama POST /pedagoga/atualizar-dados quando a Pedagoga abre o sistema. O servidor começa UMA vez por abertura do
+# sistema (o launcher), em segundo plano, a coleta de Turmas e depois a de Alunos (modo básico), as mesmas automações da tela, com o
+# navegador no modo configurado (por padrão sem janela). Fica no histórico das automações como qualquer outra execução. Se o usuário/senha
+# do SERE ainda não estiverem salvos, não começa e avisa; quando ela salvar, o front chama de novo. Para desligar: PEDAGOGA_COLETA_AUTOMATICA=0.
+_AUTO_PEDAGOGA_ETAPAS = (("turmas", {}, "Turmas"), ("alunos", {"modo": "basico"}, "Alunos"))
+_AUTO_PEDAGOGA_ESPERA_MAX_S = 45 * 60
+_AUTO_PEDAGOGA_LOCK = threading.Lock()
+_AUTO_PEDAGOGA: dict = {"estado": "nao_iniciado", "etapa": "", "mensagem": "", "iniciado_em": None, "terminado_em": None}
+
+
+def _auto_pedagoga_definir(**campos) -> None:
+    with _AUTO_PEDAGOGA_LOCK:
+        _AUTO_PEDAGOGA.update(campos)
+
+
+def _auto_pedagoga_copia() -> dict:
+    with _AUTO_PEDAGOGA_LOCK:
+        return dict(_AUTO_PEDAGOGA)
+
+
+def _sere_configurado() -> bool:
+    return ((os.getenv("SERE_LOGIN") or "").strip() not in _PLACEHOLDERS_SERE
+            and (os.getenv("SERE_SENHA") or "") not in _PLACEHOLDERS_SERE)
+
+
+def _status_da_execucao(chave: str) -> str:
+    with _EXECUCOES_LOCK:
+        return (_EXECUCOES.get(chave) or {}).get("status") or ""
+
+
+def _auto_pedagoga_esperar(chave: str) -> str:
+    """Espera a automação `chave` sair de 'executando' e devolve o status final ('' se estourou o tempo)."""
+    limite = time.time() + _AUTO_PEDAGOGA_ESPERA_MAX_S
+    while time.time() < limite:
+        status = _status_da_execucao(chave)
+        if status != StatusExecucao.EXECUTANDO.value:
+            return status
+        time.sleep(2)
+    return ""
+
+
+def _auto_pedagoga_trabalho() -> None:
+    try:
+        for chave, payload, rotulo in _AUTO_PEDAGOGA_ETAPAS:
+            _auto_pedagoga_definir(etapa=rotulo, mensagem=f"Atualizando {rotulo}…")
+            if _status_da_execucao(chave) == StatusExecucao.EXECUTANDO.value:      # ela mesma já a iniciou pela tela: só espera
+                _auto_pedagoga_esperar(chave)
+                continue
+            if _conflito_em_execucao(chave, str(payload.get("modo") or "")):
+                _auto_pedagoga_esperar(chave)
+                continue
+            script = _registro.obter(chave)
+            if script is None:
+                raise ValueError(f"Automação '{chave}' não encontrada.")
+            _OPCOES_PENDENTES[chave] = dict(payload)
+            _executar_registrado(script, chave, dict(payload), _carregar_json("turmas.json", {}))
+            final = _auto_pedagoga_esperar(chave)
+            if final != StatusExecucao.CONCLUIDO.value:
+                raise RuntimeError(f"A coleta de {rotulo} não terminou bem (veja o histórico em Automações).")
+        _auto_pedagoga_definir(estado="concluido", etapa="", mensagem="Dados atualizados.", terminado_em=time.time())
+    except Exception as exc:  # noqa: BLE001 — a atualização é de conveniência: nunca derruba o sistema
+        _auto_pedagoga_definir(estado="erro", mensagem=str(exc) or exc.__class__.__name__, terminado_em=time.time())
+
+
+@api_bp.route("/pedagoga/atualizar-dados", methods=["POST"])
+def pedagoga_atualizar_dados():
+    if _perfil_atual() != _politica.PEDAGOGA:
+        return jsonify({"estado": "nao_se_aplica"}), 403
+    if (os.getenv("PEDAGOGA_COLETA_AUTOMATICA") or "1").strip().lower() in ("0", "false", "nao", "não", "off"):
+        return jsonify({"estado": "desativado", "mensagem": ""})
+    with _AUTO_PEDAGOGA_LOCK:
+        if _AUTO_PEDAGOGA["estado"] in ("executando", "concluido", "erro"):       # uma vez por abertura do sistema
+            return jsonify(dict(_AUTO_PEDAGOGA))
+        if not _sere_configurado():
+            _AUTO_PEDAGOGA.update(estado="sem_credenciais", etapa="", mensagem="Salve o usuário e a senha do SERE em Configurações para a atualização automática.")
+            return jsonify(dict(_AUTO_PEDAGOGA))
+        _AUTO_PEDAGOGA.update(estado="executando", etapa="", mensagem="Atualizando dados…", iniciado_em=time.time(), terminado_em=None)
+    threading.Thread(target=_auto_pedagoga_trabalho, name="pedagoga_atualizacao", daemon=True).start()
+    return jsonify(_auto_pedagoga_copia())
+
+
+@api_bp.route("/pedagoga/atualizar-dados/status")
+def pedagoga_atualizar_dados_status():
+    return jsonify(_auto_pedagoga_copia())
+
+
 @api_bp.route("/automacoes/<string:chave>/status")
 def automacoes_status(chave):
     """
@@ -3496,6 +3583,9 @@ def wizard_status():
 @api_bp.route("/wizard/<string:passo>/executar", methods=["POST"])
 def wizard_executar_passo(passo):
     """Mapeia cada passo do wizard para a automação real correspondente."""
+    # Segunda trava: a Pedagoga só pode gravar o usuário/senha do SERE; os demais passos do assistente continuam sendo do administrador.
+    if _perfil_atual() == _politica.PEDAGOGA and passo != "credenciais_sere":
+        return jsonify({"status": "erro", "mensagem": "O seu perfil não tem permissão para este passo."}), 403
     payload = request.get_json(silent=True) or {}
 
     try:

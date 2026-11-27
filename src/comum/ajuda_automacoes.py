@@ -341,7 +341,7 @@ AUTOMACOES: dict[str, dict] = {
         "antes": ["Planilha das respostas cadastrada em Planilhas do Drive com o tipo \"Matrícula (respostas do formulário)\" e ativa.",
                   "Modelo .docx enviado em Configurações → Modelo do requerimento.",
                   "Acesso ao Google configurado (na primeira vez o Google pede autorização)."],
-        "resultado": ["PDFs `<nº da resposta>_<nome do aluno>.pdf` na pasta do ano letivo (`dados/<ano>/`). Com **Gerar também um PDF único**, sai também `TODOS.pdf`."],
+        "resultado": ["PDFs `<nº da resposta>_<nome do aluno>.pdf` na subpasta `REQUERIMENTO_MATRICULA` da pasta do ano letivo (`dados/<ano>/REQUERIMENTO_MATRICULA/`). Com **Gerar também um PDF único**, sai também `TODOS.pdf`."],
         "cuidados": ["Filiação 1 e 2 do modelo vêm do Responsável 1 e 2 da planilha (`$NOME_RESP1`, `$NOME_RESP2`...).",
                      "A coluna com a foto do RG do responsável 1 é ignorada.",
                      "Avisos de tags não substituídas ou respostas não reconhecidas aparecem no log."],

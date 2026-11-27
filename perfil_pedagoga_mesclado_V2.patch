@@ -1,0 +1,2102 @@
+diff -ruN -x '*.orig' -x '*.rej' -x __pycache__ a/docs/ALTERACOES_PERFIL_PEDAGOGA.md b/docs/ALTERACOES_PERFIL_PEDAGOGA.md
+--- a/docs/ALTERACOES_PERFIL_PEDAGOGA.md	1970-01-01 00:00:00.000000000 +0000
++++ b/docs/ALTERACOES_PERFIL_PEDAGOGA.md	2026-11-27 11:00:38.481135964 +0000
+@@ -0,0 +1,72 @@
++# Alterações — perfil PEDAGOGA (mesclagem de 27/11/2026)
++
++Base: `AUTO_SERE_mesclado_final (2).zip`. Mesclado: `perfil_pedagoga.patch` (aplicado com `patch -p1`, sem conflitos, sem rejeições).
++Resultado: 19 arquivos alterados/criados, ~600 linhas adicionadas. Nenhum arquivo existente teve comportamento mudado para Administrador, Operador ou Consulta.
++
++## Resumo
++
++Novo perfil **Pedagoga**, independente da escada Consulta < Operador < Administrador. Ela só consulta **Painel, Turmas, Alunos e Encaminhamentos SUS**
++e só executa as coletas **Turmas** (`turmas.py`) e **Alunos** (básico `alunos.py` e completo `alunos_completo.py`). É somente leitura: não grava
++registro nem configuração, não apaga histórico, não envia mensagem; só troca a própria senha.
++
++Princípio: **lista de permissões** (o que não está na lista é negado com 403, inclusive rotas criadas no futuro), validada **no servidor** em duas
++camadas; esconder menu é só vitrine.
++
++## Alterações por arquivo
++
++### Segurança (servidor)
++| Arquivo | O que mudou |
++|---|---|
++| `src/seguranca/politica.py` | Constante `PEDAGOGA`; conjuntos `AUTOMACOES_PEDAGOGA` (`turmas`, `alunos`), `TELAS_PEDAGOGA`, `GRUPOS_AUTOMACAO_PEDAGOGA`, `CONFIGURACOES_PEDAGOGA` (somente consulta) e `CONFIGURACOES_PEDAGOGA_EDITAVEIS` (`minha_conta`, `temas`); lista `_REGRAS_PEDAGOGA` (método + expressão de rota); funções `permite`, `motivo_da_negativa`, `automacao_permitida`, `pode_ver_tela`, `pode_ver_grupo_automacao`, `pode_ver_configuracao` e o resumo de perfil para o front. |
++| `src/seguranca/usuarios.py` | `PERFIS` e `ROTULO_PERFIL` passam a incluir `pedagoga`; `Usuario.pode(metodo, caminho)` como decisão única (escada ou lista). |
++| `src/seguranca/web.py` | Guarda de toda requisição usa `usuario.pode(...)` e audita a negativa com o motivo; novo `perfil_atual()`; o contexto dos templates expõe `pode_tela`, `pode_automacao`, `pode_grupo_automacao`, `pode_configuracao`, `perfil_restrito`, `config_editaveis`. |
++| `src/seguranca/cli.py` | Novo comando `python -m src.seguranca criar-usuario --perfil pedagoga|operador|consulta|admin` (exige administrador já existente; aceita `--usuario`, `--nome`, `--senha-stdin`). |
++| `scripts/windows/instalar.ps1` | Depois de criar o administrador, pergunta "Deseja cadastrar agora um usuário com o perfil PEDAGOGA? (S/N)". |
++
++### Rotas e ajuda
++| Arquivo | O que mudou |
++|---|---|
++| `src/web/api/rotas.py` | **Painel reduzido no servidor** para a Pedagoga (total de alunos, meninos, meninas, turmas, encaminhamentos SUS; pré-matrícula, documentos, raio e transferidos nem são lidos). Lista de automações filtrada por perfil. **Segunda trava** em `automacoes_executar`: 403 se o perfil não pode a automação. |
++| `src/web/api/ajuda.py` | A Central de ajuda (F1) mostra à Pedagoga só os textos das telas, automações e configurações que ela usa. |
++
++### Interface
++| Arquivo | O que mudou |
++|---|---|
++| `src/web/templates/base.html` | Menu/seções e script de inicialização condicionados a `pode_tela`/`pode_automacao`; `body[data-perfil-restrito]`. |
++| `src/web/templates/menu.html` | Itens do menu só para o que o perfil pode. |
++| `src/web/templates/configuracoes.html` | Pedagoga vê só: Dados da escola, Ano letivo, Navegador, Backup automático, Senha do SERE (nunca exibida), Minha conta, Temas e Perfil; as quatro primeiras e a senha do SERE em somente consulta. |
++| `src/web/templates/painel.html` | Blocos Transferidos e Pré-matrícula só aparecem se `pode_tela(...)`. |
++| `src/web/static/js/app.js` | Respeita perfil restrito (sem opções guardadas, navegador, limpar histórico; campos de configuração travados). |
++| `src/web/static/js/calendario.js`, `corte_etario.js` | Não quebram quando a tela não existe para o perfil (guarda `if (!$(...)) return`). |
++| `src/web/static/js/usuarios.js` | Opção "Pedagoga" no cadastro e texto explicativo dos perfis. |
++| `src/web/static/css/auth.css` | Regras `body[data-perfil-restrito]` e selo `.usr-selo.pedagoga`. |
++
++### Documentação e testes
++| Arquivo | O que mudou |
++|---|---|
++| `documentacao/Seguranca.md` | Linha do perfil na tabela e seção "Perfil Pedagoga" (regras, criação, como liberar mais algo). |
++| `tests/test_perfil_pedagoga.py` (novo) | 21 testes: lista fechada, 403 em toda rota fora da lista (percorre todas as rotas do app), não herda a escada, só Turmas/Alunos (básico e completo), segunda trava, somente leitura, troca da própria senha, painel reduzido, painel/menu do admin inalterados, mudar perfil derruba a sessão, ajuda filtrada, instalador. |
++
++## Correção extra: visual da tela "Usuários e segurança" (27/11/2026)
++- **Causa:** `base.html` (tela principal) nunca carregava `auth.css`, onde ficam os estilos `.usr-*`. Por isso select e botões apareciam crus e o log sem formatação. Isso também impedia as regras `body[data-perfil-restrito]` e `body.perfil-consulta` de esconder itens na vitrine (o servidor já bloqueava de qualquer forma).
++- `src/web/templates/base.html`: passa a carregar `css/auth.css` depois de `styles.css`.
++- `src/web/static/js/usuarios.js`: auditoria vira **tabela** (Hora, Evento, Usuário, IP, Detalhe), agrupada por **dia** com cabeçalho "quinta-feira, 27/11/2026", mais novo primeiro; eventos de recusa/bloqueio ganham selo vermelho.
++- `src/web/static/css/auth.css`: estilo de select, botões, cabeçalho fixo e linhas da auditoria no tema do sistema.
++
++## Ajustes de 27/11/2026 (2): senha do SERE e atualização automática
++1. **Pedagoga pode salvar o usuário e a senha do SERE.** `politica.py`: `senha_sere` entra em `CONFIGURACOES_PEDAGOGA_EDITAVEIS` e a regra `POST /web/api/wizard/credenciais_sere/executar` entra na lista dela. Em `rotas.py`, `wizard_executar_passo` tem segunda trava: para a Pedagoga, qualquer outro passo do assistente dá 403. `app.js`: some o painel "guardada pelo administrador" e aparece o formulário normal; `configuracoes.html`: a linha `senha_sere` não leva `data-requer="admin"` para ela (senão o CSS a esconderia). Atenção: o login do SERE é **um só para o sistema** (`credenciais/.env`); o que ela salvar vale para todos.
++2. **Atualização silenciosa de Turmas e Alunos.** `rotas.py`: `POST /pedagoga/atualizar-dados` e `GET /pedagoga/atualizar-dados/status`; um trabalhador em segundo plano roda `turmas` e depois `alunos` (básico) pelas mesmas automações da tela (histórico, navegador conforme configurado, por padrão sem janela). Roda uma vez por abertura do sistema, para quando uma etapa falha (Alunos não roda sobre Turmas com erro) e nunca derruba o sistema. Sem senha do SERE salva, avisa e tenta de novo quando ela salvar. `app.js`: `iniciarAtualizacaoSilenciosa()` dispara ao abrir a tela da Pedagoga, mostra só um aviso discreto no canto e recarrega o painel ao terminar. Desligar: `PEDAGOGA_COLETA_AUTOMATICA=0`.
++3. Testes: `test_perfil_pedagoga.py` agora tem 21 testes (senha do SERE, demais passos do wizard negados, atualização uma vez só, sem credenciais, desligada, ordem Turmas→Alunos e parada na falha).
++
++## Como liberar mais algo para a Pedagoga
++Editar `AUTOMACOES_PEDAGOGA`, `TELAS_PEDAGOGA`, `CONFIGURACOES_PEDAGOGA` e `_REGRAS_PEDAGOGA` em `src/seguranca/politica.py` e atualizar `PERMITIDAS` em `tests/test_perfil_pedagoga.py`.
++
++## Verificação feita na mesclagem
++- `patch --dry-run` e aplicação real: 18 arquivos, 0 conflitos. O `.ps1` tem fim de linha CRLF e foi preservado.
++- `tests/test_perfil_pedagoga.py`: 15 passaram. Arquivos de teste de segurança, ajuda, calendário, menu, painel e UI (automações, calendário, escola, painel de avisos, tabelas): todos passaram.
++- `tests/test_ui_componentes.py` (29 falhas) e `tests/test_ui_transferidos.py` (6 falhas) falham **igual na árvore original**, sem o patch (testes de navegador que estouram o tempo neste ambiente); não são causados pela mudança.
++- A suíte completa (2.828 testes) não terminou neste ambiente por tempo; rode `python -m pytest tests -q` na sua máquina para confirmar.
++
++## Observações
++- O zip já trazia sobras de merges antigos que não foram mexidas: `src/comum/modelos_whatsapp.py.orig/.rej`, `src/servicos/whatsapp/base.py.rej`, `src/seguranca/web.py.orig`, `src/seguranca/politica.py.orig`. Vale revisar o `.rej` do WhatsApp (pode ter pedaço que não foi aplicado) e apagar os `.orig`.
++- Limite: a linha de comando e o Agendador (`python -m src.comum.cli`) não passam pelo login e, portanto, não têm perfil.
+diff -ruN -x '*.orig' -x '*.rej' -x __pycache__ a/documentacao/Seguranca.md b/documentacao/Seguranca.md
+--- a/documentacao/Seguranca.md	2026-11-27 09:52:34.428376737 +0000
++++ b/documentacao/Seguranca.md	2026-11-27 11:00:38.479777248 +0000
+@@ -27,6 +27,18 @@
+ | **Administrador** | tudo: usuários, auditoria, senhas e integrações (SERE, Gmail, Google, WhatsApp), data de corte, restaurar ano letivo, assistente de 1ª execução, escolher pastas |
+ | **Operador** | o dia a dia: executar automações, editar registros, enviar mensagens, trocar o ano letivo para consultar, "Turmas do QR antigo" |
+ | **Consulta** | só ver telas e tabelas |
++| **Pedagoga** | perfil **independente** (fora da escada acima): só consulta **Painel, Turmas, Alunos e Encaminhamentos SUS** e executa **apenas** as coletas **Turmas** (`turmas.py`) e **Alunos** (modo básico `alunos.py` e completo `alunos_completo.py`) |
++
++### Perfil Pedagoga
++
++- **Lista de permissões, não escada.** Em `politica.py`, `_REGRAS_PEDAGOGA` enumera o que ela pode chamar; **tudo o que não está na lista é negado** (403), inclusive rotas criadas no futuro. O teste `tests/test_perfil_pedagoga.py` percorre todas as rotas do app e trava a lista.
++- **Validado no servidor**, no mesmo guarda de toda requisição, e de novo na própria rota de execução (`automacoes_executar`). Esconder menu é só vitrine: o HTML dela já nasce sem as telas e automações proibidas, e o painel principal é reduzido no servidor (sem pré-matrícula, documentos, raio nem transferidos).
++- **Somente leitura**, com uma única gravação de configuração: o **usuário e a senha do SERE** (Configurações → Salvar senha do SERE), porque as coletas dela entram no SERE com eles. Fora isso ela não grava registro nem configuração, não apaga histórico, não salva opções do script nem navegador, não envia mensagem, e os outros passos do assistente de 1ª execução continuam só do administrador. Troca também a **própria** senha de acesso. A senha do SERE nunca é mostrada de volta. As coletas Turmas e Alunos apenas **leem** do SERE (navegam e consultam; não enviam, alteram nem apagam nada lá) e atualizam o cache local (`turmas.json`, `alunos.json`, `alunos_completo.json`).
++- **Configurações** que ela vê, em **somente consulta**: Dados da escola, Ano letivo, Navegador e Backup automático. Editáveis por ela: Senha do SERE, Minha conta e Temas (mais o Perfil, só para ver). O resto quem grava é o administrador.
++- **Atualização automática.** Ao abrir o sistema com a Pedagoga logada, o servidor roda sozinho, em segundo plano e sem avisos na tela (só um aviso discreto no canto), a coleta de **Turmas** e depois a de **Alunos** (básico), uma vez por abertura do sistema; ao terminar as telas são recarregadas. Aparece no histórico das automações como qualquer execução. Sem usuário/senha do SERE salvos, não roda e avisa; quando ela salva, começa. Para desligar: variável `PEDAGOGA_COLETA_AUTOMATICA=0` em `credenciais/.env`.
++- Para liberar mais algo: `AUTOMACOES_PEDAGOGA`, `TELAS_PEDAGOGA`, `CONFIGURACOES_PEDAGOGA` e `_REGRAS_PEDAGOGA` em `src/seguranca/politica.py` (e atualizar `PERMITIDAS` no teste).
++- Criação: na **instalação**, depois de criar o administrador, o instalador pergunta "Deseja cadastrar agora um usuário com o perfil PEDAGOGA? (S/N)" (o primeiro usuário é sempre administrador). Ou, a qualquer hora, `python -m src.seguranca criar-usuario --perfil pedagoga`, ou Configurações → Usuários e segurança (perfil "Pedagoga"). Mudar o perfil derruba a sessão na hora.
++- Limite: a linha de comando e o Agendador (`python -m src.comum.cli`) não passam pelo login, então não têm perfil. A Central de ajuda (F1) mostra a ela só os textos das telas, automações e configurações que ela usa.
+ 
+ A regra está em **um lugar só** (`src/seguranca/politica.py`) e vale para toda rota, inclusive as que alguém criar depois. Mudar o perfil, desativar ou apagar um usuário **derruba a sessão dele na hora**. Nunca fica sem administrador ativo (o sistema não deixa apagar, desativar ou rebaixar o último). Tenha pelo menos dois administradores.
+ 
+diff -ruN -x '*.orig' -x '*.rej' -x __pycache__ a/scripts/windows/instalar.ps1 b/scripts/windows/instalar.ps1
+--- a/scripts/windows/instalar.ps1	2026-11-27 09:52:34.427170176 +0000
++++ b/scripts/windows/instalar.ps1	2026-11-27 09:52:43.404472481 +0000
+@@ -317,6 +317,10 @@
+     & $pyExe -m src.seguranca criar-admin
+     if ($LASTEXITCODE -ne 0) {
+         Write-Host "O administrador não foi criado agora. O sistema vai pedir isso no primeiro acesso." -ForegroundColor Yellow
++    } else {
++        # Perfil Pedagoga (só consulta + coletas Turmas e Alunos). Opcional; também dá para criar depois em Configurações > Usuários.
++        $resp = Read-Host "Deseja cadastrar agora um usuário com o perfil PEDAGOGA? (S/N)"
++        if ($resp -match '^[sS]') { & $pyExe -m src.seguranca criar-usuario --perfil pedagoga }
+     }
+ }
+ # Só o usuário atual do Windows (e administradores) enxerga credenciais\ (usuários, hashes, senhas das integrações).
+diff -ruN -x '*.orig' -x '*.rej' -x __pycache__ a/src/seguranca/cli.py b/src/seguranca/cli.py
+--- a/src/seguranca/cli.py	2026-11-27 09:52:34.425494810 +0000
++++ b/src/seguranca/cli.py	2026-11-27 09:52:43.404567823 +0000
+@@ -104,6 +104,45 @@
+     return OK
+ 
+ 
++def cmd_criar_usuario(args) -> int:
++    """Cadastra um usuário comum (pedagoga, operador, consulta ou admin) depois que o administrador já existe."""
++    estado = usuarios.estado()
++    if estado == "ilegivel":
++        _escrever("O cadastro de usuários está ilegível (veja documentacao/Seguranca.md).")
++        return ILEGIVEL
++    if estado == "sem_usuarios":
++        _escrever("Ainda não há administrador. Crie-o primeiro: python -m src.seguranca criar-admin")
++        return ERRO
++    perfil = args.perfil
++    rotulo = usuarios.ROTULO_PERFIL[perfil]
++    try:
++        _escrever("")
++        _escrever(f"=== Criar usuário com perfil {rotulo} ===")
++        padrao = args.usuario or perfil
++        if args.senha_stdin:
++            usuario, nome, senha = padrao, args.nome or rotulo, _senha_da_entrada_padrao()
++        else:
++            usuario = _ler_texto(f"Nome de usuário [{padrao}]: ").strip() or padrao
++            nome = _ler_texto(f"Nome completo [{args.nome or rotulo}]: ").strip() or args.nome or rotulo
++            senha = _pedir_senha_nova(usuario, nome)
++            if senha is None:
++                return ERRO
++        usuarios.criar(usuario, nome, perfil, senha, por="instalador", trocar_senha=True)
++    except (KeyboardInterrupt, EOFError):
++        _escrever("\nCancelado. O usuário poderá ser criado depois, em Configurações → Usuários e segurança.")
++        return CANCELADO
++    except ErroUsuarios as e:
++        _escrever("ERRO: " + e.mensagem)
++        for pr in e.problemas:
++            _escrever("  - " + pr)
++        return ERRO
++    except segredo.ChaveIndisponivel as e:
++        _escrever(f"ERRO: não foi possível proteger a senha ({e}).")
++        return ERRO
++    _escrever(f"Usuário '{usuario}' ({rotulo}) criado. No primeiro acesso o sistema pede para trocar a senha.")
++    return OK
++
++
+ def cmd_redefinir_senha(args) -> int:
+     try:
+         usuario = (args.usuario or _ler_texto("Usuário que vai receber a nova senha: ")).strip().lower()
+@@ -215,6 +254,13 @@
+     a.add_argument("--nome", default="")
+     a.add_argument("--senha-stdin", action="store_true", help="lê a senha da entrada padrão (instalação sem janela)")
+     a.set_defaults(f=cmd_criar_admin)
++    u = sub.add_parser("criar-usuario", help="cria um usuário (pedagoga, operador, consulta ou admin); o administrador já precisa existir")
++    u.add_argument("--perfil", choices=usuarios.PERFIS, default="pedagoga")
++    u.add_argument("--usuario", default="")
++    u.add_argument("--nome", default="")
++    u.add_argument("--senha-stdin", action="store_true", help="lê a senha da entrada padrão (sem janela)")
++    u.set_defaults(f=cmd_criar_usuario)
++
+     r = sub.add_parser("redefinir-senha", help="recuperação de senha perdida (exige estar no computador)")
+     r.add_argument("--usuario", default="")
+     r.add_argument("--criar", action="store_true", help="cria o usuário como administrador se ele não existir")
+diff -ruN -x '*.orig' -x '*.rej' -x __pycache__ a/src/seguranca/politica.py b/src/seguranca/politica.py
+--- a/src/seguranca/politica.py	2026-11-27 09:52:34.425955119 +0000
++++ b/src/seguranca/politica.py	2026-11-27 10:59:29.747519999 +0000
+@@ -11,6 +11,13 @@
+     exceções liberadas a QUALQUER usuário entrado → ver a própria sessão, sair, trocar a própria senha
+ 
+ A tabela é por EXPRESSÃO REGULAR sobre o caminho; a primeira que casar vale. O que não casa com nenhuma cai na regra geral.
++
++PERFIL INDEPENDENTE — "pedagoga". Não faz parte da escada consulta < operador < admin (nela, "consulta" já leria TUDO). Ela tem uma
++LISTA DE PERMISSÕES PRÓPRIA, com a lógica invertida: o que não está na lista é NEGADO (inclusive qualquer rota que alguém criar depois).
++A lista (`_REGRAS_PEDAGOGA`) só tem leitura: telas Turmas, Alunos e Encaminhamentos SUS, o painel resumido, e executar/acompanhar as
++automações `turmas` e `alunos` (a coleta de `alunos` cobre o modo básico, alunos.py, e o completo, alunos_completo.py). Essas coletas só
++LEEM do SERE (navegam e consultam) e atualizam o cache local em JSON; nenhuma grava, envia ou apaga nada no SERE. Nada de configuração
++é gravável por ela, a não ser a própria senha de acesso e o usuário/senha do SERE (as coletas dela precisam entrar no SERE). O que o administrador/operador já fazem NÃO muda: para eles vale exatamente a tabela acima.
+ """
+ from __future__ import annotations
+ 
+@@ -18,6 +25,24 @@
+ 
+ LEITURA = ("GET", "HEAD", "OPTIONS")
+ 
++# Escada dos perfis hierárquicos (quem tem o nível exigido ou mais, pode). A Pedagoga NÃO está aqui de propósito: ver `permite`.
++NIVEL = {"consulta": 1, "operador": 2, "admin": 3}
++
++PEDAGOGA = "pedagoga"
++
++# Automações (chaves de src/comum/registro_scripts.py) que a Pedagoga pode abrir e executar. "alunos" tem os dois modos de coleta
++# (básico = alunos.py, completo = alunos_completo.py): o modo é uma opção da própria automação, não outra chave.
++AUTOMACOES_PEDAGOGA = frozenset({"turmas", "alunos"})
++
++# Interface da Pedagoga: o que a tela mostra (o servidor monta o HTML só com isto; os dados e as ações são barrados à parte,
++# pela lista de rotas abaixo). Esconder um botão nunca é a proteção — é só a vitrine.
++TELAS_PEDAGOGA = frozenset({"painel", "turmas", "alunos", "encaminhamentos", "automacoes", "configuracoes", "ajuda"})
++GRUPOS_AUTOMACAO_PEDAGOGA = frozenset({"cadastros"})        # "Turmas e alunos" (só Turmas e Alunos aparecem dentro dele)
++CONFIGURACOES_PEDAGOGA = frozenset({"minha_conta", "escola", "ano_letivo", "navegador", "backup_automatico", "senha_sere", "temas", "perfil"})
++# Destas, só estas aceitam alteração (a própria senha e o tema, que é do navegador). As demais aparecem para CONSULTA: a Pedagoga vê o
++# que as coletas usam, mas quem grava ano letivo, senha do SERE, dados da escola etc. é o administrador.
++CONFIGURACOES_PEDAGOGA_EDITAVEIS = frozenset({"minha_conta", "temas", "senha_sere"})
++
+ # (método ou None = qualquer, expressão, perfil mínimo). A ORDEM IMPORTA: a primeira que casa vale.
+ _TABELA: list[tuple[tuple[str, ...] | None, re.Pattern, str]] = [
+     # a própria conta: qualquer usuário entrado
+@@ -50,3 +75,84 @@
+         if (metodos is None or metodo in metodos) and expressao.match(caminho):
+             return perfil
+     return "consulta" if metodo in LEITURA else "operador"
++
++
++# ───────────────────────────── perfil Pedagoga (lista de permissões) ─────────────────────────────
++
++_CHAVES_PEDAGOGA = "|".join(re.escape(c) for c in sorted(AUTOMACOES_PEDAGOGA))
++
++# (métodos, expressão). Tudo o que não casar aqui é NEGADO à Pedagoga. HEAD e OPTIONS valem como GET.
++_REGRAS_PEDAGOGA: list[tuple[tuple[str, ...], re.Pattern]] = [(m, re.compile(e)) for m, e in [
++    # a própria conta
++    (("GET",), r"^/web/api/seguranca/sessao$"),
++    (("POST",), r"^/web/api/seguranca/(estender|sair|trocar-senha)$"),
++    (("GET",), r"^/web/trocar-senha$"),
++    # a página do sistema (o HTML já vem só com o que ela pode ver)
++    (("GET",), r"^/(web)?$"),
++    # dados das telas liberadas (só leitura). O painel responde numa versão reduzida (ver rotas.painel_resumo)
++    (("GET",), r"^/web/api/(painel/resumo|turmas/lista|alunos/lista|encaminhamentos/lista|ano-letivo/contexto)$"),
++    # configurações que as coletas usam, só para CONSULTA (as gravações ficam com o administrador)
++    (("GET",), r"^/web/api/configuracoes/(escola|ano-letivo|navegador|backup-automatico)$"),
++    # ajuda (texto fixo, sem dado de aluno)
++    (("GET",), r"^/web/api/ajuda(/[^/]+){1,2}$"),
++    # automações liberadas: ver, executar e acompanhar. NÃO: gravar opções guardadas (/flags), navegador, apagar histórico
++    (("GET",), r"^/web/api/automacoes/lista$"),
++    (("GET",), rf"^/web/api/automacoes/(?:{_CHAVES_PEDAGOGA})/(componentes|status|configuracao|historico|flags)$"),
++    (("GET",), rf"^/web/api/automacoes/(?:{_CHAVES_PEDAGOGA})/historico/[^/]+$"),
++    (("POST",), rf"^/web/api/automacoes/(?:{_CHAVES_PEDAGOGA})/(executar|previa|resposta|cancelar)$"),
++    (("POST",), r"^/web/api/cgm/analisar$"),                  # só confere o texto de CGMs digitados (não grava nada)
++    # ÚNICA gravação de configuração dela: usuário e senha do SERE (as coletas dela precisam entrar no SERE). A rota do wizard confere de novo.
++    (("POST",), r"^/web/api/wizard/credenciais_sere/executar$"),
++    # atualização silenciosa de Turmas e Alunos ao abrir o sistema (começa uma vez por abertura; só dispara as duas coletas dela)
++    (("GET",), r"^/web/api/pedagoga/atualizar-dados/status$"),
++    (("POST",), r"^/web/api/pedagoga/atualizar-dados$"),
++]]
++
++
++def _pedagoga_permite(metodo: str, caminho: str) -> bool:
++    metodo = "GET" if metodo in ("HEAD", "OPTIONS") else metodo
++    return any(metodo in metodos and expressao.match(caminho) for metodos, expressao in _REGRAS_PEDAGOGA)
++
++
++def permite(perfil: str, metodo: str, caminho: str) -> bool:
++    """A decisão única do guarda: este perfil pode fazer este método neste caminho?
++
++    Administrador, operador e consulta: pela escada (`perfil_exigido`), exatamente como antes. Pedagoga: pela lista de permissões
++    própria. Perfil desconhecido: nada (nega por padrão)."""
++    caminho = caminho.rstrip("/") or "/"
++    metodo = (metodo or "GET").upper()
++    if perfil == PEDAGOGA:
++        return _pedagoga_permite(metodo, caminho)
++    return NIVEL.get(perfil, 0) >= NIVEL.get(perfil_exigido(metodo, caminho), 99)
++
++
++def motivo_da_negativa(perfil: str, metodo: str, caminho: str) -> str:
++    """Texto curto para a auditoria (nunca vai ao navegador)."""
++    if perfil == PEDAGOGA:
++        return f"{metodo} {caminho} (fora das permissões do perfil pedagoga)"
++    return f"{metodo} {caminho} (precisa {perfil_exigido(metodo, caminho)})"
++
++
++def automacao_permitida(perfil: str | None, chave: str) -> bool:
++    """A automação `chave` pode ser executada/vista por este perfil? (A Pedagoga só tem as de AUTOMACOES_PEDAGOGA.)
++
++    Sem perfil (chamada fora da interface web: linha de comando, agendador) não há o que restringir aqui."""
++    return perfil != PEDAGOGA or chave in AUTOMACOES_PEDAGOGA
++
++
++def pode_ver_tela(perfil: str | None, tela: str) -> bool:
++    return perfil != PEDAGOGA or tela in TELAS_PEDAGOGA
++
++
++def pode_ver_grupo_automacao(perfil: str | None, grupo: str) -> bool:
++    return perfil != PEDAGOGA or grupo in GRUPOS_AUTOMACAO_PEDAGOGA
++
++
++def pode_ver_configuracao(perfil: str | None, id_config: str) -> bool:
++    return perfil != PEDAGOGA or id_config in CONFIGURACOES_PEDAGOGA
++
++
++def resumo_de_permissoes(perfil: str | None) -> dict:
++    """O que a tela precisa saber do perfil (vai para o navegador, só para desenhar a vitrine)."""
++    return {"perfil": perfil or "", "restrito": perfil == PEDAGOGA,
++            "configuracoes_editaveis": sorted(CONFIGURACOES_PEDAGOGA_EDITAVEIS) if perfil == PEDAGOGA else None}
+diff -ruN -x '*.orig' -x '*.rej' -x __pycache__ a/src/seguranca/usuarios.py b/src/seguranca/usuarios.py
+--- a/src/seguranca/usuarios.py	2026-11-27 09:52:34.425541583 +0000
++++ b/src/seguranca/usuarios.py	2026-11-27 09:52:43.404819873 +0000
+@@ -9,6 +9,10 @@
+     operador   o uso do dia a dia: executa as automações, edita registros, envia mensagens
+     admin      tudo do operador + usuários, senhas e integrações (SERE, Gmail, Google, WhatsApp), ano letivo, dados de teste
+ 
++Perfil independente (fora dessa escada):
++    pedagoga   só consulta (Turmas, Alunos, Encaminhamentos SUS) e só executa as coletas `turmas` e `alunos` (que apenas leem do
++               SERE). Permissões próprias, em src/seguranca/politica.py; o que não está lá é negado.
++
+ Regras que este módulo garante, em qualquer porta de entrada (tela, instalador, linha de comando):
+   • o PRIMEIRO usuário criado é administrador, e só se não houver nenhum usuário;
+   • nunca fica sem pelo menos 1 administrador ATIVO (não dá para apagar, desativar ou rebaixar o último);
+@@ -28,11 +32,11 @@
+ 
+ from src.comum import paths
+ 
+-from . import auditoria, senhas
++from . import auditoria, politica, senhas
+ 
+-PERFIS = ("consulta", "operador", "admin")
+-NIVEL = {"consulta": 1, "operador": 2, "admin": 3}
+-ROTULO_PERFIL = {"consulta": "Consulta", "operador": "Operador", "admin": "Administrador"}
++PERFIS = ("consulta", "operador", "admin", politica.PEDAGOGA)
++NIVEL = politica.NIVEL                      # só a escada hierárquica: a Pedagoga fica de fora de propósito (ver politica.py)
++ROTULO_PERFIL = {"consulta": "Consulta", "operador": "Operador", "admin": "Administrador", politica.PEDAGOGA: "Pedagoga"}
+ 
+ RE_USUARIO = re.compile(r"^[a-z0-9][a-z0-9._-]{2,31}$")
+ MAX_FALHAS = 5
+@@ -98,8 +102,13 @@
+         return bool(ate and ate > _agora())
+ 
+     def tem_perfil(self, minimo: str) -> bool:
++        """Só para a escada consulta < operador < admin. A Pedagoga NUNCA passa aqui (nível 0): o que ela pode está em `pode`."""
+         return NIVEL.get(self.perfil, 0) >= NIVEL.get(minimo, 99)
+ 
++    def pode(self, metodo: str, caminho: str) -> bool:
++        """Este usuário pode fazer este método neste caminho? É a pergunta que o guarda de toda requisição faz."""
++        return politica.permite(self.perfil, metodo, caminho)
++
+     def publico(self) -> dict:
+         return {"id": self.id, "usuario": self.usuario, "nome": self.nome, "perfil": self.perfil,
+                 "perfil_rotulo": ROTULO_PERFIL.get(self.perfil, self.perfil), "ativo": self.ativo,
+@@ -207,7 +216,7 @@
+ 
+ def _validar_perfil(perfil: str) -> str:
+     if perfil not in PERFIS:
+-        raise ErroUsuarios("Perfil inválido. Use: consulta, operador ou admin.")
++        raise ErroUsuarios("Perfil inválido. Use: consulta, operador, admin ou pedagoga.")
+     return perfil
+ 
+ 
+diff -ruN -x '*.orig' -x '*.rej' -x __pycache__ a/src/seguranca/web.py b/src/seguranca/web.py
+--- a/src/seguranca/web.py	2026-11-27 09:52:34.425843003 +0000
++++ b/src/seguranca/web.py	2026-11-27 09:52:43.404984659 +0000
+@@ -9,7 +9,7 @@
+   3. Sessão    sem sessão válida: páginas vão para o login, a API responde 401. Exceções: login, criação do administrador,
+                arquivos estáticos, ping do launcher e o webhook do WhatsApp (esse tem token próprio).
+   4. Troca     se a senha é temporária, só a tela de troca de senha funciona.
+-  5. Perfil    politica.perfil_exigido(): consulta / operador / admin.
++  5. Perfil    politica.permite(): consulta / operador / admin pela escada; a Pedagoga por lista de permissões própria (nega o que não está nela).
+   6. CSRF      escrita autenticada exige o cabeçalho X-CSRF-Token igual ao da sessão (static/js/seguranca.js põe em todo fetch).
+ 
+ E, em toda resposta: Content-Security-Policy estrita (só scripts do próprio sistema), X-Frame-Options, nosniff, sem cache dos
+@@ -127,6 +127,12 @@
+     return getattr(g, "usuario", None)
+ 
+ 
++def perfil_atual() -> str | None:
++    """Perfil de quem fez a requisição (None fora do login: testes antigos com o guarda desligado, linha de comando)."""
++    u = usuario_atual()
++    return u.perfil if u else None
++
++
+ # ───────────────────────────── o guarda ─────────────────────────────
+ 
+ def _guarda():
+@@ -175,9 +181,8 @@
+             return _resposta_erro(403, "Você precisa trocar a senha temporária antes de continuar.", trocar_senha=True)
+         return redirect("/web/trocar-senha")
+ 
+-    exigido = politica.perfil_exigido(request.method, caminho)
+-    if not usuario.tem_perfil(exigido):
+-        auditoria.registrar("acesso_negado", usuario.usuario, _ip(), f"{request.method} {caminho} (precisa {exigido})")
++    if not usuario.pode(request.method, caminho):                       # a decisão única: escada (consulta/operador/admin) ou lista da Pedagoga
++        auditoria.registrar("acesso_negado", usuario.usuario, _ip(), politica.motivo_da_negativa(usuario.perfil, request.method, caminho))
+         texto = f"O seu perfil ({usuarios.ROTULO_PERFIL.get(usuario.perfil, usuario.perfil)}) não tem permissão para isso. Peça a um administrador."
+         return (_resposta_erro(403, texto, permissao=True) if _quer_json()
+                 else _pagina_erro(403, "Sem permissão", texto))
+@@ -214,9 +219,17 @@
+ def _contexto():
+     u = usuario_atual()
+     s = getattr(g, "sessao", None)
++    perfil = u.perfil if u else None
+     return {"csrf_token": s.csrf if s else "", "usuario_atual": u.publico() if u else None,
+             "inatividade_cliente_s": max(60, _sessoes.inatividade_s() - 120),
+-            "seguranca_ativa": ATIVA}
++            "seguranca_ativa": ATIVA,
++            # vitrine do HTML (o menu só mostra o que o perfil pode usar). Para administrador, operador e consulta tudo continua à mostra.
++            "pode_tela": lambda tela: politica.pode_ver_tela(perfil, tela),
++            "pode_automacao": lambda chave: politica.automacao_permitida(perfil, chave),
++            "pode_grupo_automacao": lambda grupo: politica.pode_ver_grupo_automacao(perfil, grupo),
++            "pode_configuracao": lambda id_config: politica.pode_ver_configuracao(perfil, id_config),
++            "perfil_restrito": perfil == politica.PEDAGOGA,
++            "config_editaveis": ",".join(sorted(politica.CONFIGURACOES_PEDAGOGA_EDITAVEIS))}
+ 
+ 
+ # ───────────────────────────── páginas ─────────────────────────────
+diff -ruN -x '*.orig' -x '*.rej' -x __pycache__ a/src/web/api/ajuda.py b/src/web/api/ajuda.py
+--- a/src/web/api/ajuda.py	2026-11-27 09:52:34.424014137 +0000
++++ b/src/web/api/ajuda.py	2026-11-27 09:52:43.405102132 +0000
+@@ -14,13 +14,41 @@
+ from flask import Blueprint, jsonify
+ 
+ from src.comum import ajuda as _ajuda
++from src.seguranca import politica as _politica
++from src.seguranca.web import perfil_atual as _perfil_atual
+ 
+ ajuda_bp = Blueprint("ajuda", __name__)
+ 
+ 
++def _liberado(tipo: str, chave: str) -> bool:
++    """A Pedagoga só vê a ajuda do que ela usa (telas, automações e configurações dela). Os demais perfis veem tudo."""
++    perfil = _perfil_atual()
++    if perfil != _politica.PEDAGOGA:
++        return True
++    if tipo == "tela":
++        return _politica.pode_ver_tela(perfil, chave)
++    if tipo == "automacao":
++        return _politica.automacao_permitida(perfil, chave)
++    if tipo == "configuracao":
++        return _politica.pode_ver_configuracao(perfil, chave)
++    return False                                  # abas e janelas pertencem a telas que ela não tem
++
++
+ @ajuda_bp.route("/indice")
+ def indice():
+-    return jsonify(_ajuda.indice())
++    dados = _ajuda.indice()
++    if _perfil_atual() == _politica.PEDAGOGA:
++        dados["telas"] = [i for i in dados.get("telas", []) if _liberado("tela", i["chave"])]
++        grupos = []
++        for g in dados.get("automacoes", []):
++            itens = [i for i in g["itens"] if _liberado("automacao", i["chave"])]
++            if itens:
++                grupos.append(dict(g, itens=itens))
++        dados["automacoes"] = grupos
++        dados["configuracoes"] = [i for i in dados.get("configuracoes", []) if _liberado("configuracao", i["chave"])]
++        for outra in set(dados) - {"telas", "automacoes", "configuracoes"}:
++            dados[outra] = []
++    return jsonify(dados)
+ 
+ 
+ @ajuda_bp.route("/geral")
+@@ -30,7 +58,7 @@
+ 
+ @ajuda_bp.route("/<string:tipo>/<string:chave>")
+ def obter(tipo: str, chave: str):
+-    resultado = _ajuda.obter(tipo, chave) if tipo in _ajuda.TIPOS else None
++    resultado = _ajuda.obter(tipo, chave) if tipo in _ajuda.TIPOS and _liberado(tipo, chave) else None
+     if resultado is None:
+         return jsonify({"erro": "Ainda não há ajuda para esta tela."}), 404
+     return jsonify(resultado)
+diff -ruN -x '*.orig' -x '*.rej' -x __pycache__ a/src/web/api/rotas.py b/src/web/api/rotas.py
+--- a/src/web/api/rotas.py	2026-11-27 09:52:34.423939334 +0000
++++ b/src/web/api/rotas.py	2026-11-27 10:59:29.750590308 +0000
+@@ -54,6 +54,8 @@
+ from src.comum import registro_scripts as _registro
+ from src.comum import historico_execucoes as _historico
+ from src.comum import navegador as _navegador
++from src.seguranca import politica as _politica
++from src.seguranca.web import perfil_atual as _perfil_atual
+ from src.comum import configuracoes_scripts as _cfgs
+ from src.comum.registros_aluno import casar_com_turmas, registro_principal
+ 
+@@ -119,12 +121,15 @@
+     Um dado que depende de um arquivo ainda inexistente (automação nunca
+     rodada) aparece como 0, não como um valor inventado.
+     """
++    # Pedagoga: versão reduzida, montada AQUI (e não escondida na tela): ela só recebe o que as telas dela mostram (alunos, turmas e
++    # encaminhamentos). Pré-matrícula, documentos, raio e transferidos nem são lidos para ela.
++    restrito = _perfil_atual() == _politica.PEDAGOGA
+     turmas = _carregar_json("turmas.json", {})
+-    documentos_alunos = _carregar_json("documentos-alunos.json", [])
+-    pre_matricula = _carregar_json("pre_matricula.json", {})
+-    alunos_fora_raio, _meta_raio = _alunos_fora_do_raio()
++    documentos_alunos = [] if restrito else _carregar_json("documentos-alunos.json", [])
++    pre_matricula = {} if restrito else _carregar_json("pre_matricula.json", {})
++    alunos_fora_raio, _meta_raio = ([], {}) if restrito else _alunos_fora_do_raio()
+     alunos_encaminhamento, _cpf_invalidos = _alunos_com_encaminhamento()
+-    transferidos = _carregar_json("transferidos.json", {})
++    transferidos = {} if restrito else _carregar_json("transferidos.json", {})
+ 
+     total_alunos = 0
+     meninos = 0
+@@ -172,6 +177,19 @@
+             ultima_atualizacao = m
+             break
+ 
++    if restrito:
++        return jsonify({
++            "atualizado_em": ultima_atualizacao or datetime.now().strftime("%d/%m/%Y %H:%M"),
++            "principais": [
++                {"chave": "total_alunos", "label": "Total de alunos", "valor": total_alunos},
++                {"chave": "meninos", "label": "Meninos", "valor": meninos, "sub": pct_meninos},
++                {"chave": "meninas", "label": "Meninas", "valor": meninas, "sub": pct_meninas},
++                {"chave": "turmas", "label": "Turmas", "valor": len(turmas)},
++            ],
++            "secundarias": [
++                {"chave": "encaminhamentos", "label": "Qtd. encaminhamentos SUS", "valor": len(alunos_encaminhamento)},
++            ],
++        })
+     return jsonify({
+         "atualizado_em": ultima_atualizacao or datetime.now().strftime("%d/%m/%Y %H:%M"),
+         "principais": [
+@@ -1746,7 +1764,10 @@
+ @api_bp.route("/automacoes/lista")
+ def automacoes_lista():
+     itens = []
++    perfil = _perfil_atual()
+     for item in AUTOMACOES_DISPONIVEIS:
++        if not _politica.automacao_permitida(perfil, item["chave"]):     # Pedagoga: só as automações dela (a lista nem chega à tela)
++            continue
+         script = _registro.obter(item["chave"])
+         itens.append(dict(item, recursos=list(script.recursos)) if script else item)
+     return jsonify({"itens": itens})
+@@ -2002,6 +2023,10 @@
+ 
+ @api_bp.route("/automacoes/<string:chave>/executar", methods=["POST"])
+ def automacoes_executar(chave):
++    # Segunda trava (a primeira é o guarda de toda requisição, em src/seguranca/web.py): quem dispara uma automação confere aqui,
++    # também, se o perfil pode executá-la. Assim um caminho novo até esta função não abre uma automação para a Pedagoga.
++    if not _politica.automacao_permitida(_perfil_atual(), chave):
++        return jsonify({"status": "erro", "mensagem": "O seu perfil não tem permissão para executar esta automação.", "permissao": True}), 403
+     if chave in AUTOMACOES_NAO_IMPLEMENTADAS:
+         return jsonify({
+             "status": "erro",
+@@ -2054,6 +2079,93 @@
+     })
+ 
+ 
++# ── Pedagoga: atualização silenciosa de Turmas e Alunos ao abrir o sistema ──
++# O front (app.js) chama POST /pedagoga/atualizar-dados quando a Pedagoga abre o sistema. O servidor começa UMA vez por abertura do
++# sistema (o launcher), em segundo plano, a coleta de Turmas e depois a de Alunos (modo básico), as mesmas automações da tela, com o
++# navegador no modo configurado (por padrão sem janela). Fica no histórico das automações como qualquer outra execução. Se o usuário/senha
++# do SERE ainda não estiverem salvos, não começa e avisa; quando ela salvar, o front chama de novo. Para desligar: PEDAGOGA_COLETA_AUTOMATICA=0.
++_AUTO_PEDAGOGA_ETAPAS = (("turmas", {}, "Turmas"), ("alunos", {"modo": "basico"}, "Alunos"))
++_AUTO_PEDAGOGA_ESPERA_MAX_S = 45 * 60
++_AUTO_PEDAGOGA_LOCK = threading.Lock()
++_AUTO_PEDAGOGA: dict = {"estado": "nao_iniciado", "etapa": "", "mensagem": "", "iniciado_em": None, "terminado_em": None}
++
++
++def _auto_pedagoga_definir(**campos) -> None:
++    with _AUTO_PEDAGOGA_LOCK:
++        _AUTO_PEDAGOGA.update(campos)
++
++
++def _auto_pedagoga_copia() -> dict:
++    with _AUTO_PEDAGOGA_LOCK:
++        return dict(_AUTO_PEDAGOGA)
++
++
++def _sere_configurado() -> bool:
++    return ((os.getenv("SERE_LOGIN") or "").strip() not in _PLACEHOLDERS_SERE
++            and (os.getenv("SERE_SENHA") or "") not in _PLACEHOLDERS_SERE)
++
++
++def _status_da_execucao(chave: str) -> str:
++    with _EXECUCOES_LOCK:
++        return (_EXECUCOES.get(chave) or {}).get("status") or ""
++
++
++def _auto_pedagoga_esperar(chave: str) -> str:
++    """Espera a automação `chave` sair de 'executando' e devolve o status final ('' se estourou o tempo)."""
++    limite = time.time() + _AUTO_PEDAGOGA_ESPERA_MAX_S
++    while time.time() < limite:
++        status = _status_da_execucao(chave)
++        if status != StatusExecucao.EXECUTANDO.value:
++            return status
++        time.sleep(2)
++    return ""
++
++
++def _auto_pedagoga_trabalho() -> None:
++    try:
++        for chave, payload, rotulo in _AUTO_PEDAGOGA_ETAPAS:
++            _auto_pedagoga_definir(etapa=rotulo, mensagem=f"Atualizando {rotulo}…")
++            if _status_da_execucao(chave) == StatusExecucao.EXECUTANDO.value:      # ela mesma já a iniciou pela tela: só espera
++                _auto_pedagoga_esperar(chave)
++                continue
++            if _conflito_em_execucao(chave, str(payload.get("modo") or "")):
++                _auto_pedagoga_esperar(chave)
++                continue
++            script = _registro.obter(chave)
++            if script is None:
++                raise ValueError(f"Automação '{chave}' não encontrada.")
++            _OPCOES_PENDENTES[chave] = dict(payload)
++            _executar_registrado(script, chave, dict(payload), _carregar_json("turmas.json", {}))
++            final = _auto_pedagoga_esperar(chave)
++            if final != StatusExecucao.CONCLUIDO.value:
++                raise RuntimeError(f"A coleta de {rotulo} não terminou bem (veja o histórico em Automações).")
++        _auto_pedagoga_definir(estado="concluido", etapa="", mensagem="Dados atualizados.", terminado_em=time.time())
++    except Exception as exc:  # noqa: BLE001 — a atualização é de conveniência: nunca derruba o sistema
++        _auto_pedagoga_definir(estado="erro", mensagem=str(exc) or exc.__class__.__name__, terminado_em=time.time())
++
++
++@api_bp.route("/pedagoga/atualizar-dados", methods=["POST"])
++def pedagoga_atualizar_dados():
++    if _perfil_atual() != _politica.PEDAGOGA:
++        return jsonify({"estado": "nao_se_aplica"}), 403
++    if (os.getenv("PEDAGOGA_COLETA_AUTOMATICA") or "1").strip().lower() in ("0", "false", "nao", "não", "off"):
++        return jsonify({"estado": "desativado", "mensagem": ""})
++    with _AUTO_PEDAGOGA_LOCK:
++        if _AUTO_PEDAGOGA["estado"] in ("executando", "concluido", "erro"):       # uma vez por abertura do sistema
++            return jsonify(dict(_AUTO_PEDAGOGA))
++        if not _sere_configurado():
++            _AUTO_PEDAGOGA.update(estado="sem_credenciais", etapa="", mensagem="Salve o usuário e a senha do SERE em Configurações para a atualização automática.")
++            return jsonify(dict(_AUTO_PEDAGOGA))
++        _AUTO_PEDAGOGA.update(estado="executando", etapa="", mensagem="Atualizando dados…", iniciado_em=time.time(), terminado_em=None)
++    threading.Thread(target=_auto_pedagoga_trabalho, name="pedagoga_atualizacao", daemon=True).start()
++    return jsonify(_auto_pedagoga_copia())
++
++
++@api_bp.route("/pedagoga/atualizar-dados/status")
++def pedagoga_atualizar_dados_status():
++    return jsonify(_auto_pedagoga_copia())
++
++
+ @api_bp.route("/automacoes/<string:chave>/status")
+ def automacoes_status(chave):
+     """
+@@ -3471,6 +3583,9 @@
+ @api_bp.route("/wizard/<string:passo>/executar", methods=["POST"])
+ def wizard_executar_passo(passo):
+     """Mapeia cada passo do wizard para a automação real correspondente."""
++    # Segunda trava: a Pedagoga só pode gravar o usuário/senha do SERE; os demais passos do assistente continuam sendo do administrador.
++    if _perfil_atual() == _politica.PEDAGOGA and passo != "credenciais_sere":
++        return jsonify({"status": "erro", "mensagem": "O seu perfil não tem permissão para este passo."}), 403
+     payload = request.get_json(silent=True) or {}
+ 
+     try:
+diff -ruN -x '*.orig' -x '*.rej' -x __pycache__ a/src/web/static/css/auth.css b/src/web/static/css/auth.css
+--- a/src/web/static/css/auth.css	2026-11-27 09:52:34.423565823 +0000
++++ b/src/web/static/css/auth.css	2026-11-27 10:59:45.993641119 +0000
+@@ -58,3 +58,30 @@
+ .usr-linha-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; align-items: end; }
+ .usr-audit { max-height: 260px; overflow: auto; font-family: var(--mono); font-size: .7rem; color: var(--txt2); border: 1px solid var(--border);
+   border-radius: var(--radius); padding: 8px 10px; background: var(--bg); }
++
++/* Pedagoga (perfil restrito): nada de "opções guardadas", navegador ou apagar histórico nas telas de automação, nem item que exija
++   operador/admin. É só a vitrine; o servidor recusa essas ações de qualquer jeito. */
++body[data-perfil-restrito] [data-requer],
++body[data-perfil-restrito] #cfg-flags,
++body[data-perfil-restrito] #cfg-navegador,
++body[data-perfil-restrito] #btn-historico-limpar { display: none !important; }
++.usr-selo.pedagoga { background: var(--badge-lime-bg); border-color: var(--badge-lime-brd); color: var(--lime); }
++
++/* Usuários e segurança: select e botões no tema do sistema, auditoria em tabela agrupada por dia */
++.usr-tabela select, .usr-linha-form select, .usr-linha-form input[type=text] { background: var(--surface2); color: var(--txt); border: 1px solid var(--border);
++  border-radius: var(--radius); padding: 5px 8px; font-size: .78rem; font-family: inherit; }
++.usr-tabela tbody tr:hover { background: var(--surface); }
++.usr-acoes button { white-space: nowrap; }
++.usr-audit { max-height: 420px; padding: 0; font-family: inherit; font-size: .76rem; }
++.usr-audit-tabela { width: 100%; border-collapse: collapse; }
++.usr-audit-tabela th { position: sticky; top: 0; background: var(--surface); color: var(--txt2); font-weight: 500; font-size: .68rem;
++  text-transform: uppercase; letter-spacing: .04em; text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); }
++.usr-audit-tabela td { padding: 5px 10px; border-bottom: 1px solid var(--border); color: var(--txt); vertical-align: middle; }
++.usr-audit-tabela tr.usr-audit-dia td { background: var(--surface2); color: var(--txt2); font-size: .7rem; font-weight: 600; text-transform: capitalize; letter-spacing: .02em; }
++.usr-audit-hora, .usr-audit-ip { font-family: var(--mono); font-size: .72rem; color: var(--txt2); white-space: nowrap; }
++.usr-audit-det { color: var(--txt2); word-break: break-word; }
++
++/* Pedagoga: aviso discreto da atualização automática de Turmas e Alunos */
++#aviso-atualizacao { position: fixed; right: 14px; bottom: 14px; z-index: 50; max-width: 320px; padding: 7px 12px; font-size: .72rem;
++  color: var(--txt2); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); }
++#aviso-atualizacao.ruim { color: var(--txt); border-color: var(--badge-amber-brd); background: var(--badge-amber-bg); }
+diff -ruN -x '*.orig' -x '*.rej' -x __pycache__ a/src/web/static/js/app.js b/src/web/static/js/app.js
+--- a/src/web/static/js/app.js	2026-11-27 09:52:34.423613070 +0000
++++ b/src/web/static/js/app.js	2026-11-27 10:59:45.991563433 +0000
+@@ -277,6 +277,11 @@
+ 
+ /* ---------- Navegação entre telas ---------- */
+ 
++/* Perfil com permissões próprias (Pedagoga): só consulta + as coletas liberadas. O servidor monta o menu só com o que ela pode usar e
++   barra o resto em toda rota (src/seguranca/politica.py); aqui o navegador só evita pedidos que ele já sabe que seriam negados. */
++const PERFIL_RESTRITO = document.body.dataset.perfilRestrito === "1";
++const CONFIG_EDITAVEIS = (document.body.dataset.configEditaveis || "").split(",").filter(Boolean);
++
+ const TITULOS = {
+   painel: "Painel principal",
+   turmas: "Turmas",
+@@ -436,6 +441,7 @@
+     console.warn("Painel: usando dados de exemplo (endpoint ainda não conectado)", e);
+   }
+ 
++  if (PERFIL_RESTRITO) return;       // avisos de transferidos e fila da pré-matrícula não são dela
+   await carregarAvisosPainel();
+ 
+   try {
+@@ -3689,12 +3695,50 @@
+     <button class="btn-primary">Salvar perfil</button>`,
+ };
+ 
++/** Painel somente leitura: o conteúdo entra num <fieldset disabled>, que desabilita todo campo e botão dentro dele (mesmo os que o
++ *  código do painel reabilite depois). A proteção de verdade está no servidor, que recusa a gravação. */
++function tornarSomenteConsulta(detalhe) {
++  const campos = document.createElement("fieldset");
++  campos.disabled = true;
++  campos.style.cssText = "border:0; padding:0; margin:0; min-width:0;";
++  while (detalhe.firstChild) campos.appendChild(detalhe.firstChild);
++  const aviso = document.createElement("p");
++  aviso.style.cssText = "color:var(--amber); font-size:.8rem; margin-bottom:12px;";
++  aviso.textContent = "Somente consulta: o seu perfil não altera esta configuração. Peça a um administrador.";
++  detalhe.appendChild(aviso);
++  detalhe.appendChild(campos);
++}
++
++/** "Perfil" da Pedagoga: quem é e o que pode (só texto, via textContent). */
++function montarPerfilRestrito(detalhe) {
++  const b = document.body.dataset;
++  const linhas = [
++    ["Nome", b.usuarioNome || ""], ["Usuário", b.usuarioLogin || ""], ["Perfil", b.perfilRotulo || ""],
++    ["Pode", "consultar Turmas, Alunos e Encaminhamentos SUS; executar as coletas Turmas e Alunos (básico e completo)."],
++    ["Não pode", "alterar dados ou configurações, nem usar as demais automações. As coletas só leem do SERE."],
++  ];
++  detalhe.textContent = "";
++  const h = document.createElement("h4"); h.style.cssText = "margin-bottom:14px; font-size:.9rem;"; h.textContent = "Perfil";
++  detalhe.appendChild(h);
++  linhas.forEach(([rotulo, valor]) => {
++    const p = document.createElement("p"); p.style.cssText = "font-size:.84rem; margin-bottom:8px; max-width:620px;";
++    const r = document.createElement("b"); r.textContent = rotulo + ": ";
++    p.appendChild(r); p.appendChild(document.createTextNode(valor)); detalhe.appendChild(p);
++  });
++}
++
+ function initConfiguracoes() {
+   document.querySelectorAll(".config-row[data-config]").forEach((row) => {
+     row.addEventListener("click", () => {
+-      document.getElementById("config-detalhe").innerHTML =
+-        DETALHE_CONFIG[row.dataset.config] || "<p>Configuração não encontrada.</p>";
+-      aplicarIconesDOM(document.getElementById("config-detalhe"));
++      const detalhe = document.getElementById("config-detalhe");
++      const soConsulta = PERFIL_RESTRITO && !CONFIG_EDITAVEIS.includes(row.dataset.config);
++      if (soConsulta && row.dataset.config === "perfil") {
++        montarPerfilRestrito(detalhe);
++        return;
++      }
++      detalhe.innerHTML = DETALHE_CONFIG[row.dataset.config] || "<p>Configuração não encontrada.</p>";
++      if (soConsulta) tornarSomenteConsulta(detalhe);
++      aplicarIconesDOM(detalhe);
+       if (row.dataset.config === "senha_sere") {
+         conectarFormSenhaSere();
+       }
+@@ -4594,6 +4638,7 @@
+     try {
+       const resposta = await apiPost("/wizard/credenciais_sere/executar", { login, senha });
+       toast(resposta.mensagem || "Credenciais salvas");
++      if (PERFIL_RESTRITO) iniciarAtualizacaoSilenciosa();      // agora que o SERE tem login, a Pedagoga já atualiza os dados
+     } catch (e) {
+       toast(e.message);
+     } finally {
+@@ -5599,6 +5644,39 @@
+   }
+ }
+ 
++/* ---------- Pedagoga: atualização silenciosa de Turmas e Alunos ---------- */
++// Ao abrir o sistema, o servidor começa (uma vez por abertura) as coletas de Turmas e Alunos em segundo plano. Aqui só se mostra um
++// aviso discreto no canto e, quando termina, as telas são recarregadas sem toast nem janela. Falha ou falta de senha: só o aviso.
++let _atualSilenciosaPolling = null;
++
++function _avisoAtualizacao(texto, ruim) {
++  let el = document.getElementById("aviso-atualizacao");
++  if (!texto) { if (el) el.remove(); return; }
++  if (!el) { el = document.createElement("div"); el.id = "aviso-atualizacao"; el.setAttribute("role", "status"); document.body.appendChild(el); }
++  el.textContent = texto;
++  el.classList.toggle("ruim", !!ruim);
++}
++
++async function iniciarAtualizacaoSilenciosa() {
++  if (!PERFIL_RESTRITO || _atualSilenciosaPolling) return;
++  let estado;
++  try { estado = await apiPost("/pedagoga/atualizar-dados", {}); } catch (e) { return; }
++  const tratar = (d) => {
++    if (d.estado === "executando") { _avisoAtualizacao("Atualizando dados do SERE em segundo plano…"); return false; }
++    if (d.estado === "concluido") { _avisoAtualizacao(""); carregarPainel(); return true; }
++    if (d.estado === "erro") { _avisoAtualizacao("Não foi possível atualizar agora. Use Automações → Turmas/Alunos.", true); setTimeout(() => _avisoAtualizacao(""), 15000); return true; }
++    if (d.estado === "sem_credenciais") { _avisoAtualizacao(d.mensagem, true); return true; }
++    _avisoAtualizacao(""); return true;
++  };
++  if (tratar(estado)) return;
++  _atualSilenciosaPolling = setInterval(async () => {
++    try {
++      const d = await apiGet("/pedagoga/atualizar-dados/status");
++      if (tratar(d)) { clearInterval(_atualSilenciosaPolling); _atualSilenciosaPolling = null; }
++    } catch (e) { /* sem rede por um instante: tenta no próximo ciclo */ }
++  }, 5000);
++}
++
+ /* ---------- Init ---------- */
+ 
+ document.addEventListener("DOMContentLoaded", () => {
+@@ -5609,11 +5687,14 @@
+   initNavegacao();
+   initAutomacoes();
+   initConfiguracoes();
+-  conectarPainelWizard();
++  if (!PERFIL_RESTRITO) conectarPainelWizard();
+   carregarPainel();
+   iniciarContextoAno();
+-  abrirAssistenteSeNecessario();
+-  iniciarMonitorAutorizacaoGoogle();
++  if (PERFIL_RESTRITO) iniciarAtualizacaoSilenciosa();       // Pedagoga: atualiza Turmas e Alunos sozinha, sem avisos
++  if (!PERFIL_RESTRITO) {          // assistente de 1ª execução e autorização do Google são do administrador
++    abrirAssistenteSeNecessario();
++    iniciarMonitorAutorizacaoGoogle();
++  }
+ });
+ 
+ /* Cliques delegados no lugar dos antigos handlers escritos dentro do HTML (a política de segurança do sistema não aceita
+diff -ruN -x '*.orig' -x '*.rej' -x __pycache__ a/src/web/static/js/calendario.js b/src/web/static/js/calendario.js
+--- a/src/web/static/js/calendario.js	2026-11-27 09:52:34.423600555 +0000
++++ b/src/web/static/js/calendario.js	2026-11-27 09:52:43.406208111 +0000
+@@ -346,6 +346,7 @@
+   }
+ 
+   function init() {
++    if (!$("cal-prev")) return;      // tela não existe neste perfil (a Pedagoga não a recebe)
+     $("cal-prev").onclick = () => {
+       if (st.vista === "ano") return ir(st.ano - 1);
+       st.mes === 0 ? ir(st.ano - 1, 11) : ir(st.ano, st.mes - 1);
+diff -ruN -x '*.orig' -x '*.rej' -x __pycache__ a/src/web/static/js/corte_etario.js b/src/web/static/js/corte_etario.js
+--- a/src/web/static/js/corte_etario.js	2026-11-27 09:52:34.423695206 +0000
++++ b/src/web/static/js/corte_etario.js	2026-11-27 09:52:43.406273042 +0000
+@@ -269,10 +269,11 @@
+   /* ---------- Eventos ---------- */
+ 
+   function telaAtiva() {
+-    return $("sec-corte-etario").classList.contains("active");
++    return !!$("sec-corte-etario") && $("sec-corte-etario").classList.contains("active");
+   }
+ 
+   function init() {
++    if (!$("ce-anterior")) return;    // tela não existe neste perfil (a Pedagoga não a recebe)
+     $("ce-anterior").addEventListener("click", () => mudarAno(-1));
+     $("ce-proximo").addEventListener("click", () => mudarAno(1));
+     $("ce-voltar").addEventListener("click", () => { anoSelecionado = anoPadrao(); renderTudo(); });
+diff -ruN -x '*.orig' -x '*.rej' -x __pycache__ a/src/web/static/js/usuarios.js b/src/web/static/js/usuarios.js
+--- a/src/web/static/js/usuarios.js	2026-11-27 09:52:34.423673851 +0000
++++ b/src/web/static/js/usuarios.js	2026-11-27 10:52:08.901113929 +0000
+@@ -50,14 +50,14 @@
+     raiz.textContent = "";
+     raiz.appendChild(el("h4", { texto: "Usuários e segurança", style: "margin-bottom:6px;font-size:.9rem;" }));
+     raiz.appendChild(el("p", { style: "color:var(--txt3);font-size:.82rem;margin-bottom:8px;max-width:640px;",
+-      texto: "Administrador: tudo. Operador: executa as automações e edita registros. Consulta: só vê. As senhas são guardadas só como hash (Argon2id); ninguém, nem o sistema, consegue ler uma senha." }));
++      texto: "Administrador: tudo. Operador: executa as automações e edita registros. Consulta: só vê. Pedagoga: só consulta Turmas, Alunos e Encaminhamentos SUS e roda as coletas Turmas e Alunos. As senhas são guardadas só como hash (Argon2id); ninguém, nem o sistema, consegue ler uma senha." }));
+     var aviso = el("p", { style: "font-size:.8rem;min-height:1.2em;", role: "status" });
+     var segredo = el("div", {});
+     var tabelaBox = el("div", {});
+     var auditoriaBox = el("div", {});
+ 
+     var selPerfil = el("select", { id: "usr-novo-perfil" }, [
+-      el("option", { value: "operador", texto: "Operador" }), el("option", { value: "consulta", texto: "Consulta" }), el("option", { value: "admin", texto: "Administrador" })]);
++      el("option", { value: "operador", texto: "Operador" }), el("option", { value: "consulta", texto: "Consulta" }), el("option", { value: "admin", texto: "Administrador" }), el("option", { value: "pedagoga", texto: "Pedagoga" })]);
+     var inUsuario = el("input", { type: "text", id: "usr-novo-usuario", autocomplete: "off", autocapitalize: "none" });
+     var inNome = el("input", { type: "text", id: "usr-novo-nome", autocomplete: "off", maxlength: "80" });
+     var btnCriar = el("button", { classe: "btn-primary", type: "button", texto: "Criar usuário" });
+@@ -118,7 +118,25 @@
+         auditoriaBox.appendChild(el("p", { style: "font-size:.76rem;margin-bottom:6px;color:" + (c.integra ? "var(--lime)" : "var(--rose)"),
+           texto: c.integra ? "Registro íntegro (" + c.linhas + " eventos, sem quebras na corrente)." : "ATENÇÃO: a corrente do registro está quebrada na linha " + c.primeira_quebra + " — o arquivo foi alterado." }));
+         var caixa = el("div", { classe: "usr-audit" });
+-        d.eventos.forEach(function (e) { caixa.appendChild(el("div", { texto: dataBr(e.ts) + " · " + (e.descricao || e.evento) + (e.usuario ? " · " + e.usuario : "") + (e.ip ? " · " + e.ip : "") + (e.detalhe ? " · " + e.detalhe : "") })); });
++        var corpo = el("tbody", {});
++        var diaAtual = "";
++        d.eventos.forEach(function (e) {
++          var dt = e.ts ? new Date(e.ts) : null, valida = dt && !isNaN(dt);
++          var dia = valida ? dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" }) : "Sem data";
++          if (dia !== diaAtual) {
++            diaAtual = dia;
++            corpo.appendChild(el("tr", { classe: "usr-audit-dia" }, [el("td", { colspan: "5", texto: dia })]));
++          }
++          var ruim = /negad|recusad|bloque|falh|erro|limite|tentativa/i.test(e.evento || "");
++          corpo.appendChild(el("tr", {}, [
++            el("td", { classe: "usr-audit-hora", texto: valida ? dt.toLocaleTimeString("pt-BR") : "—" }),
++            el("td", {}, [el("span", { classe: "usr-selo" + (ruim ? " ruim" : ""), texto: e.descricao || e.evento })]),
++            el("td", { texto: e.usuario || "—" }),
++            el("td", { classe: "usr-audit-ip", texto: e.ip || "—" }),
++            el("td", { classe: "usr-audit-det", texto: e.detalhe || "" })]));
++        });
++        caixa.appendChild(el("table", { classe: "usr-audit-tabela" }, [
++          el("thead", {}, [el("tr", {}, ["Hora", "Evento", "Usuário", "IP", "Detalhe"].map(function (h) { return el("th", { texto: h }); }))]), corpo]));
+         auditoriaBox.appendChild(caixa);
+       }).catch(function () { /* sem permissão ou sem registro ainda */ });
+     }
+diff -ruN -x '*.orig' -x '*.rej' -x __pycache__ a/src/web/templates/base.html b/src/web/templates/base.html
+--- a/src/web/templates/base.html	2026-11-27 09:52:34.424274133 +0000
++++ b/src/web/templates/base.html	2026-11-27 10:52:08.900589855 +0000
+@@ -18,8 +18,9 @@
+   <link rel="preconnect" href="https://fonts.googleapis.com">
+   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+   <link rel="stylesheet" href="{{ url_for('web.static', filename='css/styles.css') }}">
++  <link rel="stylesheet" href="{{ url_for('web.static', filename='css/auth.css') }}">
+ </head>
+-<body class="{{ 'modo-consulta' if somente_consulta else '' }}" data-ano-letivo="{{ ano_letivo }}"{% if usuario_atual %} data-perfil="{{ usuario_atual.perfil }}" data-perfil-rotulo="{{ usuario_atual.perfil_rotulo }}" data-usuario-nome="{{ usuario_atual.nome }}" data-usuario-login="{{ usuario_atual.usuario }}"{% endif %}>
++<body class="{{ 'modo-consulta' if somente_consulta else '' }}" data-ano-letivo="{{ ano_letivo }}"{% if usuario_atual %} data-perfil="{{ usuario_atual.perfil }}" data-perfil-rotulo="{{ usuario_atual.perfil_rotulo }}" data-usuario-nome="{{ usuario_atual.nome }}" data-usuario-login="{{ usuario_atual.usuario }}"{% endif %}{% if perfil_restrito %} data-perfil-restrito="1" data-config-editaveis="{{ config_editaveis }}"{% endif %}>
+ 
+ <div id="app" style="position:relative; min-height:100vh;">
+ 
+@@ -38,62 +39,89 @@
+ 
+     <nav class="sidebar-nav" id="sidebar-nav">
+       <div class="nav-section-label">Painel</div>
++      {% if pode_tela('painel') %}
+       <div class="nav-item active" data-view="painel">
+         <span class="nav-item-icon" data-icon="dashboard"></span>
+         <span class="nav-item-label">Painel principal</span>
+       </div>
++      {% endif %}
+ 
+       <div class="nav-section-label">Menu</div>
++      {% if pode_tela('turmas') %}
+       <div class="nav-item" data-view="turmas">
+         <span class="nav-item-icon" data-icon="users"></span>
+         <span class="nav-item-label">Turmas</span>
+       </div>
++      {% endif %}
++      {% if pode_tela('alunos') %}
+       <div class="nav-item" data-view="alunos">
+         <span class="nav-item-icon" data-icon="student"></span>
+         <span class="nav-item-label">Alunos</span>
+       </div>
++      {% endif %}
++      {% if pode_tela('prematricula') %}
+       <div class="nav-item" data-view="prematricula">
+         <span class="nav-item-icon" data-icon="clipboard"></span>
+         <span class="nav-item-label">Pré matrícula</span>
+       </div>
++      {% endif %}
++      {% if pode_tela('previsao') %}
+       <div class="nav-item" data-view="previsao">
+         <span class="nav-item-icon" data-icon="users"></span>
+         <span class="nav-item-label">Previsão {{ (ano_letivo | int) + 1 }}</span>
+       </div>
++      {% endif %}
++      {% if pode_tela('transferidos') %}
+       <div class="nav-item" data-view="transferidos">
+         <span class="nav-item-icon" data-icon="transfer"></span>
+         <span class="nav-item-label">Transferidos</span>
+       </div>
++      {% endif %}
++      {% if pode_tela('funcionarios') %}
+       <div class="nav-item" data-view="funcionarios">
+         <span class="nav-item-icon" data-icon="badge"></span>
+         <span class="nav-item-label">Funcionários</span>
+       </div>
++      {% endif %}
++      {% if pode_tela('encaminhamentos') %}
+       <div class="nav-item" data-view="encaminhamentos">
+         <span class="nav-item-icon" data-icon="heart"></span>
+         <span class="nav-item-label">Encaminhamentos SUS</span>
+       </div>
++      {% endif %}
++      {% if pode_tela('fora-do-raio') %}
+       <div class="nav-item" data-view="fora-do-raio">
+         <span class="nav-item-icon" data-icon="mapPinOff"></span>
+         <span class="nav-item-label">Alunos fora do raio</span>
+       </div>
++      {% endif %}
++      {% if pode_tela('calendario') %}
+       <div class="nav-item" data-view="calendario">
+         <span class="nav-item-icon" data-icon="calendar"></span>
+         <span class="nav-item-label">Calendário letivo</span>
+       </div>
++      {% endif %}
++      {% if pode_tela('corte-etario') %}
+       <div class="nav-item" data-view="corte-etario">
+         <span class="nav-item-icon" data-icon="ageCut"></span>
+         <span class="nav-item-label">Corte etário</span>
+       </div>
++      {% endif %}
++      {% if pode_tela('planilhas') %}
+       <div class="nav-item" data-view="planilhas">
+         <span class="nav-item-icon" data-icon="database"></span>
+         <span class="nav-item-label">Planilhas do Drive</span>
+       </div>
++      {% endif %}
+ 
++      {% if pode_tela('documentos') %}
+       <div class="nav-item" data-view="documentos">
+         <span class="nav-item-icon" data-icon="files"></span>
+         <span class="nav-item-label">Análise de documentos</span>
+       </div>
++      {% endif %}
+ 
++      {% if pode_tela('automacoes') %}
+       <div class="nav-group-toggle" id="toggle-automacoes">
+         <span class="nav-group-toggle-label">
+           <span class="nav-item-icon" data-icon="bolt"></span>
+@@ -102,6 +130,7 @@
+         <span class="nav-group-chev" data-icon="chevronRight"></span>
+       </div>
+       <div class="nav-subitems" id="sub-automacoes">
++        {% if pode_grupo_automacao('cadastros') %}
+         <div class="nav-group-toggle nav-subgroup-toggle" data-subgroup="cadastros">
+           <span class="nav-group-toggle-label">
+             <span class="nav-item-icon" data-icon="users"></span>
+@@ -110,35 +139,51 @@
+           <span class="nav-group-chev" data-icon="chevronRight"></span>
+         </div>
+         <div class="nav-subitems nav-subgroup-items" data-subgroup-items="cadastros">
++        {% if pode_automacao('turmas') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="turmas">
+           <span class="nav-item-icon" data-icon="school"></span>
+           <span class="nav-item-label">Turmas</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('alunos') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="alunos">
+           <span class="nav-item-icon" data-icon="users"></span>
+           <span class="nav-item-label">Alunos</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('aluno') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="aluno">
+           <span class="nav-item-icon" data-icon="userCircle"></span>
+           <span class="nav-item-label">Alunos por CGM</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('funcionarios') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="funcionarios">
+           <span class="nav-item-icon" data-icon="badge"></span>
+           <span class="nav-item-label">Funcionários / Servidores</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('vinculos') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="vinculos">
+           <span class="nav-item-icon" data-icon="compare"></span>
+           <span class="nav-item-label">Vínculos dos funcionários</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('compara_anos') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="compara_anos">
+           <span class="nav-item-icon" data-icon="scale"></span>
+           <span class="nav-item-label">Compara anos</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('sheets') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="sheets">
+           <span class="nav-item-icon" data-icon="database"></span>
+           <span class="nav-item-label">Planilha Google Sheets</span>
+         </div>
++        {% endif %}
+         </div>
++        {% endif %}
++        {% if pode_grupo_automacao('matricula') %}
+         <div class="nav-group-toggle nav-subgroup-toggle" data-subgroup="matricula">
+           <span class="nav-group-toggle-label">
+             <span class="nav-item-icon" data-icon="clipboard"></span>
+@@ -147,15 +192,21 @@
+           <span class="nav-group-chev" data-icon="chevronRight"></span>
+         </div>
+         <div class="nav-subitems nav-subgroup-items" data-subgroup-items="matricula">
++        {% if pode_automacao('prematricula_completa') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="prematricula_completa">
+           <span class="nav-item-icon" data-icon="clipboard"></span>
+           <span class="nav-item-label">Pré-matrícula completa</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('rematricula') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="rematricula">
+           <span class="nav-item-icon" data-icon="refresh"></span>
+           <span class="nav-item-label">Rematrícula no SERE</span>
+         </div>
++        {% endif %}
+         </div>
++        {% endif %}
++        {% if pode_grupo_automacao('transferidos') %}
+         <div class="nav-group-toggle nav-subgroup-toggle" data-subgroup="transferidos">
+           <span class="nav-group-toggle-label">
+             <span class="nav-item-icon" data-icon="transfer"></span>
+@@ -164,23 +215,33 @@
+           <span class="nav-group-chev" data-icon="chevronRight"></span>
+         </div>
+         <div class="nav-subitems nav-subgroup-items" data-subgroup-items="transferidos">
++        {% if pode_automacao('transferidos_fila') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="transferidos_fila">
+           <span class="nav-item-icon" data-icon="transfer"></span>
+           <span class="nav-item-label">Fila de transferidos</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('transferidos_gerar') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="transferidos_gerar">
+           <span class="nav-item-icon" data-icon="transfer"></span>
+           <span class="nav-item-label">Gerar guia e histórico</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('transferidos') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="transferidos">
+           <span class="nav-item-icon" data-icon="transfer"></span>
+           <span class="nav-item-label">Enviar transferidos ao SERE</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('pareceres_transferidos') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="pareceres_transferidos">
+           <span class="nav-item-icon" data-icon="certificate"></span>
+           <span class="nav-item-label">Pareceres dos transferidos</span>
+         </div>
++        {% endif %}
+         </div>
++        {% endif %}
++        {% if pode_grupo_automacao('pareceres') %}
+         <div class="nav-group-toggle nav-subgroup-toggle" data-subgroup="pareceres">
+           <span class="nav-group-toggle-label">
+             <span class="nav-item-icon" data-icon="certificate"></span>
+@@ -189,31 +250,45 @@
+           <span class="nav-group-chev" data-icon="chevronRight"></span>
+         </div>
+         <div class="nav-subitems nav-subgroup-items" data-subgroup-items="pareceres">
++        {% if pode_automacao('parecer_fund') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="parecer_fund">
+           <span class="nav-item-icon" data-icon="certificate"></span>
+           <span class="nav-item-label">Pareceres fundamental</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('pareceres_digitalizados') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="pareceres_digitalizados">
+           <span class="nav-item-icon" data-icon="certificate"></span>
+           <span class="nav-item-label">Pareceres digitalizados</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('parecer_rco') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="parecer_rco">
+           <span class="nav-item-icon" data-icon="certificate"></span>
+           <span class="nav-item-label">Pareceres infantil</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('parecer_planilha') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="parecer_planilha">
+           <span class="nav-item-icon" data-icon="certificate"></span>
+           <span class="nav-item-label">Pareceres infantil (planilha)</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('planilha_modelo') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="planilha_modelo">
+           <span class="nav-item-icon" data-icon="database"></span>
+           <span class="nav-item-label">Criar planilha de modelo</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('termos') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="termos">
+           <span class="nav-item-icon" data-icon="certificate"></span>
+           <span class="nav-item-label">Termos de ciência</span>
+         </div>
++        {% endif %}
+         </div>
++        {% endif %}
++        {% if pode_grupo_automacao('documentos') %}
+         <div class="nav-group-toggle nav-subgroup-toggle" data-subgroup="documentos">
+           <span class="nav-group-toggle-label">
+             <span class="nav-item-icon" data-icon="files"></span>
+@@ -222,51 +297,75 @@
+           <span class="nav-group-chev" data-icon="chevronRight"></span>
+         </div>
+         <div class="nav-subitems nav-subgroup-items" data-subgroup-items="documentos">
++        {% if pode_automacao('validar') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="validar">
+           <span class="nav-item-icon" data-icon="circleCheck"></span>
+           <span class="nav-item-label">Validar documentos</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('requerimento') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="requerimento">
+           <span class="nav-item-icon" data-icon="files"></span>
+           <span class="nav-item-label">Requerimento de matrícula</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('espec') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="espec">
+           <span class="nav-item-icon" data-icon="send"></span>
+           <span class="nav-item-label">Upload de um documento</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('limpeza') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="limpeza">
+           <span class="nav-item-icon" data-icon="alertFile"></span>
+           <span class="nav-item-label">Limpeza de documentos</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('analisa_pasta') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="analisa_pasta">
+           <span class="nav-item-icon" data-icon="fileSearch"></span>
+           <span class="nav-item-label">Analisa docs da pasta</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('analisa_sere') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="analisa_sere">
+           <span class="nav-item-icon" data-icon="fileSearch"></span>
+           <span class="nav-item-label">Analisa docs do SERE</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('documentos') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="documentos">
+           <span class="nav-item-icon" data-icon="files"></span>
+           <span class="nav-item-label">Documentos</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('cruzamento') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="cruzamento">
+           <span class="nav-item-icon" data-icon="compare"></span>
+           <span class="nav-item-label">Cruzamento de docs</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('comprimir') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="comprimir">
+           <span class="nav-item-icon" data-icon="zip"></span>
+           <span class="nav-item-label">Comprimir documentos</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('gerar_pastas') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="gerar_pastas">
+           <span class="nav-item-icon" data-icon="folderPlus"></span>
+           <span class="nav-item-label">Gerar pastas</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('mapear_pastas') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="mapear_pastas">
+           <span class="nav-item-icon" data-icon="map"></span>
+           <span class="nav-item-label">Mapear pastas</span>
+         </div>
++        {% endif %}
+         </div>
++        {% endif %}
++        {% if pode_grupo_automacao('saude') %}
+         <div class="nav-group-toggle nav-subgroup-toggle" data-subgroup="saude">
+           <span class="nav-group-toggle-label">
+             <span class="nav-item-icon" data-icon="heart"></span>
+@@ -275,15 +374,21 @@
+           <span class="nav-group-chev" data-icon="chevronRight"></span>
+         </div>
+         <div class="nav-subitems nav-subgroup-items" data-subgroup-items="saude">
++        {% if pode_automacao('sus') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="sus">
+           <span class="nav-item-icon" data-icon="heart"></span>
+           <span class="nav-item-label">Encaminhamentos SUS</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('cep') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="cep">
+           <span class="nav-item-icon" data-icon="mapPin"></span>
+           <span class="nav-item-label">CEP</span>
+         </div>
++        {% endif %}
+         </div>
++        {% endif %}
++        {% if pode_grupo_automacao('comunicacao') %}
+         <div class="nav-group-toggle nav-subgroup-toggle" data-subgroup="comunicacao">
+           <span class="nav-group-toggle-label">
+             <span class="nav-item-icon" data-icon="mail"></span>
+@@ -292,15 +397,21 @@
+           <span class="nav-group-chev" data-icon="chevronRight"></span>
+         </div>
+         <div class="nav-subitems nav-subgroup-items" data-subgroup-items="comunicacao">
++        {% if pode_automacao('avisos') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="avisos">
+           <span class="nav-item-icon" data-icon="send"></span>
+           <span class="nav-item-label">Mandar avisos</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('coleta_emails') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="coleta_emails">
+           <span class="nav-item-icon" data-icon="mail"></span>
+           <span class="nav-item-label">Coleta e-mails</span>
+         </div>
++        {% endif %}
+         </div>
++        {% endif %}
++        {% if pode_grupo_automacao('sistema') %}
+         <div class="nav-group-toggle nav-subgroup-toggle" data-subgroup="sistema">
+           <span class="nav-group-toggle-label">
+             <span class="nav-item-icon" data-icon="settings"></span>
+@@ -309,50 +420,72 @@
+           <span class="nav-group-chev" data-icon="chevronRight"></span>
+         </div>
+         <div class="nav-subitems nav-subgroup-items" data-subgroup-items="sistema">
++        {% if pode_automacao('agendador') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="agendador">
+           <span class="nav-item-icon" data-icon="clock"></span>
+           <span class="nav-item-label">Rotinas no agendador</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('backup') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="backup">
+           <span class="nav-item-icon" data-icon="database"></span>
+           <span class="nav-item-label">Backup dos dados</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('mascara') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="mascara">
+           <span class="nav-item-icon" data-icon="shieldLock"></span>
+           <span class="nav-item-label">Máscara de dados</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('base_abc') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="base_abc">
+           <span class="nav-item-icon" data-icon="fileSearch"></span>
+           <span class="nav-item-label">Consulta na Base ABC</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('fluxo_geo') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="fluxo_geo">
+           <span class="nav-item-icon" data-icon="mapPin"></span>
+           <span class="nav-item-label">Direcionados GEO</span>
+         </div>
++        {% endif %}
++        {% if pode_automacao('gerar_chaves') %}
+         <div class="nav-item nav-subitem nav-subitem2" data-view="automacoes" data-auto="gerar_chaves">
+           <span class="nav-item-icon" data-icon="key"></span>
+           <span class="nav-item-label">Gerar chaves de acesso</span>
+         </div>
++        {% endif %}
+         </div>
++        {% endif %}
+       </div>
++      {% endif %}
+ 
+       <div class="nav-section-label">Sistema</div>
++      {% if pode_tela('whatsapp') %}
+       <div class="nav-item" data-view="whatsapp">
+         <span class="nav-item-icon" data-icon="whatsapp"></span>
+         <span class="nav-item-label">WhatsApp</span>
+       </div>
++      {% endif %}
++      {% if pode_tela('configuracoes') %}
+       <div class="nav-item" data-view="configuracoes">
+         <span class="nav-item-icon" data-icon="settings"></span>
+         <span class="nav-item-label">Configurações</span>
+       </div>
++      {% endif %}
++      {% if pode_tela('primeira-execucao') %}
+       <div class="nav-item" data-view="primeira-execucao">
+         <span class="nav-item-icon" data-icon="rocket"></span>
+         <span class="nav-item-label">1ª execução</span>
+       </div>
++      {% endif %}
++      {% if pode_tela('ajuda') %}
+       <div class="nav-item" data-view="ajuda">
+         <span class="nav-item-icon" data-icon="help"></span>
+         <span class="nav-item-label">Ajuda</span>
+       </div>
++      {% endif %}
+     </nav>
+ 
+     <div class="sidebar-footer">
+@@ -395,14 +528,14 @@
+       <main id="main-content">
+         {% include "painel.html" %}
+         {% include "menu.html" %}
+-        {% include "calendario.html" %}
+-        {% include "corte_etario.html" %}
+-        {% include "previsao.html" %}
+-        {% include "planilhas.html" %}
++        {% if pode_tela('calendario') %}{% include "calendario.html" %}{% endif %}
++        {% if pode_tela('corte-etario') %}{% include "corte_etario.html" %}{% endif %}
++        {% if pode_tela('previsao') %}{% include "previsao.html" %}{% endif %}
++        {% if pode_tela('planilhas') %}{% include "planilhas.html" %}{% endif %}
+         {% include "automacoes.html" %}
+         {% include "configuracoes.html" %}
+-        {% include "primeira_execucao.html" %}
+-        {% include "whatsapp.html" %}
++        {% if pode_tela('primeira-execucao') %}{% include "primeira_execucao.html" %}{% endif %}
++        {% if pode_tela('whatsapp') %}{% include "whatsapp.html" %}{% endif %}
+         {% include "ajuda.html" %}
+       </main>
+     </div>
+diff -ruN -x '*.orig' -x '*.rej' -x __pycache__ a/src/web/templates/configuracoes.html b/src/web/templates/configuracoes.html
+--- a/src/web/templates/configuracoes.html	2026-11-27 09:52:34.424253239 +0000
++++ b/src/web/templates/configuracoes.html	2026-11-27 10:59:45.992207547 +0000
+@@ -11,6 +11,7 @@
+   <div class="sec-hdr"><span class="sec-ttl">Acesso e segurança</span></div>
+   <div class="config-grid">
+ 
++    {% if pode_configuracao('minha_conta') %}
+     <div class="config-row" data-config="minha_conta">
+       <div class="ic" style="background:var(--badge-lime-bg); color:var(--lime);"><span data-icon="userCircle"></span></div>
+       <div class="txt">
+@@ -18,7 +19,9 @@
+         <div class="desc">Quem está logado, trocar a minha senha e sair do sistema.</div>
+       </div>
+     </div>
++    {% endif %}
+ 
++    {% if pode_configuracao('usuarios') %}
+     <div class="config-row" data-config="usuarios" data-requer="admin">
+       <div class="ic" style="background:var(--badge-violet-bg); color:var(--violet);"><span data-icon="key"></span></div>
+       <div class="txt">
+@@ -26,12 +29,14 @@
+         <div class="desc">Cadastre usuários, defina perfis, redefina senhas, desbloqueie contas e veja o registro de segurança.</div>
+       </div>
+     </div>
++    {% endif %}
+ 
+   </div>
+ 
+   <div class="sec-hdr" style="margin-top:32px;"><span class="sec-ttl">Escola</span></div>
+   <div class="config-grid">
+ 
++    {% if pode_configuracao('escola') %}
+     <div class="config-row" data-config="escola">
+       <div class="ic" style="background:var(--badge-amber-bg); color:var(--amber);"><span data-icon="school"></span></div>
+       <div class="txt">
+@@ -39,7 +44,9 @@
+         <div class="desc">Nome, CEP, endereço e identificação. Usados por todos os scripts.</div>
+       </div>
+     </div>
++    {% endif %}
+ 
++    {% if pode_configuracao('ano_letivo') %}
+     <div class="config-row" data-config="ano_letivo">
+       <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="calendar"></span></div>
+       <div class="txt">
+@@ -47,7 +54,9 @@
+         <div class="desc">Escolha o ano de trabalho, volte a um ano anterior ou restaure os dados de um ano.</div>
+       </div>
+     </div>
++    {% endif %}
+ 
++    {% if pode_configuracao('data_corte_transferidos') %}
+     <div class="config-row" data-config="data_corte_transferidos" data-requer="admin">
+       <div class="ic" style="background:var(--badge-amber-bg); color:var(--amber);"><span data-icon="calendar"></span></div>
+       <div class="txt">
+@@ -55,7 +64,9 @@
+         <div class="desc">A partir de que data o processo de transferidos (guia, histórico e parecer) é automático.</div>
+       </div>
+     </div>
++    {% endif %}
+ 
++    {% if pode_configuracao('mapeamento_turmas_qr') %}
+     <div class="config-row" data-config="mapeamento_turmas_qr">
+       <div class="ic" style="background:var(--badge-amber-bg); color:var(--amber);"><span data-icon="compare"></span></div>
+       <div class="txt">
+@@ -63,7 +74,9 @@
+         <div class="desc">Ensina o sistema a reconhecer o nome da turma escrito no QR antigo dos pareceres (ex.: INF 4 A).</div>
+       </div>
+     </div>
++    {% endif %}
+ 
++    {% if pode_configuracao('navegador') %}
+     <div class="config-row" data-config="navegador">
+       <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="eye"></span></div>
+       <div class="txt">
+@@ -71,7 +84,9 @@
+         <div class="desc">Escolha Chrome ou Firefox para todos os scripts que abrem navegador (ou deixe automático).</div>
+       </div>
+     </div>
++    {% endif %}
+ 
++    {% if pode_configuracao('backup_automatico') %}
+     <div class="config-row" data-config="backup_automatico">
+       <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="database"></span></div>
+       <div class="txt">
+@@ -79,20 +94,24 @@
+         <div class="desc">Liga ou desliga o backup que o sistema faz ao fim das coletas de turmas, alunos e funcionários.</div>
+       </div>
+     </div>
++    {% endif %}
+ 
+   </div>
+ 
+   <div class="sec-hdr" style="margin-top:32px;"><span class="sec-ttl">Credenciais e integrações</span></div>
+   <div class="config-grid">
+ 
+-    <div class="config-row" data-config="senha_sere" data-requer="admin">
++    {% if pode_configuracao('senha_sere') %}
++    <div class="config-row" data-config="senha_sere"{% if not perfil_restrito %} data-requer="admin"{% endif %}>
+       <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="lock"></span></div>
+       <div class="txt">
+         <div class="name">Salvar senha do SERE</div>
+         <div class="desc">Armazena credenciais de acesso ao SERE.</div>
+       </div>
+     </div>
++    {% endif %}
+ 
++    {% if pode_configuracao('senha_prematricula') %}
+     <div class="config-row" data-config="senha_prematricula" data-requer="admin">
+       <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="lock"></span></div>
+       <div class="txt">
+@@ -100,7 +119,9 @@
+         <div class="desc">Armazena o login e a senha do portal da pré-matrícula.</div>
+       </div>
+     </div>
++    {% endif %}
+ 
++    {% if pode_configuracao('senha_rco') %}
+     <div class="config-row" data-config="senha_rco" data-requer="admin">
+       <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="lock"></span></div>
+       <div class="txt">
+@@ -108,7 +129,9 @@
+         <div class="desc">Login e senha do RCO (por padrão, os mesmos do SERE).</div>
+       </div>
+     </div>
++    {% endif %}
+ 
++    {% if pode_configuracao('google_conta') %}
+     <div class="config-row" data-config="google_conta" data-requer="admin">
+       <div class="ic" style="background:var(--badge-cyan-bg); color:var(--cyan);"><span data-icon="lock"></span></div>
+       <div class="txt">
+@@ -116,7 +139,9 @@
+         <div class="desc">Escolha a conta, o navegador e o perfil em que o link de autorização do Google abre.</div>
+       </div>
+     </div>
++    {% endif %}
+ 
++    {% if pode_configuracao('chave_gmail') %}
+     <div class="config-row" data-config="chave_gmail" data-requer="admin">
+       <div class="ic" style="background:var(--badge-rose-bg); color:var(--rose);"><span data-icon="mail"></span></div>
+       <div class="txt">
+@@ -124,7 +149,9 @@
+         <div class="desc">Armazena o e-mail e a senha de app do Gmail (envio de e-mails).</div>
+       </div>
+     </div>
++    {% endif %}
+ 
++    {% if pode_configuracao('planilhas_google') %}
+     <div class="config-row" data-config="planilhas_google">
+       <div class="ic" style="background:var(--badge-lime-bg); color:var(--lime);"><span data-icon="files"></span></div>
+       <div class="txt">
+@@ -132,7 +159,9 @@
+         <div class="desc">Guarda o link e o nome das planilhas, cada uma com um id. As planilhas criadas pelo sistema entram aqui.</div>
+       </div>
+     </div>
++    {% endif %}
+ 
++    {% if pode_configuracao('outras_credenciais') %}
+     <div class="config-row" data-config="outras_credenciais" data-requer="admin">
+       <div class="ic" style="background:var(--badge-violet-bg); color:var(--violet);"><span data-icon="key"></span></div>
+       <div class="txt">
+@@ -140,7 +169,9 @@
+         <div class="desc">Outras chaves e tokens de acesso.</div>
+       </div>
+     </div>
++    {% endif %}
+ 
++    {% if pode_configuracao('temas') %}
+     <div class="config-row" data-config="temas">
+       <div class="ic" style="background:var(--badge-amber-bg); color:var(--amber);"><span data-icon="palette"></span></div>
+       <div class="txt">
+@@ -148,7 +179,9 @@
+         <div class="desc">Escolha o tema do sistema.</div>
+       </div>
+     </div>
++    {% endif %}
+ 
++    {% if pode_configuracao('perfil') %}
+     <div class="config-row" data-config="perfil">
+       <div class="ic" style="background:var(--badge-lime-bg); color:var(--lime);"><span data-icon="userCircle"></span></div>
+       <div class="txt">
+@@ -156,12 +189,15 @@
+         <div class="desc">Dados do usuário e permissões.</div>
+       </div>
+     </div>
++    {% endif %}
+ 
+   </div>
+ 
++  {% if pode_configuracao('pasta_digitalizacao') or pode_configuracao('modelos_parecer') or pode_configuracao('modelo_requerimento') %}
+   <div class="sec-hdr" style="margin-top:32px;"><span class="sec-ttl">Pastas</span></div>
+   <div class="config-grid">
+ 
++    {% if pode_configuracao('pasta_digitalizacao') %}
+     <div class="config-row" data-config="pasta_digitalizacao" data-requer="admin">
+       <div class="ic" style="background:var(--badge-blue-bg); color:var(--blue);"><span data-icon="folder"></span></div>
+       <div class="txt">
+@@ -169,7 +205,9 @@
+         <div class="desc">Define a pasta raiz dos documentos digitalizados dos alunos.</div>
+       </div>
+     </div>
++    {% endif %}
+ 
++    {% if pode_configuracao('modelos_parecer') %}
+     <div class="config-row" data-config="modelos_parecer" data-requer="admin">
+       <div class="ic" style="background:var(--badge-violet-bg); color:var(--violet);"><span data-icon="files"></span></div>
+       <div class="txt">
+@@ -177,7 +215,9 @@
+         <div class="desc">Envie o modelo Word do parecer do Fundamental e ligue-o às turmas.</div>
+       </div>
+     </div>
++    {% endif %}
+ 
++    {% if pode_configuracao('modelo_requerimento') %}
+     <div class="config-row" data-config="modelo_requerimento" data-requer="admin">
+       <div class="ic" style="background:var(--badge-violet-bg); color:var(--violet);"><span data-icon="files"></span></div>
+       <div class="txt">
+@@ -185,8 +225,10 @@
+         <div class="desc">Envie o modelo Word do requerimento de matrícula; ele fica guardado na pasta de modelos.</div>
+       </div>
+     </div>
++    {% endif %}
+ 
+   </div>
++  {% endif %}
+ 
+   <div class="sec-hdr" style="margin-top:32px;"><span class="sec-ttl">Painel selecionado</span></div>
+   <div class="form-card" id="config-detalhe">
+diff -ruN -x '*.orig' -x '*.rej' -x __pycache__ a/src/web/templates/menu.html b/src/web/templates/menu.html
+--- a/src/web/templates/menu.html	2026-11-27 09:52:34.424169052 +0000
++++ b/src/web/templates/menu.html	2026-11-27 09:52:43.406677554 +0000
+@@ -1,3 +1,4 @@
++{% if pode_tela('turmas') %}
+ <section class="section" id="sec-turmas" data-title="Turmas">
+   <div class="page-header">
+     <div class="page-header-icon violet"><span data-icon="users"></span></div>
+@@ -9,7 +10,9 @@
+   {% set entity = "turmas" %}
+   {% include "partials/turmas_cards.html" %}
+ </section>
++{% endif %}
+ 
++{% if pode_tela('alunos') %}
+ <section class="section" id="sec-alunos" data-title="Alunos">
+   <div class="page-header">
+     <div class="page-header-icon cyan"><span data-icon="student"></span></div>
+@@ -21,7 +24,9 @@
+   {% set entity = "alunos" %}
+   {% include "partials/alunos_cards.html" %}
+ </section>
++{% endif %}
+ 
++{% if pode_tela('prematricula') %}
+ <section class="section" id="sec-prematricula" data-title="Pré matrícula">
+   <div class="page-header">
+     <div class="page-header-icon amber"><span data-icon="clipboard"></span></div>
+@@ -40,7 +45,9 @@
+   {% include "partials/pre_matricula_cards.html" %}
+   {% include "partials/pre_matricula_geo.html" %}
+ </section>
++{% endif %}
+ 
++{% if pode_tela('transferidos') %}
+ <section class="section" id="sec-transferidos" data-title="Transferidos">
+   <div class="page-header">
+     <div class="page-header-icon rose"><span data-icon="transfer"></span></div>
+@@ -49,14 +56,18 @@
+       <p>Controle dos documentos de transferência (guia, histórico e parecer)</p>
+     </div>
+     <div class="page-header-actions">
++      {% if pode_automacao('transferidos') %}
+       <button class="btn-sm js-atualizar" data-auto="transferidos" title="Abre a automação que coleta estes dados"><span data-icon="refresh"></span> Atualizar dados</button>
++      {% endif %}
+       <button class="btn-sm js-exportar"><span data-icon="download"></span> Exportar</button>
+     </div>
+   </div>
+   {% set entity = "transferidos" %}
+   {% include "partials/transferidos_cards.html" %}
+ </section>
++{% endif %}
+ 
++{% if pode_tela('funcionarios') %}
+ <section class="section" id="sec-funcionarios" data-title="Funcionários">
+   <div class="page-header">
+     <div class="page-header-icon blue"><span data-icon="badge"></span></div>
+@@ -71,7 +82,9 @@
+   {% set entity = "funcionarios" %}
+   {% include "partials/funcionarios_cards.html" %}
+ </section>
++{% endif %}
+ 
++{% if pode_tela('encaminhamentos') %}
+ <section class="section" id="sec-encaminhamentos" data-title="Encaminhamentos do SUS">
+   <div class="page-header">
+     <div class="page-header-icon lime"><span data-icon="heart"></span></div>
+@@ -80,7 +93,9 @@
+       <p>Alunos com procedimentos na fila de espera do SISREG (consulta pelo CPF)</p>
+     </div>
+     <div class="page-header-actions">
++      {% if pode_automacao('sus') %}
+       <button class="btn-sm js-atualizar" data-auto="sus" title="Abre a automação que coleta estes dados"><span data-icon="refresh"></span> Atualizar dados</button>
++      {% endif %}
+       <button class="btn-sm js-exportar"><span data-icon="download"></span> Exportar</button>
+     </div>
+   </div>
+@@ -89,7 +104,9 @@
+   {% set acao_auto = "sus" %}
+   {% include "partials/encaminhamentos_cards.html" %}
+ </section>
++{% endif %}
+ 
++{% if pode_tela('fora-do-raio') %}
+ <section class="section" id="sec-fora-do-raio" data-title="Alunos fora do raio">
+   <div class="page-header">
+     <div class="page-header-icon rose"><span data-icon="mapPinOff"></span></div>
+@@ -98,7 +115,9 @@
+       <p>Alunos cujo CEP fica além do raio de atendimento da escola</p>
+     </div>
+     <div class="page-header-actions">
++      {% if pode_automacao('cep') %}
+       <button class="btn-sm js-atualizar" data-auto="cep" title="Abre a automação que coleta estes dados"><span data-icon="refresh"></span> Atualizar dados</button>
++      {% endif %}
+       <button class="btn-sm js-exportar"><span data-icon="download"></span> Exportar</button>
+     </div>
+   </div>
+@@ -107,7 +126,9 @@
+   {% set acao_auto = "cep" %}
+   {% include "partials/fora_do_raio_cards.html" %}
+ </section>
++{% endif %}
+ 
++{% if pode_tela('documentos') %}
+ <section class="section" id="sec-documentos" data-title="Análise de documentos">
+   <div class="page-header">
+     <div class="page-header-icon cyan"><span data-icon="files"></span></div>
+@@ -118,4 +139,5 @@
+   </div>
+   {% set entity = "documentos" %}
+   {% include "partials/documentos_cards.html" %}
+-</section>
+\ No newline at end of file
++</section>
++{% endif %}
+\ No newline at end of file
+diff -ruN -x '*.orig' -x '*.rej' -x __pycache__ a/src/web/templates/painel.html b/src/web/templates/painel.html
+--- a/src/web/templates/painel.html	2026-11-27 09:52:34.424260967 +0000
++++ b/src/web/templates/painel.html	2026-11-27 09:52:43.406757394 +0000
+@@ -16,6 +16,7 @@
+     </button>
+   </div>
+ 
++  {% if pode_tela('transferidos') %}
+   <!-- Avisos da rotina diária (transferidos a documentar/enviar etc.). Fica escondido quando não há nada a avisar. -->
+   <div class="card" id="painel-avisos" hidden>
+     <div class="card-header">
+@@ -27,6 +28,7 @@
+     </div>
+     <div class="card-body" id="painel-avisos-lista"></div>
+   </div>
++  {% endif %}
+ 
+   <div class="metrics-grid" id="metrics-principais">
+     <!-- preenchido via JS (stat-card) a partir de /web/api/painel/resumo -->
+@@ -39,6 +41,7 @@
+     <!-- preenchido via JS -->
+   </div>
+ 
++  {% if pode_tela('prematricula') %}
+   <div class="card">
+     <div class="card-header">
+       <span data-icon="clipboard" style="color:var(--amber)"></span>
+@@ -67,5 +70,6 @@
+       </div>
+     </div>
+   </div>
++  {% endif %}
+ 
+ </section>
+diff -ruN -x '*.orig' -x '*.rej' -x __pycache__ a/tests/test_perfil_pedagoga.py b/tests/test_perfil_pedagoga.py
+--- a/tests/test_perfil_pedagoga.py	1970-01-01 00:00:00.000000000 +0000
++++ b/tests/test_perfil_pedagoga.py	2026-11-27 11:00:21.807896424 +0000
+@@ -0,0 +1,344 @@
++"""Perfil Pedagoga: permissões próprias (lista, nega por padrão), validadas no servidor, e a interface só com o que ela pode usar.
++O administrador (e operador/consulta) continua exatamente como antes."""
++import re
++
++import pytest
++
++from src.comum import paths
++from src.seguranca import auditoria, politica, segredo, senhas, usuarios
++from src.seguranca import web as seg_web
++from src.web.api import rotas
++from src.web.app import create_app
++
++SENHA = "Escola-Forte#2026x"
++SENHA2 = "Outra-Senha!9876zz"
++
++
++@pytest.fixture(autouse=True)
++def seguranca_ligada(tmp_path, monkeypatch):
++    monkeypatch.setattr(seg_web, "ATIVA", True)
++    monkeypatch.setattr(paths, "CREDENCIAIS_DIR", tmp_path / "credenciais")
++    monkeypatch.setattr(paths, "LOGS_DIR", tmp_path / "logs")
++    monkeypatch.setattr(senhas, "PARAMETROS", {"memoria_kib": 1024, "tempo": 1, "paralelismo": 1})
++    monkeypatch.setattr(senhas, "_hash_de_mentira", None)
++    monkeypatch.setattr(seg_web, "sessoes", seg_web._sessoes.RepositorioSessoes())
++    seg_web.limitador_login.zerar()
++    seg_web.limitador_troca.zerar()
++    segredo.esquecer_cache()
++    auditoria.esquecer_cache()
++
++
++@pytest.fixture()
++def app():
++    return create_app()
++
++
++def _cliente(app, perfil):
++    if usuarios.estado() == "sem_usuarios":
++        usuarios.criar_primeiro_admin("admin", "Adm", SENHA)
++    nome, senha = "admin", SENHA
++    if perfil != "admin":
++        nome, senha = perfil, SENHA2
++        usuarios.criar(nome, nome.title(), perfil, SENHA2, trocar_senha=False)
++    c = app.test_client()
++    assert c.post("/web/entrar", json={"usuario": nome, "senha": senha}).status_code == 200
++    return c
++
++
++def _h(c):
++    return {"X-CSRF-Token": c.get("/web/api/seguranca/sessao").get_json()["csrf"]}
++
++
++def _rotas(app):
++    for rule in app.url_map.iter_rules():
++        if rule.endpoint.endswith("static") or rule.rule.startswith("/web/static"):
++            continue
++        caminho = re.sub(r"<[^>]+>", "x", rule.rule)
++        for metodo in sorted(set(rule.methods) - {"HEAD", "OPTIONS"}):
++            yield metodo, caminho
++
++
++# Tudo o que a Pedagoga pode chamar. Se alguém ampliar a lista em politica.py, este teste obriga a decidir de propósito.
++PERMITIDAS = {
++    ("GET", "/web/api/seguranca/sessao"), ("POST", "/web/api/seguranca/estender"), ("POST", "/web/api/seguranca/sair"),
++    ("POST", "/web/api/seguranca/trocar-senha"), ("GET", "/web/trocar-senha"), ("GET", "/"), ("GET", "/web"),
++    ("GET", "/web/api/painel/resumo"), ("GET", "/web/api/turmas/lista"), ("GET", "/web/api/alunos/lista"),
++    ("GET", "/web/api/encaminhamentos/lista"), ("GET", "/web/api/ano-letivo/contexto"),
++    ("GET", "/web/api/configuracoes/escola"), ("GET", "/web/api/configuracoes/ano-letivo"),
++    ("GET", "/web/api/configuracoes/navegador"), ("GET", "/web/api/configuracoes/backup-automatico"),
++    ("GET", "/web/api/ajuda/indice"), ("GET", "/web/api/ajuda/geral"), ("GET", "/web/api/ajuda/x/x"),
++    ("GET", "/web/api/automacoes/lista"), ("POST", "/web/api/cgm/analisar"),
++    ("GET", "/web/api/automacoes/x/componentes"), ("GET", "/web/api/automacoes/x/status"),
++    ("GET", "/web/api/automacoes/x/configuracao"), ("GET", "/web/api/automacoes/x/historico"),
++    ("GET", "/web/api/automacoes/x/historico/x"), ("GET", "/web/api/automacoes/x/flags"),
++    ("POST", "/web/api/automacoes/x/executar"), ("POST", "/web/api/automacoes/x/previa"),
++    ("POST", "/web/api/automacoes/x/resposta"), ("POST", "/web/api/automacoes/x/cancelar"),
++    ("POST", "/web/api/pedagoga/atualizar-dados"), ("GET", "/web/api/pedagoga/atualizar-dados/status"),
++}
++
++
++def test_pedagoga_so_tem_o_que_esta_na_lista(app):
++    """Para toda rota do app (inclusive as futuras): a decisão da Pedagoga bate com a lista fechada acima, com 'x' no lugar da chave
++    só para as rotas de automação (que dependem da chave)."""
++    liberadas = set()
++    for metodo, caminho in _rotas(app):
++        # /automacoes/<chave>/...: testa com uma chave liberada e uma que não é
++        for chave in ("turmas", "x_proibida"):
++            c2 = caminho.replace("/automacoes/x/", f"/automacoes/{chave}/")
++            ok = politica.permite("pedagoga", metodo, c2)
++            if ok and chave == "turmas":
++                liberadas.add((metodo, caminho))
++            if "/automacoes/x/" in caminho and chave == "x_proibida":
++                assert not ok, (metodo, c2)
++    # rotas de /ajuda têm 1 ou 2 segmentos; /web/api/ajuda/<tipo>/<chave> aparece como x/x
++    assert liberadas <= PERMITIDAS, sorted(liberadas - PERMITIDAS)
++
++
++PUBLICAS = {"/web/entrar", "/web/instalacao", "/web/api/ping", "/manifest.webmanifest", "/sw.js", "/web/api/whatsapp/webhook"}
++
++
++def test_pedagoga_recebe_403_em_toda_rota_fora_da_lista(app):
++    c = _cliente(app, "pedagoga")
++    h = _h(c)
++    negadas = 0
++    for metodo, caminho in _rotas(app):
++        if caminho in PUBLICAS or politica.permite("pedagoga", metodo, caminho.replace("/automacoes/x/", "/automacoes/zzz/")):
++            continue
++        r = c.open(caminho.replace("/automacoes/x/", "/automacoes/zzz/"), method=metodo, json={} if metodo != "GET" else None, headers=h)
++        assert r.status_code == 403, (metodo, caminho, r.status_code)
++        negadas += 1
++    assert negadas > 100
++
++
++def test_perfil_pedagoga_nao_herda_nada_da_escada():
++    for m, c in [("GET", "/web/api/funcionarios/lista"), ("GET", "/web/api/transferidos/lista"), ("GET", "/web/api/prematricula/lista"),
++                 ("GET", "/web/api/painel/avisos"), ("GET", "/web/api/whatsapp/status"), ("GET", "/web/api/planilhas"),
++                 ("GET", "/web/api/documentos/analise"), ("GET", "/web/api/configuracoes/gmail"), ("GET", "/web/api/seguranca/usuarios")]:
++        assert not politica.permite("pedagoga", m, c), (m, c)
++        assert politica.permite("consulta", m, c) == (politica.perfil_exigido(m, c) == "consulta")
++    assert usuarios.Usuario.tem_perfil  # a escada continua existindo
++    assert politica.permite("desconhecido", "GET", "/web/api/turmas/lista") is False
++
++
++def test_automacoes_permitidas_so_turmas_e_alunos(app):
++    c = _cliente(app, "pedagoga")
++    h = _h(c)
++    assert {i["chave"] for i in c.get("/web/api/automacoes/lista").get_json()["itens"]} == {"turmas", "alunos"}
++    for chave in ("funcionarios", "rematricula", "transferidos", "documentos", "limpeza", "aluno", "sus", "avisos", "backup", "wizard_turmas"):
++        for rota in ("executar", "previa", "cancelar", "resposta"):
++            assert c.post(f"/web/api/automacoes/{chave}/{rota}", json={}, headers=h).status_code == 403, (chave, rota)
++        assert c.get(f"/web/api/automacoes/{chave}/status").status_code == 403
++    # gravar opções guardadas, navegador e apagar histórico: nem nas liberadas
++    assert c.post("/web/api/automacoes/turmas/flags", json={"flags": []}, headers=h).status_code == 403
++    assert c.post("/web/api/automacoes/turmas/navegador", json={}, headers=h).status_code == 403
++    assert c.delete("/web/api/automacoes/turmas/historico", headers=h).status_code == 403
++
++
++def test_pedagoga_executa_turmas_e_alunos_modo_basico_e_completo(app, monkeypatch):
++    chamadas = []
++    monkeypatch.setattr(rotas, "_executar_registrado", lambda script, chave, payload, tj: chamadas.append((chave, payload.get("modo"))))
++    c = _cliente(app, "pedagoga")
++    h = _h(c)
++    for chave, corpo in [("turmas", {}), ("alunos", {"modo": "basico"}), ("alunos", {"modo": "completo", "rapido": True})]:
++        rotas._EXECUCOES.pop(chave, None)
++        r = c.post(f"/web/api/automacoes/{chave}/executar", json=corpo, headers=h)
++        assert r.status_code == 200, r.get_json()
++    assert chamadas == [("turmas", None), ("alunos", "basico"), ("alunos", "completo")]
++
++
++def test_segunda_trava_na_propria_rota_de_execucao(app, monkeypatch):
++    monkeypatch.setattr(seg_web, "ATIVA", False)           # sem o guarda: só a trava da rota
++    monkeypatch.setattr(rotas, "_perfil_atual", lambda: "pedagoga")
++    r = app.test_client().post("/web/api/automacoes/funcionarios/executar", json={})
++    assert r.status_code == 403 and r.get_json()["permissao"] is True
++
++
++def test_somente_leitura_nada_de_escrita_nem_configuracao(app):
++    c = _cliente(app, "pedagoga")
++    h = _h(c)
++    for metodo, caminho in [("POST", "/web/api/configuracoes/escola"), ("POST", "/web/api/configuracoes/ano-letivo"),
++                            ("POST", "/web/api/configuracoes/navegador"), ("POST", "/web/api/configuracoes/backup-automatico"),
++                            ("POST", "/web/api/wizard/escola/executar"), ("POST", "/web/api/wizard/funcionarios/executar"),
++                            ("POST", "/web/api/prematricula/registro/1"),
++                            ("POST", "/web/api/transferidos/destino/1"), ("POST", "/web/api/whatsapp/enviar"),
++                            ("POST", "/web/api/seguranca/usuarios"), ("PATCH", "/web/api/seguranca/usuarios/x"),
++                            ("DELETE", "/web/api/seguranca/usuarios/x"), ("POST", "/web/api/painel/avisos/x/resolver")]:
++        assert c.open(caminho, method=metodo, json={}, headers=h).status_code == 403, (metodo, caminho)
++    eventos = [e for e in auditoria.ler(100)]
++    assert any("acesso_negado" in str(e) for e in eventos)
++
++
++def test_pedagoga_pode_trocar_a_propria_senha_e_sair(app):
++    c = _cliente(app, "pedagoga")
++    h = _h(c)
++    r = c.post("/web/api/seguranca/trocar-senha", json={"atual": SENHA2, "nova": "Terceira-Senha#4321qq"}, headers=h)
++    assert r.status_code == 200, r.get_json()
++
++
++def test_painel_reduzido_no_servidor(app, tmp_path, monkeypatch):
++    monkeypatch.setattr(rotas, "_alunos_fora_do_raio", lambda: (_ for _ in ()).throw(AssertionError("não devia ler")))
++    c = _cliente(app, "pedagoga")
++    d = c.get("/web/api/painel/resumo").get_json()
++    assert [m["chave"] for m in d["principais"]] == ["total_alunos", "meninos", "meninas", "turmas"]
++    assert [m["chave"] for m in d["secundarias"]] == ["encaminhamentos"]
++
++
++def test_painel_do_administrador_continua_completo(app, monkeypatch):
++    c = _cliente(app, "admin")
++    d = c.get("/web/api/painel/resumo").get_json()
++    assert [m["chave"] for m in d["principais"]] == ["total_alunos", "meninos", "meninas", "fila_prematricula", "turmas"]
++    assert [m["chave"] for m in d["secundarias"]] == ["docs_pendentes", "fora_do_raio", "transferidos", "encaminhamentos"]
++    assert len(c.get("/web/api/automacoes/lista").get_json()["itens"]) > 30
++
++
++def test_menu_da_pedagoga_so_tem_o_autorizado(app):
++    html = _cliente(app, "pedagoga").get("/web").get_data(as_text=True)
++    views = set(re.findall(r'class="nav-item[^"]*" data-view="([\w-]+)"', html))
++    assert views == {"painel", "turmas", "alunos", "encaminhamentos", "configuracoes", "ajuda", "automacoes"}
++    assert set(re.findall(r'data-auto="(\w+)"', html)) == {"turmas", "alunos"}
++    assert 'data-subgroup="matricula"' not in html and 'id="sec-funcionarios"' not in html and 'id="sec-whatsapp"' not in html
++    assert 'data-perfil-restrito="1"' in html
++    cfg = set(re.findall(r'data-config="(\w+)"', html))
++    assert cfg == politica.CONFIGURACOES_PEDAGOGA
++
++
++def test_menu_do_administrador_e_identico_ao_de_sempre(app):
++    html = _cliente(app, "admin").get("/web").get_data(as_text=True)
++    assert len(set(re.findall(r'data-auto="(\w+)"', html))) == 40
++    for v in ("prematricula", "funcionarios", "transferidos", "whatsapp", "primeira-execucao", "planilhas"):
++        assert f'data-view="{v}"' in html
++    assert "data-perfil-restrito" not in html
++    assert len(re.findall(r'data-config="(\w+)"', html)) == 20
++
++
++def test_admin_cria_usuario_pedagoga_e_mudar_perfil_derruba_sessao(app):
++    adm = _cliente(app, "admin")
++    h = _h(adm)
++    r = adm.post("/web/api/seguranca/usuarios", json={"usuario": "maria", "nome": "Maria", "perfil": "pedagoga", "senha": SENHA2}, headers=h)
++    assert r.status_code == 201 and r.get_json()["usuario"]["perfil_rotulo"] == "Pedagoga"
++    u = usuarios.obter_por_usuario("maria")
++    usuarios.alterar(u.id, ativo=True)
++    p = app.test_client()
++    usuarios.redefinir_senha(u.id, SENHA2, temporaria=False)
++    assert p.post("/web/entrar", json={"usuario": "maria", "senha": SENHA2}).status_code == 200
++    assert p.get("/web/api/funcionarios/lista").status_code == 403
++    adm.patch(f"/web/api/seguranca/usuarios/{u.id}", json={"perfil": "operador"}, headers=h)
++    assert p.get("/web/api/turmas/lista").status_code == 401           # sessão derrubada: entra de novo já como operador
++
++
++def test_ajuda_da_pedagoga_so_tem_o_que_ela_usa(app):
++    ped = _cliente(app, "pedagoga").get("/web/api/ajuda/indice").get_json()
++    assert {i["chave"] for i in ped["telas"]} <= politica.TELAS_PEDAGOGA and ped["telas"]
++    assert {i["chave"] for g in ped["automacoes"] for i in g["itens"]} == {"turmas", "alunos"}
++    assert {i["chave"] for i in ped["configuracoes"]} <= politica.CONFIGURACOES_PEDAGOGA
++    p = app.test_client()
++    p.post("/web/entrar", json={"usuario": "pedagoga", "senha": SENHA2})
++    assert p.get("/web/api/ajuda/automacao/turmas").status_code == 200
++    assert p.get("/web/api/ajuda/automacao/rematricula").status_code == 404
++    assert p.get("/web/api/ajuda/tela/funcionarios").status_code == 404
++    adm = app.test_client()
++    adm.post("/web/entrar", json={"usuario": "admin", "senha": SENHA})
++    full = adm.get("/web/api/ajuda/indice").get_json()
++    assert len(full["telas"]) > len(ped["telas"]) and adm.get("/web/api/ajuda/automacao/rematricula").status_code == 200
++
++
++def test_instalador_cria_admin_e_depois_pedagoga(monkeypatch):
++    from src.seguranca import cli
++    saidas = iter(["pedagoga", "Maria"])
++    monkeypatch.setattr(cli, "_ler_texto", lambda prompt: next(saidas))
++    monkeypatch.setattr(cli, "_ler_senha", lambda prompt: SENHA2)
++    assert cli.main(["criar-usuario"]) != 0                         # sem administrador ainda: recusa
++    usuarios.criar_primeiro_admin("admin", "Adm", SENHA)
++    assert cli.main(["criar-usuario", "--perfil", "pedagoga"]) == 0
++    u = usuarios.obter_por_usuario("pedagoga")
++    assert u.perfil == "pedagoga" and u.trocar_senha is True
++
++
++def test_pedagoga_salva_usuario_e_senha_do_sere_e_so_isso_no_assistente(app, monkeypatch):
++    gravado = {}
++    monkeypatch.setattr(rotas, "_persistir_env", lambda valores: gravado.update(valores))
++    monkeypatch.setattr(rotas, "_recarregar_credenciais_em_runtime", lambda: True)
++    c = _cliente(app, "pedagoga")
++    h = _h(c)
++    r = c.post("/web/api/wizard/credenciais_sere/executar", json={"login": "maria.sere", "senha": "segredo-123"}, headers=h)
++    assert r.status_code == 200 and gravado == {"SERE_LOGIN": "maria.sere", "SERE_SENHA": "segredo-123"}
++    assert "segredo-123" not in r.get_data(as_text=True)                    # a senha nunca volta na resposta
++    for passo in ("escola", "funcionarios", "turmas", "alunos", "credenciais_rco"):    # os demais passos seguem só do administrador
++        assert c.post(f"/web/api/wizard/{passo}/executar", json={}, headers=h).status_code == 403, passo
++    html = c.get("/web").get_data(as_text=True)
++    assert 'data-config-editaveis="' in html and "senha_sere" in html.split('data-config-editaveis="')[1].split('"')[0]
++    linha = re.search(r'<div class="config-row" data-config="senha_sere"[^>]*>', html).group(0)
++    assert "data-requer" not in linha                                        # senão o CSS da vitrine esconderia a linha dela
++
++
++@pytest.fixture()
++def auto_zerada(monkeypatch):
++    monkeypatch.setattr(rotas, "_AUTO_PEDAGOGA", {"estado": "nao_iniciado", "etapa": "", "mensagem": "", "iniciado_em": None, "terminado_em": None})
++    monkeypatch.delenv("PEDAGOGA_COLETA_AUTOMATICA", raising=False)
++    iniciadas = []
++    monkeypatch.setattr(rotas, "_auto_pedagoga_trabalho", lambda: iniciadas.append(1))
++    return iniciadas
++
++
++def test_atualizacao_automatica_so_da_pedagoga_e_so_uma_vez(app, monkeypatch, auto_zerada):
++    monkeypatch.setenv("SERE_LOGIN", "maria.sere")
++    monkeypatch.setenv("SERE_SENHA", "segredo-123")
++    assert _cliente(app, "admin").post("/web/api/pedagoga/atualizar-dados", json={}, headers=_h(_cliente(app, "admin"))).status_code == 403
++    c = _cliente(app, "pedagoga")
++    h = _h(c)
++    r1 = c.post("/web/api/pedagoga/atualizar-dados", json={}, headers=h)
++    assert r1.status_code == 200 and r1.get_json()["estado"] == "executando"
++    import time as _t
++    _t.sleep(0.2)
++    assert c.post("/web/api/pedagoga/atualizar-dados", json={}, headers=h).get_json()["estado"] == "executando"
++    assert len(auto_zerada) == 1                                            # a segunda chamada (F5) não inicia outra coleta
++    assert c.get("/web/api/pedagoga/atualizar-dados/status").get_json()["estado"] == "executando"
++
++
++def test_atualizacao_automatica_sem_senha_do_sere_avisa_e_tenta_de_novo_depois(app, monkeypatch, auto_zerada):
++    monkeypatch.setenv("SERE_LOGIN", "cpf")
++    monkeypatch.setenv("SERE_SENHA", "senha_sere")
++    c = _cliente(app, "pedagoga")
++    h = _h(c)
++    assert c.post("/web/api/pedagoga/atualizar-dados", json={}, headers=h).get_json()["estado"] == "sem_credenciais"
++    assert auto_zerada == []
++    monkeypatch.setenv("SERE_LOGIN", "maria.sere")
++    monkeypatch.setenv("SERE_SENHA", "segredo-123")                          # ela salvou a senha: agora começa
++    assert c.post("/web/api/pedagoga/atualizar-dados", json={}, headers=h).get_json()["estado"] == "executando"
++
++
++def test_atualizacao_automatica_pode_ser_desligada(app, monkeypatch, auto_zerada):
++    monkeypatch.setenv("PEDAGOGA_COLETA_AUTOMATICA", "0")
++    monkeypatch.setenv("SERE_LOGIN", "maria.sere")
++    monkeypatch.setenv("SERE_SENHA", "segredo-123")
++    c = _cliente(app, "pedagoga")
++    assert c.post("/web/api/pedagoga/atualizar-dados", json={}, headers=_h(c)).get_json()["estado"] == "desativado"
++    assert auto_zerada == []
++
++
++def _trabalhador(monkeypatch, status_por_chave):
++    """Roda o trabalhador de verdade, com a execução trocada por um fantoche que só registra o status final."""
++    monkeypatch.setattr(rotas, "_AUTO_PEDAGOGA", {"estado": "executando", "etapa": "", "mensagem": "", "iniciado_em": 1, "terminado_em": None})
++    monkeypatch.setattr(rotas, "_EXECUCOES", {})
++    chamadas = []
++
++    def falsa(script, chave, payload, turmas_json):
++        chamadas.append((chave, dict(payload)))
++        rotas._EXECUCOES[chave] = {"status": status_por_chave[chave]}
++
++    monkeypatch.setattr(rotas, "_executar_registrado", falsa)
++    monkeypatch.setattr(rotas.time, "sleep", lambda s: None)
++    rotas._auto_pedagoga_trabalho()
++    return chamadas, rotas._auto_pedagoga_copia()
++
++
++def test_trabalhador_roda_turmas_e_depois_alunos_basico(monkeypatch):
++    chamadas, estado = _trabalhador(monkeypatch, {"turmas": "concluido", "alunos": "concluido"})
++    assert chamadas == [("turmas", {}), ("alunos", {"modo": "basico"})]
++    assert estado["estado"] == "concluido"
++
++
++def test_trabalhador_para_na_primeira_falha_sem_derrubar_nada(monkeypatch):
++    chamadas, estado = _trabalhador(monkeypatch, {"turmas": "erro", "alunos": "concluido"})
++    assert [c for c, _ in chamadas] == ["turmas"]                              # Alunos não roda sobre Turmas que falhou
++    assert estado["estado"] == "erro" and "Turmas" in estado["mensagem"]

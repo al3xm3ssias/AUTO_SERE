@@ -230,7 +230,7 @@ def test_arquivo_corrompido_da_erro_claro_e_nao_apaga(amb):
 # ───────────── modelos ─────────────
 
 def test_modelos_prontos_criar_ajustar_excluir(amb):
-    assert [m["id"] for m in modelos.listar()] == ["livre", "matricula_aprovada", "geo_confirmar_interesse", "chamada_matricula"]
+    assert [m["id"] for m in modelos.listar()] == ["livre", "matricula_aprovada", "geo_confirmar_interesse", "confirmar_interesse_geo", "chamada_matricula"]
     novo = modelos.salvar("Lembrete", "Olá, $RESPONSAVEL! $ALUNO.")
     assert novo["id"] == "lembrete" and not novo["padrao"]
     with pytest.raises(ValueError, match="desconhecido"):
@@ -430,3 +430,67 @@ def test_da_prematricula_usa_o_texto_da_tela_mesmo_sem_salvar_o_modelo(cli, amb)
     # modelo vazio e sem texto: recusa
     r = cli.post("/web/api/whatsapp/fila/da-prematricula", json={"ids": ["111"], "modelo_id": "livre", "texto": "  "})
     assert r.status_code == 400
+
+
+# ───────────── mensagem em massa aos Direcionados GEO ─────────────
+def _geo_massa_2027(alunos):
+    (paths.dados_ano_atual() / "sere_sisgea_2027.json").write_text(
+        json.dumps({"ano_letivo": 2027, "coleta_completa": True, "alunos": alunos}), encoding="utf-8")
+
+
+def _aluno_geo_massa(nome, fone, **extra):
+    base = {"nome": nome, "cgm": "1", "nome_responsavel": "MARIA", "fone_responsavel": fone, "etapa": "Infantil - 4-6 anos",
+            "matricula_confirmada": False, "situacao_lista": "presente", "turma": None}
+    base.update(extra)
+    return base
+
+
+def test_geo_em_massa_uma_mensagem_por_telefone_e_pula_quem_nao_deve_receber(cli, amb):
+    _geo_massa_2027([
+        _aluno_geo_massa("ANA LIMA", N1), _aluno_geo_massa("BETO LIMA", N1),                       # irmãos: mesmo telefone -> UMA mensagem
+        _aluno_geo_massa("CAIO", N2),
+        _aluno_geo_massa("DAVI", N3, matricula_confirmada=True),                              # já confirmou aqui
+        _aluno_geo_massa("ELZA", N3, situacao_lista="ausente"),                               # saiu da lista
+        _aluno_geo_massa("FABIO", ""), _aluno_geo_massa("GINA", "123"),                             # sem telefone / inválido
+    ])
+    resumo = cli.get("/web/api/whatsapp/fila/geo/resumo").get_json()
+    assert resumo["contagem"] == {"mensagens": 2, "alunos": 3, "ausentes": 1, "ja_confirmados": 1, "sem_telefone": 1,
+                                  "telefone_invalido": 1, "fora_da_etapa": 0}
+    assert all("99999" not in a["numero"] for a in resumo["amostra"])                   # número mascarado na tela
+    r = cli.post("/web/api/whatsapp/fila/geo/em-massa", json={})                              # mais de uma mensagem exige confirmo
+    assert r.status_code == 400 and r.get_json()["codigo_erro"] == "falta_confirmacao"
+    assert f.obter_fila()._ler()["itens"] == []
+    r = cli.post("/web/api/whatsapp/fila/geo/em-massa", json={"confirmo": True}).get_json()
+    assert r["resultado"]["adicionados"] == 2 and r["contagem"]["pendente"] == 2
+    itens = f.obter_fila()._ler()["itens"]
+    assert {i["origem"] for i in itens} == {"geo"}
+    irmaos = next(i for i in itens if "ANA LIMA" in i["texto"])
+    assert "ANA LIMA e BETO LIMA" in irmaos["texto"] and "Olá, Maria!" in irmaos["texto"] and "$" not in irmaos["texto"]
+    assert "ano letivo de 2027" in irmaos["texto"]
+    # repetir o pedido não duplica
+    r = cli.post("/web/api/whatsapp/fila/geo/em-massa", json={"confirmo": True}).get_json()
+    assert r["resultado"]["adicionados"] == 0 and r["resultado"]["duplicados"] == 2
+
+
+def test_geo_em_massa_filtra_etapa_e_pode_incluir_confirmados(cli, amb):
+    _geo_massa_2027([_aluno_geo_massa("ANA", N1, etapa="Infantil V"), _aluno_geo_massa("BETO", N2, etapa="1º ano"),
+               _aluno_geo_massa("CAIO", N3, etapa="1º ano", matricula_confirmada=True)])
+    assert cli.get("/web/api/whatsapp/fila/geo/resumo?etapa=1º ano").get_json()["contagem"]["mensagens"] == 1
+    assert cli.get("/web/api/whatsapp/fila/geo/resumo?etapa=1º ano&incluir_confirmados=1").get_json()["contagem"]["mensagens"] == 2
+    assert "Infantil V" in cli.get("/web/api/whatsapp/fila/geo/resumo").get_json()["etapas"]
+
+
+def test_geo_em_massa_responsavel_vazio_e_marcador_sem_dado(cli, amb):
+    _geo_massa_2027([_aluno_geo_massa("ANA", N1, nome_responsavel="")])
+    cli.post("/web/api/whatsapp/fila/geo/em-massa", json={"confirmo": True})
+    assert f.obter_fila()._ler()["itens"][0]["texto"].startswith("Olá, responsável!")
+    # $TURMA sem turma no planejamento: recusa a mensagem em vez de mandar o marcador cru
+    r = cli.post("/web/api/whatsapp/fila/geo/em-massa", json={"confirmo": True, "texto": "Oi $ALUNO da turma $TURMA"}).get_json()
+    assert r["resultado"]["adicionados"] == 0 and "$TURMA" in r["resultado"]["invalidos"][0]["erro"]
+    assert cli.post("/web/api/whatsapp/fila/geo/em-massa", json={"confirmo": True, "texto": "Oi $FULANO"}).status_code == 400
+
+
+def test_geo_em_massa_sem_arquivo_explica(cli, amb):
+    r = cli.get("/web/api/whatsapp/fila/geo/resumo")
+    assert r.status_code == 400 and "sere_sisgea_2027.json" in r.get_json()["erro"]
+    assert cli.post("/web/api/whatsapp/fila/geo/em-massa", json={"confirmo": True}).status_code == 400

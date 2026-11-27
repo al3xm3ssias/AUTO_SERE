@@ -66,3 +66,22 @@ body[data-perfil-restrito] #cfg-flags,
 body[data-perfil-restrito] #cfg-navegador,
 body[data-perfil-restrito] #btn-historico-limpar { display: none !important; }
 .usr-selo.pedagoga { background: var(--badge-lime-bg); border-color: var(--badge-lime-brd); color: var(--lime); }
+
+/* Usuários e segurança: select e botões no tema do sistema, auditoria em tabela agrupada por dia */
+.usr-tabela select, .usr-linha-form select, .usr-linha-form input[type=text] { background: var(--surface2); color: var(--txt); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 5px 8px; font-size: .78rem; font-family: inherit; }
+.usr-tabela tbody tr:hover { background: var(--surface); }
+.usr-acoes button { white-space: nowrap; }
+.usr-audit { max-height: 420px; padding: 0; font-family: inherit; font-size: .76rem; }
+.usr-audit-tabela { width: 100%; border-collapse: collapse; }
+.usr-audit-tabela th { position: sticky; top: 0; background: var(--surface); color: var(--txt2); font-weight: 500; font-size: .68rem;
+  text-transform: uppercase; letter-spacing: .04em; text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); }
+.usr-audit-tabela td { padding: 5px 10px; border-bottom: 1px solid var(--border); color: var(--txt); vertical-align: middle; }
+.usr-audit-tabela tr.usr-audit-dia td { background: var(--surface2); color: var(--txt2); font-size: .7rem; font-weight: 600; text-transform: capitalize; letter-spacing: .02em; }
+.usr-audit-hora, .usr-audit-ip { font-family: var(--mono); font-size: .72rem; color: var(--txt2); white-space: nowrap; }
+.usr-audit-det { color: var(--txt2); word-break: break-word; }
+
+/* Pedagoga: aviso discreto da atualização automática de Turmas e Alunos */
+#aviso-atualizacao { position: fixed; right: 14px; bottom: 14px; z-index: 50; max-width: 320px; padding: 7px 12px; font-size: .72rem;
+  color: var(--txt2); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); }
+#aviso-atualizacao.ruim { color: var(--txt); border-color: var(--badge-amber-brd); background: var(--badge-amber-bg); }

@@ -17,7 +17,7 @@ LISTA DE PERMISSÕES PRÓPRIA, com a lógica invertida: o que não está na list
 A lista (`_REGRAS_PEDAGOGA`) só tem leitura: telas Turmas, Alunos e Encaminhamentos SUS, o painel resumido, e executar/acompanhar as
 automações `turmas` e `alunos` (a coleta de `alunos` cobre o modo básico, alunos.py, e o completo, alunos_completo.py). Essas coletas só
 LEEM do SERE (navegam e consultam) e atualizam o cache local em JSON; nenhuma grava, envia ou apaga nada no SERE. Nada de configuração
-é gravável por ela, a não ser a própria senha. O que o administrador/operador já fazem NÃO muda: para eles vale exatamente a tabela acima.
+é gravável por ela, a não ser a própria senha de acesso e o usuário/senha do SERE (as coletas dela precisam entrar no SERE). O que o administrador/operador já fazem NÃO muda: para eles vale exatamente a tabela acima.
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ GRUPOS_AUTOMACAO_PEDAGOGA = frozenset({"cadastros"})        # "Turmas e alunos" 
 CONFIGURACOES_PEDAGOGA = frozenset({"minha_conta", "escola", "ano_letivo", "navegador", "backup_automatico", "senha_sere", "temas", "perfil"})
 # Destas, só estas aceitam alteração (a própria senha e o tema, que é do navegador). As demais aparecem para CONSULTA: a Pedagoga vê o
 # que as coletas usam, mas quem grava ano letivo, senha do SERE, dados da escola etc. é o administrador.
-CONFIGURACOES_PEDAGOGA_EDITAVEIS = frozenset({"minha_conta", "temas"})
+CONFIGURACOES_PEDAGOGA_EDITAVEIS = frozenset({"minha_conta", "temas", "senha_sere"})
 
 # (método ou None = qualquer, expressão, perfil mínimo). A ORDEM IMPORTA: a primeira que casa vale.
 _TABELA: list[tuple[tuple[str, ...] | None, re.Pattern, str]] = [
@@ -101,6 +101,11 @@ _REGRAS_PEDAGOGA: list[tuple[tuple[str, ...], re.Pattern]] = [(m, re.compile(e))
     (("GET",), rf"^/web/api/automacoes/(?:{_CHAVES_PEDAGOGA})/historico/[^/]+$"),
     (("POST",), rf"^/web/api/automacoes/(?:{_CHAVES_PEDAGOGA})/(executar|previa|resposta|cancelar)$"),
     (("POST",), r"^/web/api/cgm/analisar$"),                  # só confere o texto de CGMs digitados (não grava nada)
+    # ÚNICA gravação de configuração dela: usuário e senha do SERE (as coletas dela precisam entrar no SERE). A rota do wizard confere de novo.
+    (("POST",), r"^/web/api/wizard/credenciais_sere/executar$"),
+    # atualização silenciosa de Turmas e Alunos ao abrir o sistema (começa uma vez por abertura; só dispara as duas coletas dela)
+    (("GET",), r"^/web/api/pedagoga/atualizar-dados/status$"),
+    (("POST",), r"^/web/api/pedagoga/atualizar-dados$"),
 ]]
 
 

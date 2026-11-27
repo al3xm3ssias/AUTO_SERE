@@ -34,7 +34,7 @@ from lxml import etree
 # ----------------------------------------------------------------------------
 TEMPLATE = "REQUERIMENTO_MATRICULA_2027.docx"
 
-# Sem --saida, os PDFs vão para <base>/<ano letivo atual>/ (a mesma pasta-base dos modelos de parecer: dados/ ou
+# Sem --saida, os PDFs vão para <base>/<ano letivo atual>/REQUERIMENTO_MATRICULA/ (a mesma pasta-base dos modelos de parecer: dados/ ou
 # AUTO_SERE_PARECERES_BASE). O modelo enviado pela tela fica em <base>/MODELO/.
 PASTA_SAIDA_FALLBACK = "pdfs_matricula"       # só se o programa não estiver instalado (script solto)
 NOME_MODELO_ENVIADO = "REQUERIMENTO_MATRICULA.docx"
@@ -59,7 +59,7 @@ TAGS_TEXTO = [
     "ESCOLA", "NOME_ALUNO", "CGM", "DT.N", "N_RG", "N_CIN", "N_CPF",
     "NOME_RESP1", "RG_RESP1", "CPF_RESP1", "TEL_RESP1", "PROF_RESP1",    # Filiação 1
     "NOME_RESP2", "RG_RESP2", "CPF_RESP2", "TEL_RESP2", "PROF_RESP2",    # Filiação 2
-    "NOME_RESP", "DOC_RESP", "CPF_RESP", "TEL_RESP",
+    "NOME_RESP", "DOC_RESP", "CPF_RESP", "TEL_RESP", "Email_Resp", "NIS_RESP", "NIS_ALUNO",
     "ENDERECO", "N", "BAIRRO", "CEP", "U.C",
 ]
 TAGS_CHECK = [
@@ -70,7 +70,7 @@ TAGS_CHECK = [
     # tipo de construção / ocupação / moradia
     "ALV", "MAD", "MIS", "CS.P", "CS.C", "CS.A", "CS",
     # concessionária (GEO)
-    "CP", "SAN", "N.P",
+    "CP", "SAN", "N.P", "N.D.CONS",
     # serviços públicos
     "A.E", "I.P", "E.E", "E.S", "C.L",
     # quem mora com o aluno
@@ -78,7 +78,9 @@ TAGS_CHECK = [
     # itens na moradia
     "BANHEIRO", "FRE", "M.L", "TV", "CEL", "COMP", "RAD", "TAB", "MOTO", "GEL", "BIC", "CARRO",
     # renda
-    "S.R", "1S", "1A3", "3A5", "A5", "N.D",
+    "S.R", "1S", "1A3", "3A5", "A5", "OP.N.I",
+    # sexo / Bolsa Família
+    "FEM", "MASC", "B.F",
     # internet
     "F.O", "V.S", "4G", "COMPAR", "V.C", "V.R", "PUB", "N.PO",
 ]
@@ -116,7 +118,7 @@ def modelo_enviado():
 
 
 def pasta_saida_padrao():
-    """<base>/<ano letivo atual>/ — ex.: dados/2027/."""
+    """<base>/<ano letivo atual>/REQUERIMENTO_MATRICULA/ — ex.: dados/2027/REQUERIMENTO_MATRICULA/."""
     base = _pasta_base()
     if base is None:
         return Path(PASTA_SAIDA_FALLBACK)
@@ -263,6 +265,12 @@ def montar_getters(cab):
         "endereco":  C.idx("rua/endereco"),
         "cep":       C.idx("cep", inicio=True),
         "geo":       C.idx("identificacao geo"),
+        "sexo":      C.idx("sexo do aluno", inicio=True),
+        "unid_cons": C.idx("a unidade consumidora", inicio=True),
+        "email_form": C.idx("endereco de e-mail", inicio=True),
+        # "Documento do responsável 1 (RG e CPF)" (a foto do RG) NÃO é lido; estes são os campos de texto (RG ou CIN):
+        "r1_doc":    C.idx("documento do responsavel 1:", inicio=True),
+        "r2_doc_cin": C.idx("documento do responsavel 2:", inicio=True),
         "r1_nome":   C.idx("responsavel 1 (nome)", inicio=True),
         "r1_tel":    C.idx("telefone responsavel 1", inicio=True),
         "r1_cpf":    C.idx("cpf responsavel 1", inicio=True),
@@ -316,6 +324,14 @@ def valores_da_linha(g, avisos):
     v["N_CPF"] = g("cpf")
     v["CGM"] = ""     # não existe na planilha
     v["N_CIN"] = ""   # não existe na planilha
+    v["NIS_ALUNO"] = g("nis_aluno")
+
+    sexo = g("sexo")
+    v["FEM"] = tem(sexo, r"^femin", r"\bfemin")
+    v["MASC"] = tem(sexo, r"^mascul", r"\bmascul")
+    if sexo and not (v["FEM"] or v["MASC"]):
+        avisos.append(f"sexo não reconhecido: '{sexo}'")
+    v["B.F"] = tem(g("bolsa"), r"^sim\b")
 
     # ---- autodeclaração
     cor = g("cor")
@@ -328,9 +344,13 @@ def valores_da_linha(g, avisos):
         avisos.append(f"cor/raça não reconhecida: '{cor}'")
 
     # ---- responsáveis: Responsável 1 -> Filiação 1 ($..._RESP1), Responsável 2 -> Filiação 2 ($..._RESP2)
-    # A coluna "Documento do responsável 1" é uma foto do RG e é ignorada: sem RG nem documento do responsável 1.
-    r1 = dict(nome=g("r1_nome"), doc="", cpf=g("r1_cpf"), tel=g("r1_tel"), prof=g("r1_prof"))
-    r2 = dict(nome=g("r2_nome"), doc=extrair_rg(g("r2_doc")), cpf=g("r2_cpf"), tel=g("r2_tel"), prof=g("r2_prof"))
+    # O documento vem de "Documento do responsável 1/2: (RG ou CIN)". A coluna antiga "Documento do responsável 1
+    # (RG e CPF)" é uma foto do RG e continua ignorada; a do responsável 2 só serve de reserva se a nova vier vazia.
+    doc1 = g("r1_doc")
+    doc2 = g("r2_doc_cin")
+    r1 = dict(nome=g("r1_nome"), doc=extrair_rg(doc1) or doc1, cpf=g("r1_cpf"), tel=g("r1_tel"), prof=g("r1_prof"))
+    r2 = dict(nome=g("r2_nome"), doc=extrair_rg(doc2) or doc2 or extrair_rg(g("r2_doc")), cpf=g("r2_cpf"),
+              tel=g("r2_tel"), prof=g("r2_prof"))
     if not r2["cpf"]:
         m = CPF_RE.search(g("r2_doc"))
         r2["cpf"] = m.group(0) if m else ""
@@ -344,9 +364,11 @@ def valores_da_linha(g, avisos):
 
     # bloco "Responsável legal" = Responsável 1
     v["NOME_RESP"] = r1["nome"].upper()
-    v["DOC_RESP"] = ""
+    v["DOC_RESP"] = r1["doc"]
     v["CPF_RESP"] = r1["cpf"]
     v["TEL_RESP"] = r1["tel"]
+    v["Email_Resp"] = g("r1_email") or g("email_form")
+    v["NIS_RESP"] = g("nis_resp")
     v["V.P"] = RESP1_PAPEL == "PAI"
     v["V.M"] = RESP1_PAPEL == "MAE"
     v["V.T"] = RESP1_PAPEL == "TUTOR"
@@ -359,9 +381,13 @@ def valores_da_linha(g, avisos):
     v["CEP"] = g("cep")
     geo = g("geo")
     v["U.C"] = geo
-    v["CP"] = tem(geo, r"copel")
-    v["SAN"] = tem(geo, r"sanepar")
-    v["N.P"] = False
+    uc = g("unid_cons")                                   # "A Unidade consumidora é?"
+    v["CP"] = tem(geo, r"copel") or tem(uc, r"copel", r"energia", r"\bluz\b")
+    v["SAN"] = tem(geo, r"sanepar") or tem(uc, r"sanepar", r"\bagua\b")
+    v["N.P"] = tem(uc, r"nao possu", r"nao tenho", r"nenhum")
+    v["N.D.CONS"] = not (v["CP"] or v["SAN"] or v["N.P"]) and (not uc or tem(uc, r"nao declar", r"nao inform"))
+    if uc and not (v["CP"] or v["SAN"] or v["N.P"] or v["N.D.CONS"]):
+        avisos.append(f"unidade consumidora não reconhecida: '{uc}'")
 
     # ---- construção / ocupação / moradia
     c = g("construc")
@@ -420,8 +446,8 @@ def valores_da_linha(g, avisos):
     v["1A3"] = tem(r, r"0?1 (ate|a) 0?3", r"1 (ate|a) 3")
     v["3A5"] = tem(r, r"0?3 (ate|a) 0?5", r"3 (ate|a) 5")
     v["A5"] = tem(r, r"acima de 0?5", r"mais de 0?5")
-    v["N.D"] = tem(r, r"nao declar")
-    if r and not any(v[k] for k in ("S.R", "1S", "1A3", "3A5", "A5", "N.D")):
+    v["OP.N.I"] = not r or tem(r, r"nao declar", r"nao inform")
+    if r and not any(v[k] for k in ("S.R", "1S", "1A3", "3A5", "A5", "OP.N.I")):
         avisos.append(f"renda não reconhecida: '{r}'")
 
     # ---- internet
@@ -675,7 +701,7 @@ def main():
                     help="modelo .docx (padrão: o enviado em Configurações → Modelo do requerimento; "
                          f"se não houver, {TEMPLATE})")
     ap.add_argument("--saida", default=None,
-                    help="pasta dos PDFs (padrão: <base>/<ano letivo atual>/, ex.: dados/2027/)")
+                    help="pasta dos PDFs (padrão: <base>/<ano letivo atual>/REQUERIMENTO_MATRICULA/)")
     ap.add_argument("--linha", type=int, help="só esta resposta (1 = primeira)")
     ap.add_argument("--nome", help="só alunos cujo nome contenha este texto")
     ap.add_argument("--juntar", action="store_true", help="gera também um PDF único com todos")

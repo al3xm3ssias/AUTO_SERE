@@ -118,7 +118,25 @@
         auditoriaBox.appendChild(el("p", { style: "font-size:.76rem;margin-bottom:6px;color:" + (c.integra ? "var(--lime)" : "var(--rose)"),
           texto: c.integra ? "Registro íntegro (" + c.linhas + " eventos, sem quebras na corrente)." : "ATENÇÃO: a corrente do registro está quebrada na linha " + c.primeira_quebra + " — o arquivo foi alterado." }));
         var caixa = el("div", { classe: "usr-audit" });
-        d.eventos.forEach(function (e) { caixa.appendChild(el("div", { texto: dataBr(e.ts) + " · " + (e.descricao || e.evento) + (e.usuario ? " · " + e.usuario : "") + (e.ip ? " · " + e.ip : "") + (e.detalhe ? " · " + e.detalhe : "") })); });
+        var corpo = el("tbody", {});
+        var diaAtual = "";
+        d.eventos.forEach(function (e) {
+          var dt = e.ts ? new Date(e.ts) : null, valida = dt && !isNaN(dt);
+          var dia = valida ? dt.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" }) : "Sem data";
+          if (dia !== diaAtual) {
+            diaAtual = dia;
+            corpo.appendChild(el("tr", { classe: "usr-audit-dia" }, [el("td", { colspan: "5", texto: dia })]));
+          }
+          var ruim = /negad|recusad|bloque|falh|erro|limite|tentativa/i.test(e.evento || "");
+          corpo.appendChild(el("tr", {}, [
+            el("td", { classe: "usr-audit-hora", texto: valida ? dt.toLocaleTimeString("pt-BR") : "—" }),
+            el("td", {}, [el("span", { classe: "usr-selo" + (ruim ? " ruim" : ""), texto: e.descricao || e.evento })]),
+            el("td", { texto: e.usuario || "—" }),
+            el("td", { classe: "usr-audit-ip", texto: e.ip || "—" }),
+            el("td", { classe: "usr-audit-det", texto: e.detalhe || "" })]));
+        });
+        caixa.appendChild(el("table", { classe: "usr-audit-tabela" }, [
+          el("thead", {}, [el("tr", {}, ["Hora", "Evento", "Usuário", "IP", "Detalhe"].map(function (h) { return el("th", { texto: h }); }))]), corpo]));
         auditoriaBox.appendChild(caixa);
       }).catch(function () { /* sem permissão ou sem registro ainda */ });
     }

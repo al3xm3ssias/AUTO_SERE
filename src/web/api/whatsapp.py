@@ -15,6 +15,8 @@ API do WhatsApp para a interface web  —  prefixo /web/api/whatsapp
     POST /fila/da-prematricula       põe na fila os alunos escolhidos ({ids, modelo_id})
     GET  /fila/geo                   alunos de sere_sisgea_<ano+1>.json (Direcionados GEO), para filtrar por etapa/matrícula
     POST /fila/do-geo                põe na fila os alunos GEO escolhidos ({ids, modelo_id, texto})
+    GET  /fila/geo/resumo            resumo dos Direcionados GEO que podem receber a mensagem em massa (Pré matrícula)
+    POST /fila/geo/em-massa          põe na fila UMA mensagem por telefone ({modelo_id, texto, etapa, incluir_confirmados, confirmo})
     POST /fila/config    intervalo entre mensagens, limite por dia, continuar no dia seguinte
     POST /fila/iniciar | /fila/pausar | /fila/cancelar-pendentes | /fila/limpar-historico
     POST /fila/itens/<id>/cancelar | /fila/itens/<id>/repetir
@@ -481,6 +483,131 @@ def fila_do_geo():
         r = obter_fila().adicionar(itens, origem="geo") if itens else {"adicionados": 0, "duplicados": 0, "invalidos": []}
         r["invalidos"] = list(r.get("invalidos") or []) + recusados
         r["sem_telefone"] = sem_telefone
+        return _resposta_fila(resultado=r)
+    except ValueError as exc:
+        return _erro(str(exc))
+
+
+# ───────────────────── mensagem em massa aos Direcionados GEO ─────────────────────
+GEO_MODELO_PADRAO = "confirmar_interesse_geo"
+
+
+def _juntar_nomes(nomes: list[str]) -> str:
+    """["ANA", "BETO", "CAIO"] -> "ANA, BETO e CAIO" (irmãos com o mesmo telefone recebem UMA mensagem só)."""
+    return nomes[0] if len(nomes) == 1 else ", ".join(nomes[:-1]) + " e " + nomes[-1]
+
+
+def _geo_contatos_massa(etapa: str = "", incluir_confirmados: bool = False) -> dict:
+    """
+    Direcionados GEO do PRÓXIMO ano letivo (dados/<ano em uso>/sere_sisgea_<ano+1>.json) prontos para a fila.
+    Fica de fora: quem saiu da lista do SERE (ausente), quem já tem matrícula confirmada aqui (a menos que
+    ``incluir_confirmados``), quem está sem telefone e quem tem telefone que não dá para o WhatsApp.
+    Alunos com o MESMO telefone (irmãos) viram UM contato, com os nomes juntos em $ALUNO: o responsável não recebe duas mensagens.
+    Devolve {"ano", "arquivo", "coletado_em", "coleta_completa", "contatos": [{numero, nomes, alunos, responsavel, turma, etapas}], "contagem": {...}}.
+    ValueError (com o motivo) se o arquivo não existe ou está ilegível.
+    """
+    from src.comum import direcionados_geo as _geo
+    from src.comum import paths
+    from src.comum.arquivos_json import ArquivoJsonCorrompidoError
+
+    ano = int(paths.ano_atual()) + 1
+    try:
+        g = _geo.carregar_direcionados(paths.dados_ano_atual(), ano)
+    except ArquivoJsonCorrompidoError as exc:
+        raise ValueError(f"{_geo.nome_arquivo(ano)}: {exc}") from exc
+    if not g["existe"] or not g["alunos"]:
+        raise ValueError(f"Ainda não existe {_geo.nome_arquivo(ano)} (ou está vazio). Rode a automação \"Direcionados GEO\" para gerá-lo.")
+
+    ausentes = confirmados = sem_telefone = invalidos = fora_da_etapa = 0
+    por_numero: dict[str, dict] = {}
+    for a in g["alunos"]:
+        if a["situacao_lista"] == "ausente":
+            ausentes += 1
+            continue
+        if etapa and a["etapa"] != etapa:
+            fora_da_etapa += 1
+            continue
+        if a["matricula_confirmada"] and not incluir_confirmados:
+            confirmados += 1
+            continue
+        if not a["telefone"]:
+            sem_telefone += 1
+            continue
+        try:
+            numero = normalizar_numero(a["telefone"])
+        except ValueError:
+            invalidos += 1
+            continue
+        c = por_numero.setdefault(numero, {"numero": numero, "alunos": [], "responsaveis": [], "turmas": [], "etapas": []})
+        c["alunos"].append(a["nome"])
+        for chave, valor in (("responsaveis", a["responsavel"]), ("turmas", a["turma"]), ("etapas", a["etapa"])):
+            if valor and valor not in c[chave]:
+                c[chave].append(valor)
+    contatos = []
+    for c in por_numero.values():
+        contatos.append({"numero": c["numero"], "alunos": c["alunos"], "nomes": _juntar_nomes(c["alunos"]),
+                         "responsavel": c["responsaveis"][0] if c["responsaveis"] else "",
+                         "turma": c["turmas"][0] if len(c["turmas"]) == 1 else "", "etapas": c["etapas"]})
+    contatos.sort(key=lambda c: (c["etapas"][0].lower() if c["etapas"] else "", c["alunos"][0].lower()))
+    return {"ano": ano, "arquivo": g["arquivo"], "coletado_em": g["coletado_em"], "coleta_completa": g["coleta_completa"],
+            "contatos": contatos,
+            "contagem": {"mensagens": len(contatos), "alunos": sum(len(c["alunos"]) for c in contatos), "ausentes": ausentes,
+                         "ja_confirmados": confirmados, "sem_telefone": sem_telefone, "telefone_invalido": invalidos,
+                         "fora_da_etapa": fora_da_etapa}}
+
+
+@whatsapp_bp.route("/fila/geo/resumo")
+def fila_geo_resumo():
+    etapa = str(request.args.get("etapa") or "").strip()
+    incluir = str(request.args.get("incluir_confirmados") or "").lower() in ("1", "true", "sim")
+    try:
+        p = _geo_contatos_massa(etapa, incluir)
+        from src.comum import direcionados_geo as _geo
+        from src.comum import paths
+        todas = _geo.carregar_direcionados(paths.dados_ano_atual(), p["ano"])["alunos"]
+    except ValueError as exc:
+        return _erro(str(exc))
+    return jsonify({"ano": p["ano"], "arquivo": p["arquivo"], "coletado_em": p["coletado_em"], "coleta_completa": p["coleta_completa"],
+                    "contagem": p["contagem"], "etapas": sorted({a["etapa"] for a in todas if a["etapa"]}),
+                    "amostra": [{"nomes": c["nomes"], "responsavel": c["responsavel"], "numero": mascarar_numero(c["numero"])}
+                                for c in p["contatos"][:8]]})
+
+
+@whatsapp_bp.route("/fila/geo/em-massa", methods=["POST"])
+def fila_geo_em_massa():
+    """Põe na fila uma mensagem por telefone dos Direcionados GEO. Só ENFILEIRA: o envio é a fila (pausa, limite do dia, envio real)."""
+    from src.comum import direcionados_geo as _geo
+    from src.comum import modelos_whatsapp as _modelos
+    corpo = request.get_json(silent=True) or {}
+    modelo_id = str(corpo.get("modelo_id") or GEO_MODELO_PADRAO)
+    if modelo_id == COMUNICADO_ID:
+        return _erro("O comunicado de matrícula é para quem já tem vaga. Para os Direcionados GEO, escolha outro modelo.")
+    texto_tela = str(corpo.get("texto") or "").strip()
+    etapa = str(corpo.get("etapa") or "").strip()
+    try:
+        achado = _modelos.obter(modelo_id)
+        base = texto_tela or (achado["texto"] if achado else "")
+        if not base.strip():
+            return _erro("Escolha um modelo com texto (ou escreva a mensagem).")
+        _modelos.conferir_marcadores(base)
+        p = _geo_contatos_massa(etapa, bool(corpo.get("incluir_confirmados")))
+        if not p["contatos"]:
+            return _erro("Nenhum direcionado GEO pode receber a mensagem (veja os motivos no resumo).", contagem=p["contagem"])
+        if len(p["contatos"]) > 1 and not corpo.get("confirmo"):
+            return _erro(f"Confirme que quer pôr {len(p['contatos'])} mensagens na fila.", codigo_erro="falta_confirmacao")
+        base_ctx = _modelos.contexto_base()
+        itens, recusados = [], []
+        for c in p["contatos"]:
+            ctx = {**base_ctx, "ALUNO": c["nomes"], "TURMA": c["turma"], "RESPONSAVEL": _geo.primeiro_nome(c["responsavel"]) or "responsável"}
+            texto = _modelos.renderizar(base, ctx)
+            sobra = _modelos.marcadores_sobrando(texto)
+            if sobra:
+                recusados.append({"nome": c["nomes"], "erro": "faltou o dado de " + ", ".join("$" + m for m in sobra)})
+                continue
+            itens.append({"numero": c["numero"], "nome": c["nomes"], "texto": texto})
+        r = obter_fila().adicionar(itens, origem="geo") if itens else {"adicionados": 0, "duplicados": 0, "invalidos": []}
+        r["invalidos"] = list(r.get("invalidos") or []) + recusados
+        r["resumo_geo"] = p["contagem"]
         return _resposta_fila(resultado=r)
     except ValueError as exc:
         return _erro(str(exc))

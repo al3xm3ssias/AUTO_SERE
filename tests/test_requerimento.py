@@ -74,7 +74,7 @@ def _docx_bytes(texto="$NOME_ALUNO"):
 
 
 def test_pdfs_vao_para_a_pasta_do_ano_letivo(base):
-    assert pr.pasta_saida_padrao() == base / "2027"
+    assert pr.pasta_saida_padrao() == base / "2027" / "REQUERIMENTO_MATRICULA"
 
 
 def test_modelo_enviado_fica_na_pasta_de_modelos(base):
@@ -181,3 +181,39 @@ def test_conversao_para_pdf_nao_abre_janela_de_console(monkeypatch, tmp_path):
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: visto.update(k))
     conversao_pdf.docx_para_pdf([tmp_path / "a.docx"], tmp_path)
     assert visto.get("creationflags") == 0x08000000
+
+
+CAB2 = CAB + ["Recebe o Bolsa família?", "Número NIS estudante", "Número NIS responsável", "Renda familiar (selecionar 1 opção):",
+              "Documento do responsável 1: (RG ou CIN)", "Documento do responsável 2: (RG ou CIN)", "A Unidade consumidora é?",
+              "Endereço de e-mail", "Sexo do aluno"]
+
+
+def _valores2(**campos):
+    resp = RESP + ["Sim", "123456", "654321", "Não declarou", "12.111.222-3", "9.876.543-2", "Da COPEL (energia elétrica)",
+                   "familia@x.com", "Feminino"]
+    for nome, valor in campos.items():
+        resp[[c.split(":")[0].split(" (")[0] for c in CAB2].index(nome)] = valor
+    get = pr.montar_getters(CAB2)
+    avisos = []
+    return pr.valores_da_linha(lambda k: get(resp, k), avisos), avisos
+
+
+def test_colunas_novas_documento_texto_sexo_nis_bolsa_email_e_renda():
+    v, avisos = _valores2()
+    assert v["RG_RESP1"] == v["DOC_RESP"] == "12.111.222-3" and v["RG_RESP2"] == "9.876.543-2"   # coluna (RG ou CIN), não a foto
+    assert "foto-do-rg" not in str(v.values())
+    assert v["FEM"] is True and v["MASC"] is False and v["B.F"] is True
+    assert (v["NIS_ALUNO"], v["NIS_RESP"], v["Email_Resp"]) == ("123456", "654321", "a@x.com")     # e-mail do responsável 1 primeiro
+    assert v["OP.N.I"] is True and v["1A3"] is False
+    assert (v["CP"], v["SAN"], v["N.P"], v["N.D.CONS"]) == (True, False, False, False) and avisos == []
+
+
+def test_email_do_formulario_e_reserva_e_nao_declarou_da_unidade_consumidora():
+    v, _ = _valores2(**{"E-mail responsável 1": "", "A Unidade consumidora é?": ""})
+    assert v["Email_Resp"] == "familia@x.com" and v["N.D.CONS"] is True and v["CP"] is False
+
+
+def test_modelo_novo_so_usa_tags_conhecidas():
+    for tag in ("NOME_RESP1", "Email_Resp", "NIS_RESP", "NIS_ALUNO", "FEM", "MASC", "B.F", "N.D.CONS", "OP.N.I"):
+        assert tag in pr.TODAS_TAGS
+    assert "N.D" not in pr.TODAS_TAGS

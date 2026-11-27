@@ -137,4 +137,102 @@
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", iniciar); else iniciar();
+
+  /* ───── Mensagem em massa: põe na fila do WhatsApp (uma por telefone). Não envia nada: a fila é que envia. ───── */
+  const massa = { modelos: [], carregando: false };
+  const BASE_WA = "/web/api/whatsapp";
+
+  async function chamarWa(caminho, metodo, corpo) {
+    const opts = { method: metodo || "GET", headers: { "Content-Type": "application/json" } };
+    if (corpo) opts.body = JSON.stringify(corpo);
+    const res = await fetch(BASE_WA + caminho, opts);
+    let dados = {};
+    try { dados = await res.json(); } catch (e) { /* sem corpo */ }
+    return { ok: res.ok, dados };
+  }
+
+  function parametrosMassa() {
+    const q = new URLSearchParams();
+    if ($("pg-massa-etapa").value) q.set("etapa", $("pg-massa-etapa").value);
+    if ($("pg-massa-confirmados").checked) q.set("incluir_confirmados", "1");
+    return q.toString();
+  }
+
+  async function atualizarResumoMassa() {
+    const r = await chamarWa("/fila/geo/resumo" + (parametrosMassa() ? "?" + parametrosMassa() : ""));
+    const caixa = $("pg-massa-cartoes");
+    if (!r.ok) { caixa.innerHTML = ""; $("pg-massa-amostra").textContent = r.dados.erro || "Não foi possível ler os direcionados GEO."; $("pg-massa-enfileirar").disabled = true; return; }
+    const c = r.dados.contagem;
+    const cartao = (rot, val, sub, cor) => `<div class="stat-card"><div class="stat-lbl">${esc(rot)}</div><div class="stat-val v-${cor}">${esc(val)}</div><div class="stat-sub">${esc(sub)}</div></div>`;
+    caixa.innerHTML = [
+      cartao("Mensagens", c.mensagens, `${c.alunos} aluno(s)`, "lime"),
+      cartao("Já confirmados", c.ja_confirmados, "não recebem", "cyan"),
+      cartao("Sem telefone", c.sem_telefone + c.telefone_invalido, "não dá para enviar", "amber"),
+      cartao("Ausentes da lista", c.ausentes, "não recebem", "rose"),
+    ].join("");
+    const sel = $("pg-massa-etapa");
+    if (sel.options.length <= 1) sel.innerHTML = `<option value="">Todas as etapas</option>` + (r.dados.etapas || []).map((e) => `<option value="${esc(e)}">${esc(e)}</option>`).join("");
+    $("pg-massa-amostra").textContent = (r.dados.amostra || []).length
+      ? "Primeiros da fila: " + r.dados.amostra.map((a) => `${a.nomes} (${a.numero})`).join(" · ") : "Nenhum direcionado pode receber a mensagem.";
+    $("pg-massa-enfileirar").disabled = !c.mensagens;
+    $("pg-massa-enfileirar").dataset.n = c.mensagens;
+    if (r.dados.coleta_completa === false) $("pg-massa-amostra").textContent += " · ATENÇÃO: a última coleta foi incompleta, rode \"Direcionados GEO\" de novo antes de enviar.";
+  }
+
+  async function abrirMassa() {
+    $("pg-massa").style.display = "";
+    $("pg-massa-ir").hidden = true;
+    const m = await chamarWa("/fila/modelos");
+    massa.modelos = (m.dados.modelos || []).filter((x) => x.id !== "livre" && x.id !== "comunicado");
+    const sel = $("pg-massa-modelo");
+    sel.innerHTML = massa.modelos.map((x) => `<option value="${esc(x.id)}"${x.id === "confirmar_interesse_geo" ? " selected" : ""}>${esc(x.nome)}</option>`).join("");
+    trocarModelo();
+    await atualizarResumoMassa();
+  }
+
+  function trocarModelo() {
+    const m = massa.modelos.find((x) => x.id === $("pg-massa-modelo").value);
+    $("pg-massa-texto").value = m ? m.texto : "";
+  }
+
+  async function enfileirarMassa() {
+    const n = Number($("pg-massa-enfileirar").dataset.n || 0);
+    if (!n) return;
+    if (!confirm(`Pôr ${n} mensagem(ns) na fila do WhatsApp?\n\nNada é enviado agora: o envio só começa quando você iniciar a fila na tela WhatsApp, uma mensagem por vez, com pausa entre elas.`)) return;
+    const botao = $("pg-massa-enfileirar");
+    botao.disabled = true;
+    try {
+      const r = await chamarWa("/fila/geo/em-massa", "POST", {
+        modelo_id: $("pg-massa-modelo").value, texto: $("pg-massa-texto").value, etapa: $("pg-massa-etapa").value,
+        incluir_confirmados: $("pg-massa-confirmados").checked, confirmo: true,
+      });
+      if (!r.ok) { toast(r.dados.erro || "Não foi possível pôr na fila."); return; }
+      const res = r.dados.resultado || {};
+      const partes = [`${res.adicionados || 0} na fila`];
+      if (res.duplicados) partes.push(`${res.duplicados} já estavam (mesmo texto, mesmo número)`);
+      if ((res.invalidos || []).length) partes.push(`${res.invalidos.length} recusada(s)`);
+      toast(partes.join(" · "));
+      $("pg-massa-ir").hidden = false;
+    } catch (e) {
+      toast("Falha ao falar com o servidor.");
+      console.warn("Mensagem em massa GEO:", e);
+    } finally {
+      botao.disabled = false;
+      atualizarResumoMassa();
+    }
+  }
+
+  function iniciarMassa() {
+    const abrirBtn = $("pg-massa-abrir");
+    if (!abrirBtn) return;
+    abrirBtn.addEventListener("click", abrirMassa);
+    $("pg-massa-fechar").addEventListener("click", () => { $("pg-massa").style.display = "none"; });
+    $("pg-massa-modelo").addEventListener("change", trocarModelo);
+    $("pg-massa-etapa").addEventListener("change", atualizarResumoMassa);
+    $("pg-massa-confirmados").addEventListener("change", atualizarResumoMassa);
+    $("pg-massa-enfileirar").addEventListener("click", enfileirarMassa);
+    $("pg-massa-ir").addEventListener("click", () => document.querySelector('.nav-item[data-view="whatsapp"]')?.click());
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", iniciarMassa); else iniciarMassa();
 })();
