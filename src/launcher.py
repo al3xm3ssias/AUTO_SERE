@@ -331,28 +331,127 @@ def localizar_edge() -> Path | None:
     return None
 
 
+def _preferencias_de_conta() -> dict:
+    """Conta Google / navegador / perfil escolhidos em Configurações (os mesmos da autorização do Google). Nunca levanta erro."""
+    try:
+        from src.comum import configuracao
+
+        return configuracao.google_oauth_preferencias() or {}
+    except Exception:
+        return {}
+
+
+def escolher_navegador_da_janela() -> tuple[Path, str, str] | None:
+    """(executável, 'chrome'|'edge', pasta do perfil ou '') ou None se não há Chrome nem Edge.
+
+    O Chrome/Edge abre a janela no perfil que estiver em uso no momento (por isso a janela aparecia na conta errada). Aqui o perfil é
+    escolhido: o configurado em Configurações ou, se só a conta (e-mail) estiver configurada, o perfil que está logado nessa conta."""
+    prefs = _preferencias_de_conta()
+    conta = str(prefs.get("conta") or "").strip()
+    preferido = str(prefs.get("navegador") or "").strip().lower()
+    pasta_config = str(prefs.get("perfil") or "").strip()
+    ordem = ([preferido] if preferido in ("chrome", "edge") else []) + [n for n in ("chrome", "edge") if n != preferido]
+    achados: list[tuple[Path, str, str]] = []
+    for chave in ordem:
+        exe = localizar_chrome() if chave == "chrome" else localizar_edge()
+        if exe is None:
+            continue
+        perfil = pasta_config if pasta_config and (preferido == chave or (not preferido and chave == "chrome")) else ""
+        if not perfil and conta:
+            try:
+                from src.comum import google_navegador
+
+                perfil = google_navegador.perfil_da_conta(chave, conta)
+            except Exception:
+                perfil = ""
+        achados.append((exe, chave, perfil))
+    if not achados:
+        return None
+    for a in achados:                      # prefere o navegador em que o perfil da conta foi encontrado
+        if a[2]:
+            return a
+    if conta:
+        _log(f"nenhum perfil do Chrome/Edge está logado em {conta}; abrindo no perfil em uso")
+    return achados[0]
+
+
+def montar_comando_janela(url: str) -> tuple[list[str], str, str] | None:
+    """(comando, nome do navegador, perfil) para abrir `url` como aplicativo; None se não há Chrome/Edge."""
+    escolha = escolher_navegador_da_janela()
+    if escolha is None:
+        return None
+    exe, chave, perfil = escolha
+    cmd = [str(exe)]
+    if perfil:
+        cmd.append(f"--profile-directory={perfil}")
+    modo = servidor.janela_modo()
+    if modo == "tela_cheia":
+        cmd.append("--start-fullscreen")
+    elif modo == "maximizada":
+        cmd.append("--start-maximized")
+    cmd.append(f"--app={url}")
+    return cmd, "Chrome" if chave == "chrome" else "Edge", perfil
+
+
+def _maximizar_janela_windows(espera_s: float = 10.0) -> bool:
+    """Garante a janela maximizada no Windows: se o Chrome já estava aberto, ele pode ignorar --start-maximized e usar o tamanho
+    da última vez. Procura a janela do AUTO SERE por alguns segundos e a maximiza. False se não achou (inofensivo)."""
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        achou = []
+        encontrar = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+        def _cb(hwnd, _lp):
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            classe = ctypes.create_unicode_buffer(64)
+            user32.GetClassNameW(hwnd, classe, 64)
+            if classe.value != "Chrome_WidgetWin_1":
+                return True
+            titulo = ctypes.create_unicode_buffer(256)
+            user32.GetWindowTextW(hwnd, titulo, 256)
+            if "auto sere" in titulo.value.lower():
+                achou.append(hwnd)
+            return True
+
+        limite = time.time() + espera_s
+        while time.time() < limite:
+            achou.clear()
+            user32.EnumWindows(encontrar(_cb), 0)
+            if achou:
+                user32.ShowWindow(achou[0], 3)          # SW_MAXIMIZE
+                return True
+            time.sleep(0.3)
+    except Exception:
+        pass
+    return False
+
+
 def abrir_janela(url: str) -> bool:
-    """Abre `url` em janela de aplicativo. Devolve True se abriu."""
-    chrome = localizar_chrome()
-    navegador, nome = chrome, "Chrome"
-    if navegador is None:
-        navegador, nome = localizar_edge(), "Edge"
-        if navegador is not None:
-            _log("Chrome não encontrado; usando Edge (Chromium) em modo aplicativo")
-    if navegador is None:
+    """Abre `url` em janela de aplicativo (maximizada, no perfil da conta configurada). Devolve True se abriu."""
+    montado = montar_comando_janela(url)
+    if montado is None:
         _log("nenhum navegador Chromium encontrado; abrindo no navegador padrão")
         webbrowser.open(url)
         return False
+    cmd, nome, perfil = montado
     flags = _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
     subprocess.Popen(
-        [str(navegador), f"--app={url}"],
+        cmd,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         creationflags=flags,
         close_fds=True,
     )
-    _log(f"janela aberta com {nome}: {url}")
+    _log(f"janela aberta com {nome}" + (f" (perfil {perfil})" if perfil else "") + f", modo {servidor.janela_modo()}: {url}")
+    if servidor.janela_modo() == "maximizada":
+        _maximizar_janela_windows()
     return True
 
 

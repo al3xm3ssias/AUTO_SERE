@@ -37,7 +37,7 @@ except Exception:                                                  # noqa: BLE00
 PARAMETROS = {"memoria_kib": 131072, "tempo": 3, "paralelismo": 4}
 SCRYPT = {"n": 2 ** 16, "r": 8, "p": 2}
 
-MIN_CARACTERES = 12
+MIN_CARACTERES = 8
 MAX_CARACTERES = 128
 LIMITE_CARACTERES_MISTURA = 16                                    # a partir daqui a "frase-senha" dispensa misturar tipos de caractere
 
@@ -58,6 +58,12 @@ class SenhaInvalida(ValueError):
 # Senhas que a internet inteira tenta primeiro (e variações típicas de escola/Brasil). Comparadas sem maiúsculas e sem
 # símbolos nas pontas. Não é uma lista completa: é a barreira contra o óbvio; o tamanho mínimo faz o resto.
 _COMUNS = {
+    # entradas curtas (8 a 11 caracteres), já sem símbolos: valem desde que o mínimo é 8
+    "admin123", "admin1234", "admin12345", "admin2026", "admin2027", "administrador", "senha123", "senha1234", "senha12345",
+    "12345678", "123456789", "1234567890", "12345678910", "password", "password1", "password123", "passw0rd", "qwerty123",
+    "qwertyui", "qwertyuiop", "abcd1234", "abc12345", "mudar123", "mudar1234", "trocar123", "escola123", "escola2026",
+    "escola2027", "brasil123", "brasil2026", "sere2026", "sere2027", "autosere1", "autosere123", "bemvindo1", "bemvindo123",
+    "prefeitura", "secretaria", "professor1", "professora1", "diretor123", "iloveyou1", "mudarsenha", "novasenha1",
     "123456789012", "1234567890123", "12345678901234", "123456123456", "111111111111", "000000000000", "aaaaaaaaaaaa",
     "qwertyuiopas", "qwertyuiop12", "qwertyuiop123", "asdfghjklzxc", "abcdefghijkl", "abc123abc123", "senhasenhasenha",
     "senha1234567", "senha12345678", "senha123456789", "minhasenha123", "minhasenha1234", "mudar123456", "mudar@123456",

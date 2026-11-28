@@ -15,6 +15,7 @@ usa src.launcher: sobe este servidor uma única vez e abre o Chrome em modo
 aplicativo. Host e porta vêm de src.comum.servidor (padrão 127.0.0.1:8000).
 """
 
+import os
 import re
 
 from flask import Flask, Blueprint, jsonify, render_template, request, send_from_directory
@@ -38,6 +39,27 @@ web_bp = Blueprint(
     static_folder="static",
     static_url_path="/web/static",
 )
+
+
+def _versao_dos_estaticos() -> int:
+    """Maior data de alteração dos arquivos de static/. Vai na URL (?v=...) de cada .js/.css: quando um arquivo muda, o navegador
+    baixa de novo em vez de usar a cópia velha (era o que misturava JavaScript antigo com CSS novo depois de uma atualização)."""
+    maior = 0
+    try:
+        for pasta, _dirs, arquivos in os.walk(web_bp.static_folder):
+            for nome in arquivos:
+                try:
+                    maior = max(maior, int(os.path.getmtime(os.path.join(pasta, nome))))
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return maior
+
+
+@web_bp.app_context_processor
+def _contexto_estaticos():
+    return {"asset_v": _versao_dos_estaticos()}
 
 
 @web_bp.route("/")
@@ -134,6 +156,7 @@ def _instalar_guarda_somente_consulta(app: Flask) -> None:
 
 def create_app() -> Flask:
     app = Flask(__name__)
+    app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0         # estáticos: o navegador sempre confere se mudaram (ETag), nunca usa cópia velha às cegas
     _seguranca.instalar(app)                  # PRIMEIRO: login, perfis, CSRF e cabeçalhos valem antes de qualquer outra regra
     _instalar_guarda_somente_consulta(app)
 

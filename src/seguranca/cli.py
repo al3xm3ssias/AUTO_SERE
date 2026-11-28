@@ -3,6 +3,7 @@ cli.py — o que se faz pelo terminal (e que o instalador usa)
 ==============================================================
     python -m src.seguranca existe                      sai com 0 se já há usuários, 1 se não há, 3 se o cadastro está ilegível
     python -m src.seguranca criar-admin                 cria o 1º administrador (pede usuário, nome e senha 2x, sem mostrar a senha)
+    python -m src.seguranca criar-admin-provisorio      cria o 1º administrador "admin" com senha provisória "admin" (troca obrigatória no 1º acesso; usado pelo instalador)
     python -m src.seguranca redefinir-senha             RECUPERAÇÃO de quem perdeu a senha (exige estar neste computador)
     python -m src.seguranca desbloquear USUARIO         tira o bloqueio por tentativas erradas
     python -m src.seguranca listar                      usuários, perfis e situação (nunca mostra senha nem hash)
@@ -101,6 +102,29 @@ def cmd_criar_admin(args) -> int:
         return ERRO
     segredo.proteger_pasta(paths.CREDENCIAIS_DIR)
     _escrever(f"Administrador '{usuario}' criado. Guarde a senha: ela NÃO pode ser recuperada (só redefinida, estando neste computador).")
+    return OK
+
+
+def cmd_criar_admin_provisorio(_args) -> int:
+    """Usado pelo instalador: admin/admin com troca de senha obrigatória no primeiro login. Não faz nada se já houver usuários."""
+    estado = usuarios.estado()
+    if estado == "ilegivel":
+        _escrever("O cadastro de usuários está ilegível; veja documentacao/Seguranca.md.")
+        return ILEGIVEL
+    if estado == "ok":
+        _escrever("O sistema já tem usuários cadastrados; nada a fazer.")
+        return OK
+    try:
+        usuarios.criar_admin_provisorio(origem="instalador")
+    except ErroUsuarios as e:
+        _escrever("ERRO: " + e.mensagem)
+        return ERRO
+    except segredo.ChaveIndisponivel as e:
+        _escrever(f"ERRO: não foi possível proteger a senha ({e}).")
+        return ERRO
+    segredo.proteger_pasta(paths.CREDENCIAIS_DIR)
+    _escrever(f"Administrador provisório criado: usuário '{usuarios.USUARIO_PROVISORIO}', senha '{usuarios.SENHA_PROVISORIA}'. "
+              f"No primeiro acesso o sistema exige uma senha nova (mínimo de {senhas.MIN_CARACTERES} caracteres).")
     return OK
 
 
@@ -254,6 +278,7 @@ def construir_parser() -> argparse.ArgumentParser:
     a.add_argument("--nome", default="")
     a.add_argument("--senha-stdin", action="store_true", help="lê a senha da entrada padrão (instalação sem janela)")
     a.set_defaults(f=cmd_criar_admin)
+    sub.add_parser("criar-admin-provisorio", help="cria o administrador admin/admin com troca de senha obrigatória no 1º acesso").set_defaults(f=cmd_criar_admin_provisorio)
     u = sub.add_parser("criar-usuario", help="cria um usuário (pedagoga, operador, consulta ou admin); o administrador já precisa existir")
     u.add_argument("--perfil", choices=usuarios.PERFIS, default="pedagoga")
     u.add_argument("--usuario", default="")

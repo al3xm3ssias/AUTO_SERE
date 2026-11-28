@@ -47,7 +47,7 @@
     var classes = [/[a-zà-ú]/.test(s), /[A-ZÀ-Ú]/.test(s), /[0-9]/.test(s), /[^A-Za-zÀ-ú0-9]/.test(s)].filter(Boolean).length;
     var u = valor("auth-usuario").toLowerCase();
     var estado = {
-      "tamanho": s.length >= 12,
+      "tamanho": s.length >= 8,
       "mistura": s.length >= 16 || classes >= 3,
       "sem-usuario": !(u.length >= 3 && s.toLowerCase().indexOf(u) !== -1)
     };

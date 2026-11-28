@@ -9,16 +9,16 @@
   <!-- PWA: permite instalar como aplicativo no Chrome (janela própria, sem barra de endereço) -->
   <link rel="manifest" href="{{ url_for('web.manifest') }}">
   <meta name="theme-color" content="#161b27">
-  <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('web.static', filename='img/favicon-32.png') }}">
-  <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('web.static', filename='img/favicon-16.png') }}">
-  <link rel="shortcut icon" href="{{ url_for('web.static', filename='img/favicon-32.png') }}">
+  <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('web.static', filename='img/favicon-32.png', v=asset_v) }}">
+  <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('web.static', filename='img/favicon-16.png', v=asset_v) }}">
+  <link rel="shortcut icon" href="{{ url_for('web.static', filename='img/favicon-32.png', v=asset_v) }}">
   <!-- Fontes Google (Inter + DM Mono). Se bloqueadas na rede local, o
        CSS já cai automaticamente no fallback sans-serif/monospace do
        sistema — nada quebra, só perde a fonte exata. -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('web.static', filename='css/styles.css') }}">
-  <link rel="stylesheet" href="{{ url_for('web.static', filename='css/auth.css') }}">
+  <link rel="stylesheet" href="{{ url_for('web.static', filename='css/styles.css', v=asset_v) }}">
+  <link rel="stylesheet" href="{{ url_for('web.static', filename='css/auth.css', v=asset_v) }}">
 </head>
 <body class="{{ 'modo-consulta' if somente_consulta else '' }}" data-ano-letivo="{{ ano_letivo }}"{% if usuario_atual %} data-perfil="{{ usuario_atual.perfil }}" data-perfil-rotulo="{{ usuario_atual.perfil_rotulo }}" data-usuario-nome="{{ usuario_atual.nome }}" data-usuario-login="{{ usuario_atual.usuario }}"{% endif %}{% if perfil_restrito %} data-perfil-restrito="1" data-config-editaveis="{{ config_editaveis }}"{% endif %}>
 
@@ -29,7 +29,7 @@
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-brand">
       <div class="sidebar-brand-icon">
-        <img src="{{ url_for('web.static', filename='img/logo-branco-192.png') }}" alt="Auto SERE">
+        <img src="{{ url_for('web.static', filename='img/logo-branco-192.png', v=asset_v) }}" alt="Auto SERE">
       </div>
       <div class="sidebar-brand-text">
         Auto SERE
@@ -568,18 +568,18 @@
   <span id="toast-msg">Ação concluída</span>
 </div>
 
-<script src="{{ url_for('web.static', filename='js/icons.js') }}"></script>
-<script src="{{ url_for('web.static', filename='js/seguranca.js') }}"></script>
-<script src="{{ url_for('web.static', filename='js/app.js') }}"></script>
-<script src="{{ url_for('web.static', filename='js/usuarios.js') }}"></script>
-<script src="{{ url_for('web.static', filename='js/calendario.js') }}"></script>
-<script src="{{ url_for('web.static', filename='js/planilhas.js') }}"></script>
-<script src="{{ url_for('web.static', filename='js/vendor/jspdf.umd.min.js') }}"></script>
-<script src="{{ url_for('web.static', filename='js/corte_etario.js') }}"></script>
-<script src="{{ url_for('web.static', filename='js/previsao.js') }}"></script>
-<script src="{{ url_for('web.static', filename='js/direcionados_geo.js') }}"></script>
-<script src="{{ url_for('web.static', filename='js/whatsapp.js') }}"></script>
-<script src="{{ url_for('web.static', filename='js/ajuda.js') }}"></script>
-<script src="{{ url_for('web.static', filename='js/sw-registro.js') }}" data-sw="{{ url_for('web.service_worker') }}"></script>
+<script src="{{ url_for('web.static', filename='js/icons.js', v=asset_v) }}"></script>
+<script src="{{ url_for('web.static', filename='js/seguranca.js', v=asset_v) }}"></script>
+<script src="{{ url_for('web.static', filename='js/app.js', v=asset_v) }}"></script>
+<script src="{{ url_for('web.static', filename='js/usuarios.js', v=asset_v) }}"></script>
+<script src="{{ url_for('web.static', filename='js/calendario.js', v=asset_v) }}"></script>
+<script src="{{ url_for('web.static', filename='js/planilhas.js', v=asset_v) }}"></script>
+<script src="{{ url_for('web.static', filename='js/vendor/jspdf.umd.min.js', v=asset_v) }}"></script>
+<script src="{{ url_for('web.static', filename='js/corte_etario.js', v=asset_v) }}"></script>
+<script src="{{ url_for('web.static', filename='js/previsao.js', v=asset_v) }}"></script>
+<script src="{{ url_for('web.static', filename='js/direcionados_geo.js', v=asset_v) }}"></script>
+<script src="{{ url_for('web.static', filename='js/whatsapp.js', v=asset_v) }}"></script>
+<script src="{{ url_for('web.static', filename='js/ajuda.js', v=asset_v) }}"></script>
+<script src="{{ url_for('web.static', filename='js/sw-registro.js', v=asset_v) }}" data-sw="{{ url_for('web.service_worker') }}"></script>
 </body>
 </html>

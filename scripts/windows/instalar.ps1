@@ -5,7 +5,7 @@
 # 3. Prepara um Python PRÓPRIO do projeto em <pasta>\runtime\python (versão
 #    portátil do python.org: só extrai um zip, sem instalador e sem registro no
 #    Windows; não depende do Python do sistema), as bibliotecas e os navegadores.
-# 4. Pede a criação do ADMINISTRADOR do sistema (usuário e senha; só o hash da senha é guardado).
+# 4. Cria o ADMINISTRADOR provisório (usuário admin, senha admin); a troca da senha é obrigatória no 1º login.
 # 5. Cria o atalho "AUTO SERE" e abre o sistema. Os dados da escola (nome, CEP,
 #    endereço) são pedidos pelo assistente que abre dentro do próprio sistema.
 #
@@ -302,25 +302,26 @@ if ($LASTEXITCODE -ne 0) { Falha "Falha ao criar as pastas de trabalho." }
 
 # ---------------------------------------------------------------- 6. administrador do sistema
 
-# O 1º usuário é o ADMINISTRADOR. A senha é digitada aqui, no terminal (sem aparecer na tela e sem passar como argumento de
-# comando), e só o hash Argon2id dela é guardado. Reexecutar a instalação NÃO pede de novo se já houver usuários.
-Titulo "[6/7] Segurança: criando o administrador do sistema ..."
+# O 1º usuário é o ADMINISTRADOR provisório: usuário "admin", senha provisória "admin". O sistema EXIGE trocar a senha no primeiro
+# login (mínimo de 8 caracteres). Reexecutar a instalação NÃO recria nada se já houver usuários.
+Titulo "[6/7] Segurança: criando o administrador provisório (admin/admin) ..."
 & $pyExe -m src.seguranca existe
 $estadoUsuarios = $LASTEXITCODE
 if ($estadoUsuarios -eq 0) {
     Write-Host "O sistema já tem usuários cadastrados: nada a criar."
 } elseif ($estadoUsuarios -eq 3) {
     Write-Host "ATENÇÃO: o cadastro de usuários está ilegível. Veja documentacao\Seguranca.md antes de usar o sistema." -ForegroundColor Yellow
-} elseif ($Silencioso) {
-    Write-Host "Instalação sem janela: o administrador será criado no primeiro acesso (tela 'Criar o administrador')."
 } else {
-    & $pyExe -m src.seguranca criar-admin
+    & $pyExe -m src.seguranca criar-admin-provisorio
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "O administrador não foi criado agora. O sistema vai pedir isso no primeiro acesso." -ForegroundColor Yellow
+        Write-Host "O administrador provisório não foi criado agora. O sistema vai pedir a criação no primeiro acesso." -ForegroundColor Yellow
     } else {
-        # Perfil Pedagoga (só consulta + coletas Turmas e Alunos). Opcional; também dá para criar depois em Configurações > Usuários.
-        $resp = Read-Host "Deseja cadastrar agora um usuário com o perfil PEDAGOGA? (S/N)"
-        if ($resp -match '^[sS]') { & $pyExe -m src.seguranca criar-usuario --perfil pedagoga }
+        Write-Host "Primeiro acesso: usuário 'admin', senha 'admin'. O sistema vai pedir para trocar a senha (mínimo de 8 caracteres)." -ForegroundColor Green
+        if (-not $Silencioso) {
+            # Perfil Pedagoga (só consulta + coletas Turmas e Alunos). Opcional; também dá para criar depois em Configurações > Usuários.
+            $resp = Read-Host "Deseja cadastrar agora um usuário com o perfil PEDAGOGA? (S/N)"
+            if ($resp -match '^[sS]') { & $pyExe -m src.seguranca criar-usuario --perfil pedagoga }
+        }
     }
 }
 # Só o usuário atual do Windows (e administradores) enxerga credenciais\ (usuários, hashes, senhas das integrações).

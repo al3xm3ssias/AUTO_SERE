@@ -27,13 +27,13 @@ def ambiente(tmp_path, monkeypatch):
 
 # ───────────────────────────── política ─────────────────────────────
 
-@pytest.mark.parametrize("senha", ["curta1A!", "senhasenhasenha", "Mudar@123456", "aaaaaaaaaaaa", "123456789012", "qwertyuiopas",
+@pytest.mark.parametrize("senha", ["curta1A", "senhasenhasenha", "Mudar@123456", "aaaaaaaaaaaa", "123456789012", "qwertyuiopas",
                                    "somenteminusc", " Com-espaco-na-ponta1A ", "ABCDEFGHIJKLMN"])
 def test_senhas_fracas_sao_recusadas(senha):
     assert senhas.problemas_da_senha(senha), senha
 
 
-@pytest.mark.parametrize("senha", [SENHA, "uma frase longa e boa de verdade", "Tr0ca-Isto#Agora"])
+@pytest.mark.parametrize("senha", [SENHA, "uma frase longa e boa de verdade", "Tr0ca-Isto#Agora", "Nova#Sen8", "Zq7#mKp2"])
 def test_senhas_fortes_passam(senha):
     assert senhas.problemas_da_senha(senha) == []
 
@@ -406,3 +406,41 @@ def test_auditoria_continua_a_corrente_depois_de_reiniciar():
 ])
 def test_politica_de_perfis(metodo, caminho, perfil):
     assert politica.perfil_exigido(metodo, caminho) == perfil
+
+
+# ───────────────────────────── admin provisório (instalador) ─────────────────────────────
+
+def test_minimo_de_senha_e_8_caracteres():
+    assert senhas.MIN_CARACTERES == 8
+    assert any("8 caracteres" in p for p in senhas.problemas_da_senha("Ab1!xyz"))           # 7: recusada
+    assert senhas.problemas_da_senha("Ab1!xyzw") == []                                       # 8: aceita
+    for fraca in ("admin", "admin123", "12345678", "password", "Admin@123"):
+        assert senhas.problemas_da_senha(fraca), fraca
+
+
+def test_admin_provisorio_entra_com_admin_admin_e_precisa_trocar():
+    u = usuarios.criar_admin_provisorio()
+    assert (u.usuario, u.perfil, u.trocar_senha) == ("admin", "admin", True)
+    assert usuarios.autenticar("admin", "admin").trocar_senha is True
+    bruto = (paths.CREDENCIAIS_DIR / "usuarios.json").read_text(encoding="utf-8")
+    assert '"admin"' in bruto and "$argon2id$" in bruto and '"hash": "admin"' not in bruto     # só o hash é guardado
+
+
+def test_admin_provisorio_so_existe_na_instalacao():
+    usuarios.criar_admin_provisorio()
+    with pytest.raises(usuarios.ErroUsuarios):
+        usuarios.criar_admin_provisorio()
+    with pytest.raises(usuarios.ErroUsuarios):
+        usuarios.criar_primeiro_admin("outro", "x", SENHA)
+
+
+def test_troca_do_admin_provisorio_aplica_a_politica_e_libera():
+    a = usuarios.criar_admin_provisorio()
+    for invalida in ("admin", "Ab1!xyz", "senha123", "admin#2026Ab", "12345678"):               # igual à atual, curta, comum, com o usuário, sequência
+        with pytest.raises(usuarios.ErroUsuarios):
+            usuarios.alterar_propria_senha(a.id, "admin", invalida)
+    nova = usuarios.alterar_propria_senha(a.id, "admin", "Nova#Sen8")
+    assert nova.trocar_senha is False
+    assert usuarios.autenticar("admin", "Nova#Sen8").trocar_senha is False
+    with pytest.raises(usuarios.FalhaLogin):
+        usuarios.autenticar("admin", "admin")                                                    # a provisória deixa de valer

@@ -1,0 +1,12 @@
+﻿AUTO SERE instalado.
+
+PRIMEIRO ACESSO
+  Usuario: admin
+  Senha:   admin
+
+Essa senha e PROVISORIA. Ao entrar, o sistema pede uma senha nova (minimo de 8 caracteres)
+e so libera o uso depois da troca. Depois, em Configuracoes > Usuarios, crie os demais usuarios.
+
+Atalho "AUTO SERE" na area de trabalho e no menu Iniciar.
+Atualizar: rode o instalador novo por cima; dados, credenciais e configuracoes sao mantidos.
+Desinstalar: Configuracoes do Windows > Aplicativos. Seus dados ficam na pasta de instalacao.

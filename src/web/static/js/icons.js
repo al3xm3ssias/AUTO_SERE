@@ -41,6 +41,9 @@ const ICONS = {
   // ---- Config / perfil / genero ----
   lock: (c = "") => svg(c, `<rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>`),
   key: (c = "") => svg(c, `<circle cx="8" cy="15" r="4"/><path d="M11 12 19 4M16 7l2.5 2.5M13.3 9.7 15.5 12"/>`),
+  unlock: (c = "") => svg(c, `<rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 7.6-1.7"/>`),
+  ban: (c = "") => svg(c, `<circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/>`),
+  trash: (c = "") => svg(c, `<path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 12.2A1.8 1.8 0 0 0 8.8 21h6.4a1.8 1.8 0 0 0 1.8-1.8L18 7"/><path d="M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7"/>`),
   palette: (c = "") => svg(c, `<path d="M12 3a9 9 0 1 0 0 18c1.2 0 1.8-1 1.2-2-.5-.9.1-2 1.2-2H16a5 5 0 0 0 5-5c0-5-4-9-9-9Z"/><circle cx="7.5" cy="11" r="1.2"/><circle cx="9.5" cy="7.2" r="1.2"/><circle cx="14.5" cy="7.2" r="1.2"/><circle cx="16.5" cy="11" r="1.2"/>`),
   userCircle: (c = "") => svg(c, `<circle cx="12" cy="12" r="9"/><circle cx="12" cy="10" r="3"/><path d="M6.2 18.5c1-2.5 3.2-4 5.8-4s4.8 1.5 5.8 4"/>`),
   userPlain: (c = "") => svg(c, `<circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.6 2.9-6.5 6.5-6.5s6.5 2.9 6.5 6.5"/>`),

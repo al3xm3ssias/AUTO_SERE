@@ -53,7 +53,7 @@
       texto: "Administrador: tudo. Operador: executa as automações e edita registros. Consulta: só vê. Pedagoga: só consulta Turmas, Alunos e Encaminhamentos SUS e roda as coletas Turmas e Alunos. As senhas são guardadas só como hash (Argon2id); ninguém, nem o sistema, consegue ler uma senha." }));
     var aviso = el("p", { style: "font-size:.8rem;min-height:1.2em;", role: "status" });
     var segredo = el("div", {});
-    var tabelaBox = el("div", {});
+    var tabelaBox = el("div", { classe: "usr-tabela-box" });
     var auditoriaBox = el("div", {});
 
     var selPerfil = el("select", { id: "usr-novo-perfil" }, [
@@ -91,7 +91,7 @@
 
     function carregar() {
       chamar("GET", "/usuarios").then(function (d) {
-        var cab = el("tr", {}, ["Usuário", "Nome", "Perfil", "Situação", "Último acesso", "Ações"].map(function (t) { return el("th", { texto: t }); }));
+        var cab = el("tr", {}, ["Usuário", "Perfil", "Situação", "Último acesso", "Ações"].map(function (t) { return el("th", { texto: t }); }));
         var linhas = d.usuarios.map(function (u) {
           var situacao = [];
           situacao.push(el("span", { classe: "usr-selo" + (u.ativo ? "" : " ruim"), texto: u.ativo ? "Ativo" : "Desativado" }));
@@ -101,12 +101,18 @@
             var o = el("option", { value: p.id, texto: p.rotulo }); if (p.id === u.perfil) { o.selected = true; } return o; }));
           perfil.addEventListener("change", function () { acao(chamar("PATCH", "/usuarios/" + encodeURIComponent(u.id), { perfil: perfil.value }), "Perfil alterado; a pessoa precisa entrar de novo."); });
           var botoes = [];
-          function botao(texto, fn, perigo) { var b = el("button", { type: "button", texto: texto, classe: perigo ? "usr-perigo" : "" }); b.addEventListener("click", fn); botoes.push(b); }
-          botao("Redefinir senha", function () { if (confirm("Gerar uma nova senha temporária para " + u.usuario + "? As sessões dele serão encerradas.")) { acao(chamar("POST", "/usuarios/" + encodeURIComponent(u.id) + "/redefinir-senha", {}), "Senha redefinida."); } });
-          if (u.bloqueado) { botao("Desbloquear", function () { acao(chamar("POST", "/usuarios/" + encodeURIComponent(u.id) + "/desbloquear", {}), "Desbloqueado."); }); }
-          botao(u.ativo ? "Desativar" : "Ativar", function () { acao(chamar("PATCH", "/usuarios/" + encodeURIComponent(u.id), { ativo: !u.ativo }), u.ativo ? "Desativado." : "Ativado."); });
-          botao("Apagar", function () { if (confirm("Apagar o usuário " + u.usuario + "? Isso não pode ser desfeito.")) { acao(chamar("DELETE", "/usuarios/" + encodeURIComponent(u.id)), "Usuário apagado."); } }, true);
-          return el("tr", {}, [el("td", { texto: u.usuario }), el("td", { texto: u.nome }), el("td", {}, [perfil]), el("td", {}, situacao),
+          function botao(rotulo, icone, fn, perigo) {
+            var b = el("button", { type: "button", classe: "usr-ico" + (perigo ? " usr-perigo" : ""), "aria-label": rotulo + " — " + u.usuario, "data-dica": rotulo });
+            b.innerHTML = (typeof ICONS !== "undefined" && ICONS[icone]) ? ICONS[icone]() : "•";   // só o ícone dentro do botão; o nome vem da dica (data-dica)
+            b.addEventListener("click", fn); botoes.push(b);
+          }
+          botao("Redefinir senha", "key", function () { if (confirm("Gerar uma nova senha temporária para " + u.usuario + "? As sessões dele serão encerradas.")) { acao(chamar("POST", "/usuarios/" + encodeURIComponent(u.id) + "/redefinir-senha", {}), "Senha redefinida."); } });
+          if (u.bloqueado) { botao("Desbloquear", "unlock", function () { acao(chamar("POST", "/usuarios/" + encodeURIComponent(u.id) + "/desbloquear", {}), "Desbloqueado."); }); }
+          botao(u.ativo ? "Desativar" : "Ativar", u.ativo ? "ban" : "circleCheck", function () { acao(chamar("PATCH", "/usuarios/" + encodeURIComponent(u.id), { ativo: !u.ativo }), u.ativo ? "Desativado." : "Ativado."); });
+          botao("Apagar", "trash", function () { if (confirm("Apagar o usuário " + u.usuario + "? Isso não pode ser desfeito.")) { acao(chamar("DELETE", "/usuarios/" + encodeURIComponent(u.id)), "Usuário apagado."); } }, true);
+          var identidade = [el("div", { classe: "usr-id", texto: u.usuario })];
+          if (u.nome && u.nome !== u.usuario) { identidade.push(el("div", { classe: "usr-nome", texto: u.nome, title: u.nome })); }
+          return el("tr", {}, [el("td", {}, identidade), el("td", {}, [perfil]), el("td", {}, [el("div", { classe: "usr-situacao" }, situacao)]),
             el("td", { texto: dataBr(u.ultimo_login) }), el("td", {}, [el("div", { classe: "usr-acoes" }, botoes)])]);
         });
         tabelaBox.textContent = "";

@@ -573,3 +573,24 @@ def test_cli_listar_e_verificar_auditoria(monkeypatch, capsys):
     saida = capsys.readouterr().out
     assert "admin" in saida and "argon2" not in saida
     assert cli.main(["verificar-auditoria"]) == cli.OK
+
+
+def test_admin_provisorio_na_web_so_navega_depois_de_trocar_a_senha(app):
+    usuarios.criar_admin_provisorio()
+    a = app.test_client()
+    r = _entrar(a, "admin", "admin")
+    assert r.status_code == 200 and r.get_json()["trocar_senha"] is True and r.get_json()["proximo"] == "/web/trocar-senha"
+    assert a.get("/web").headers["Location"].endswith("/web/trocar-senha")
+    assert a.get("/web/api/turmas/lista").status_code == 403                                     # nada funciona antes da troca
+    h = {"X-CSRF-Token": _csrf(a)}
+    assert a.post("/web/api/seguranca/trocar-senha", json={"atual": "admin", "nova": "Ab1!xyz", "confirmacao": "Ab1!xyz"}, headers=h).status_code == 400   # 7 caracteres
+    ok = a.post("/web/api/seguranca/trocar-senha", json={"atual": "admin", "nova": "Nova#Sen8", "confirmacao": "Nova#Sen8"}, headers=h)
+    assert ok.status_code == 200 and ok.get_json()["proximo"] == "/web"
+    assert a.get("/web/api/turmas/lista").status_code != 403
+
+
+def test_cli_criar_admin_provisorio_e_idempotente(capsys):
+    assert cli.main(["criar-admin-provisorio"]) == 0
+    assert usuarios.obter_por_usuario("admin").trocar_senha is True
+    assert cli.main(["criar-admin-provisorio"]) == 0                                             # 2ª vez: não recria nem muda nada
+    assert len(usuarios.listar()) == 1

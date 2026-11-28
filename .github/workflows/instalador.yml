@@ -1,0 +1,27 @@
+name: Gerar instalador (setup.exe)
+on:
+  workflow_dispatch:
+    inputs:
+      versao:
+        description: "Versao (ex.: 1.0.0)"
+        required: true
+        default: "1.0.0"
+  push:
+    tags: ["v*"]
+jobs:
+  setup:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar Inno Setup
+        run: choco install innosetup -y --no-progress
+      - name: Compilar
+        shell: pwsh
+        run: |
+          $v = "${{ github.event.inputs.versao }}"
+          if (-not $v) { $v = "${{ github.ref_name }}".TrimStart("v") }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$v" installer\AUTO_SERE.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AUTO_SERE_Setup
+          path: installer/Output/*.exe

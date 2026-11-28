@@ -282,6 +282,28 @@ def criar_primeiro_admin(usuario: str, nome: str, senha: str, origem: str = "ins
     return _de_registro(reg)
 
 
+# Credencial PROVISÓRIA da instalação: existe só para o 1º acesso. A senha "admin" não passa na política de senhas de propósito
+# (é curta e conhecida), por isso é gravada por esta função, que ignora a política, e o usuário fica marcado para TROCAR a senha:
+# o guarda de requisições (web.py) não deixa fazer mais nada até a troca, e a senha nova passa pela política normal.
+USUARIO_PROVISORIO = "admin"
+SENHA_PROVISORIA = "admin"
+
+
+def criar_admin_provisorio(origem: str = "instalador", ip: str = "") -> Usuario:
+    """Cria o 1º administrador com usuário e senha provisórios (admin/admin) e a troca da senha obrigatória no 1º acesso.
+
+    Só funciona quando NÃO existe nenhum usuário (mesma regra de `criar_primeiro_admin`)."""
+    with _LOCK:
+        dados = _ler()
+        if dados["usuarios"]:
+            raise ErroUsuarios("O sistema já tem usuários. O administrador provisório só vale na instalação.")
+        reg = _novo_registro(USUARIO_PROVISORIO, "Administrador", "admin", SENHA_PROVISORIA, trocar=True)
+        dados["usuarios"].append(reg)
+        _gravar(dados)
+    auditoria.registrar("admin_instalado", USUARIO_PROVISORIO, ip, f"origem: {origem} (senha provisória, troca obrigatória)")
+    return _de_registro(reg)
+
+
 def criar(usuario: str, nome: str, perfil: str, senha: str, por: str = "", ip: str = "", trocar_senha: bool = True) -> Usuario:
     u = _validar_usuario(usuario)
     n = _validar_nome(nome, u)

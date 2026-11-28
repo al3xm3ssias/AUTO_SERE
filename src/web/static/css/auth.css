@@ -85,3 +85,27 @@ body[data-perfil-restrito] #btn-historico-limpar { display: none !important; }
 #aviso-atualizacao { position: fixed; right: 14px; bottom: 14px; z-index: 50; max-width: 320px; padding: 7px 12px; font-size: .72rem;
   color: var(--txt2); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); }
 #aviso-atualizacao.ruim { color: var(--txt); border-color: var(--badge-amber-brd); background: var(--badge-amber-bg); }
+
+/* Ações da tabela de usuários: só ícones; o texto aparece ao passar o mouse (ou focar com o teclado) */
+.usr-acoes:has(.usr-ico) { flex-wrap: nowrap; }
+.usr-acoes button.usr-ico { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; flex: 0 0 auto; }
+.usr-acoes button.usr-ico .icon { width: 16px; height: 16px; pointer-events: none; }
+.usr-acoes button.usr-ico:hover, .usr-acoes button.usr-ico:focus-visible { border-color: var(--border2); outline: none; }
+.usr-acoes button.usr-ico.usr-perigo:hover, .usr-acoes button.usr-ico.usr-perigo:focus-visible { border-color: var(--rose); }
+.usr-acoes button.usr-ico::after { content: attr(data-dica); position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 20; white-space: nowrap;
+  background: var(--bg); color: var(--txt); border: 1px solid var(--border2); border-radius: 6px; padding: 4px 8px; font-size: .72rem; font-weight: 500;
+  box-shadow: 0 4px 14px rgba(0,0,0,.35); opacity: 0; transform: translateY(2px); pointer-events: none; transition: opacity .12s, transform .12s; }
+.usr-acoes button.usr-ico:hover::after, .usr-acoes button.usr-ico:focus-visible::after { opacity: 1; transform: none; }
+.usr-tabela td:last-child { width: 1%; white-space: nowrap; }
+
+/* Tabela de usuários compacta: cabe no card sem cortar os botões (e, se faltar espaço, rola em vez de cortar) */
+.usr-tabela-box { overflow-x: auto; }
+.usr-tabela th, .usr-tabela td { padding: 8px 6px; }
+.usr-tabela th:first-child, .usr-tabela td:first-child { padding-left: 4px; }
+.usr-tabela td:last-child, .usr-tabela th:last-child { padding-right: 4px; }
+.usr-id { font-weight: 600; word-break: break-word; }
+.usr-nome { color: var(--txt2); font-size: .72rem; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usr-situacao { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.usr-tabela select { max-width: 112px; padding: 4px 6px; font-size: .76rem; }
+.usr-acoes { gap: 4px; }
+.usr-acoes button.usr-ico { width: 28px; height: 28px; }

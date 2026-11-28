@@ -7,7 +7,7 @@ Fonte única para o endereço do servidor Flask. É usada pelo servidor
 Ordem de precedência (a primeira que existir vence):
   1. variáveis de ambiente  AUTO_SERE_HOST / AUTO_SERE_PORT
   2. chave "servidor" em config/config_usuario.json
-        {"servidor": {"host": "127.0.0.1", "porta": 8000}}
+        {"servidor": {"host": "127.0.0.1", "porta": 8000, "janela": "maximizada"}}
   3. padrão: 127.0.0.1:8000
 
 IMPORTANTE: a PORTA DEVE SER FIXA. O Chrome associa o app instalado (PWA)
@@ -58,3 +58,15 @@ def url_base() -> str:
 def modo_debug() -> bool:
     """Debug (auto-reload) só liga com AUTO_SERE_DEBUG=1 — nunca por padrão."""
     return os.environ.get("AUTO_SERE_DEBUG", "").strip() in ("1", "true", "True", "sim")
+
+
+JANELAS = ("maximizada", "tela_cheia", "normal")
+JANELA_PADRAO = "maximizada"
+
+
+def janela_modo() -> str:
+    """Como a janela do aplicativo abre: 'maximizada' (padrão), 'tela_cheia' (como o F11, esconde a barra do Windows) ou 'normal'.
+
+    Variável AUTO_SERE_JANELA ou chave \"janela\" do bloco \"servidor\" em config/config_usuario.json."""
+    valor = str(os.environ.get("AUTO_SERE_JANELA") or _bloco_config().get("janela") or JANELA_PADRAO).strip().lower().replace("-", "_")
+    return valor if valor in JANELAS else JANELA_PADRAO

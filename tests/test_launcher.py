@@ -51,7 +51,7 @@ def test_pagina_principal_referencia_manifest_e_sw(cliente):
     html = cliente.get("/web").get_data(as_text=True)
     assert 'rel="manifest"' in html
     # o registro do service worker saiu do HTML para js/sw-registro.js (a política de segurança não aceita script inline)
-    assert 'js/sw-registro.js" data-sw="/sw.js"' in html
+    assert 'js/sw-registro.js?v=' in html and 'data-sw="/sw.js"' in html
     assert "serviceWorker" in cliente.get("/web/static/js/sw-registro.js").get_data(as_text=True)
 
 
@@ -134,8 +134,47 @@ def test_abrir_janela_usa_modo_app(isolado, tmp_path, monkeypatch):
     monkeypatch.setenv("AUTO_SERE_CHROME", str(falso))
     chamadas = []
     monkeypatch.setattr(launcher.subprocess, "Popen", lambda cmd, **kw: chamadas.append(cmd))
+    monkeypatch.setattr(launcher, "_preferencias_de_conta", lambda: {})
+    monkeypatch.setattr(launcher, "_maximizar_janela_windows", lambda *a, **k: True)
+    monkeypatch.delenv("AUTO_SERE_JANELA", raising=False)
     assert launcher.abrir_janela("http://127.0.0.1:8000/web") is True
-    assert chamadas[0] == [str(falso), "--app=http://127.0.0.1:8000/web"]
+    assert chamadas[0] == [str(falso), "--start-maximized", "--app=http://127.0.0.1:8000/web"]      # padrão: maximizada
+
+
+def test_janela_abre_no_perfil_da_conta_configurada(isolado, tmp_path, monkeypatch):
+    from src.comum import google_navegador
+    falso = tmp_path / "chrome.exe"
+    falso.write_text("x")
+    monkeypatch.setenv("AUTO_SERE_CHROME", str(falso))
+    monkeypatch.delenv("AUTO_SERE_JANELA", raising=False)
+    monkeypatch.setattr(launcher, "_preferencias_de_conta", lambda: {"conta": "abc1@gmail.com", "navegador": "", "perfil": ""})
+    monkeypatch.setattr(google_navegador, "listar_perfis", lambda nome: [
+        {"pasta": "Default", "nome": "Pessoa 1", "email": "abc2@gmail.com"},
+        {"pasta": "Profile 3", "nome": "Escola", "email": "ABC1@gmail.com"}] if nome == "chrome" else [])
+    cmd, nome, perfil = launcher.montar_comando_janela("http://127.0.0.1:8000/web")
+    assert perfil == "Profile 3" and "--profile-directory=Profile 3" in cmd and nome == "Chrome"
+
+
+def test_perfil_configurado_na_tela_tem_prioridade_e_sem_conta_nao_mexe(isolado, tmp_path, monkeypatch):
+    falso = tmp_path / "chrome.exe"
+    falso.write_text("x")
+    monkeypatch.setenv("AUTO_SERE_CHROME", str(falso))
+    monkeypatch.delenv("AUTO_SERE_JANELA", raising=False)
+    monkeypatch.setattr(launcher, "_preferencias_de_conta", lambda: {"conta": "", "navegador": "chrome", "perfil": "Profile 9"})
+    assert "--profile-directory=Profile 9" in launcher.montar_comando_janela("http://x/web")[0]
+    monkeypatch.setattr(launcher, "_preferencias_de_conta", lambda: {})
+    assert not any(a.startswith("--profile-directory") for a in launcher.montar_comando_janela("http://x/web")[0])
+
+
+@pytest.mark.parametrize("modo,flag", [("tela_cheia", "--start-fullscreen"), ("maximizada", "--start-maximized"), ("normal", None), ("lixo", "--start-maximized")])
+def test_modo_da_janela(isolado, tmp_path, monkeypatch, modo, flag):
+    falso = tmp_path / "chrome.exe"
+    falso.write_text("x")
+    monkeypatch.setenv("AUTO_SERE_CHROME", str(falso))
+    monkeypatch.setenv("AUTO_SERE_JANELA", modo)
+    monkeypatch.setattr(launcher, "_preferencias_de_conta", lambda: {})
+    cmd = launcher.montar_comando_janela("http://x/web")[0]
+    assert (flag in cmd) if flag else not any(a.startswith("--start-") for a in cmd)
 
 
 # ── ponta a ponta: sobe de verdade, não duplica, e para ─────────────────────

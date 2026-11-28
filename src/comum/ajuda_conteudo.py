@@ -749,7 +749,7 @@ CONFIGURACOES: dict[str, dict] = {
         "elementos": [
             E("Trocar a minha senha", "Abre a tela de troca de senha. Ao trocar, todas as outras sessões abertas com a sua conta são encerradas.", "#cfg-minha-conta"),
         ],
-        "dicas": ["Uma boa senha tem 12 caracteres ou mais, misturando letras maiúsculas, minúsculas, números e símbolos; ou uma frase longa de 16+ caracteres."],
+        "dicas": ["Uma boa senha tem 8 caracteres ou mais, misturando letras maiúsculas, minúsculas, números e símbolos; ou uma frase longa de 16+ caracteres."],
         "cuidados": [
             "A senha do AUTO SERE é só sua e **não** é a do SERE. O sistema guarda apenas uma \"impressão digital\" dela (hash), por isso não consegue mostrá-la nem recuperá-la.",
             "Sem uso do mouse ou teclado por cerca de 28 minutos o sistema encerra a sessão sozinho.",
